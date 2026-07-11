@@ -30,7 +30,7 @@ export function runMigrations(dbPath: string): void {
     db
       .prepare('SELECT name FROM __migrations')
       .all()
-      .map((row: { name: string }) => row.name),
+      .map((row: unknown) => (row as { name: string }).name),
   );
 
   // Run pending migrations

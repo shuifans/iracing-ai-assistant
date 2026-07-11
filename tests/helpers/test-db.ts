@@ -15,11 +15,11 @@ const MIGRATIONS_DIR = join(__dirname, '../../src/db/migrations');
  */
 export function createTestDb(): {
   db: TestDb;
-  rawDb: InstanceType<typeof import('better-sqlite3').default>;
+  rawDb: InstanceType<typeof import('better-sqlite3')>;
   cleanup: () => void;
 } {
   // Lazy require so that a missing native module does not crash the import phase
-  let Database: typeof import('better-sqlite3').default;
+  let Database: typeof import('better-sqlite3');
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     Database = require('better-sqlite3');
