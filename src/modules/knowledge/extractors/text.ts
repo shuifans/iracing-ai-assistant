@@ -3,9 +3,6 @@ import type { ExtractionResult } from '@/modules/knowledge/types';
 /** Max extracted text length in characters (2 MB). */
 const MAX_TEXT_CHARS = 2_097_152;
 
-/** UTF-8 BOM bytes. */
-const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
-
 /**
  * Strip dangerous HTML elements (tags + inner content) from text.
  * Removes <script>, <iframe>, <object> entirely (case-insensitive).

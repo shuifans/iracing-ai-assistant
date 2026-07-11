@@ -72,17 +72,17 @@ function isPrivateOrReservedIpv4(ip: string): boolean {
   if (num === null) return false;
 
   // 0.0.0.0/8 (unspecified)
-  if ((num & 0xff000000) === 0x00000000) return true;
+  if (((num & 0xff000000) >>> 0) === 0x00000000) return true;
   // 10.0.0.0/8
-  if ((num & 0xff000000) === 0x0a000000) return true;
+  if (((num & 0xff000000) >>> 0) === 0x0a000000) return true;
   // 127.0.0.0/8 (loopback)
-  if ((num & 0xff000000) === 0x7f000000) return true;
+  if (((num & 0xff000000) >>> 0) === 0x7f000000) return true;
   // 169.254.0.0/16 (link-local)
-  if ((num & 0xffff0000) === 0xa9fe0000) return true;
+  if (((num & 0xffff0000) >>> 0) === 0xa9fe0000) return true;
   // 172.16.0.0/12
-  if ((num & 0xfff00000) === 0xac100000) return true;
+  if (((num & 0xfff00000) >>> 0) === 0xac100000) return true;
   // 192.168.0.0/16
-  if ((num & 0xffff0000) === 0xc0a80000) return true;
+  if (((num & 0xffff0000) >>> 0) === 0xc0a80000) return true;
   // 255.255.255.255 (broadcast)
   if (num === 0xffffffff) return true;
 
