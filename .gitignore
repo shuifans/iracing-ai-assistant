@@ -1,2 +1,47 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+.next/
+out/
+
+# Build
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Data
+data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
+
+# Test
+coverage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug
+npm-debug.log*
+
+# Qoder
+.qoder
+
+# Misc
+*.tsbuildinfo
+next-env.d.ts
 # Qoder
 .qoder
