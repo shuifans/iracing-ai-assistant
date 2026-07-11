@@ -53,7 +53,6 @@ function setupMockDb() {
   // Default: empty result set
   mockAll.mockReturnValue([]);
 
-  const { getDb } = require('@/db/client');
   vi.mocked(getDb).mockReturnValue({
     select: mockSelect,
   } as any);
