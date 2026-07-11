@@ -83,8 +83,8 @@ describeIf('Database migration', () => {
     }[];
 
     expect(rows.length).toBeGreaterThan(0);
-    expect(rows[0].name).toBe('20260711000000_A_initial_schema.sql');
-    expect(rows[0].applied_at).toBeTruthy();
+    expect(rows[0]!.name).toBe('20260711000000_A_initial_schema.sql');
+    expect(rows[0]!.applied_at).toBeTruthy();
   });
 
   // ── 4. CHECK constraint: invalid role ──────────────────────────────────────
