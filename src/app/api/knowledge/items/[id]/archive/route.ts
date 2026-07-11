@@ -8,6 +8,7 @@ import {
 } from '@/modules/auth/middleware';
 import { successResponse } from '@/lib/response';
 import { archiveItem } from '@/modules/knowledge/service';
+import { recordAudit } from '@/modules/audit/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,19 @@ export const POST = withErrorHandler(
 
     const id = context!.params.id;
     await archiveItem(id, user.id);
+
+    try {
+      recordAudit({
+        actorId: user.id,
+        action: 'knowledge.archived',
+        resource: 'knowledge_item',
+        resourceId: id,
+        requestId: request.headers.get('x-request-id') ?? undefined,
+        ipHash: request.headers.get('x-forwarded-for') ?? undefined,
+      });
+    } catch {
+      /* audit failure must not break main flow */
+    }
 
     return NextResponse.json(successResponse({ ok: true }));
   },

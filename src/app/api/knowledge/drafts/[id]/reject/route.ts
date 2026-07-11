@@ -10,6 +10,7 @@ import {
 import { successResponse } from '@/lib/response';
 import { AppError } from '@/lib/errors';
 import * as knowledgeService from '@/modules/knowledge/service';
+import { recordAudit } from '@/modules/audit/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,14 +40,29 @@ export const POST = withErrorHandler(
       throw new AppError('VALIDATION_ERROR', '无效的 JSON 请求体');
     }
 
+    let reason: string;
     try {
-      const { reason } = rejectDraftSchema.parse(body);
+      ({ reason } = rejectDraftSchema.parse(body));
       await knowledgeService.rejectDraft(id, user.id, reason);
     } catch (err) {
       if (err instanceof ZodError) {
         throw new AppError('VALIDATION_ERROR', err.issues.map((i) => i.message).join('; '));
       }
       throw err;
+    }
+
+    try {
+      recordAudit({
+        actorId: user.id,
+        action: 'knowledge.rejected',
+        resource: 'knowledge_draft',
+        resourceId: id,
+        requestId: request.headers.get('x-request-id') ?? undefined,
+        ipHash: request.headers.get('x-forwarded-for') ?? undefined,
+        changes: { reason },
+      });
+    } catch {
+      /* audit failure must not break main flow */
     }
 
     return NextResponse.json(successResponse({ ok: true }));

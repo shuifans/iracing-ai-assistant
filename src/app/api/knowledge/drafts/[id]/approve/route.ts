@@ -9,6 +9,7 @@ import {
 import { successResponse } from '@/lib/response';
 import { AppError } from '@/lib/errors';
 import * as knowledgeService from '@/modules/knowledge/service';
+import { recordAudit } from '@/modules/audit/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,19 @@ export const POST = withErrorHandler(
     }
 
     const result = await knowledgeService.approveDraft(id, user.id, idempotencyKey);
+
+    try {
+      recordAudit({
+        actorId: user.id,
+        action: 'knowledge.approved',
+        resource: 'knowledge_draft',
+        resourceId: id,
+        requestId: request.headers.get('x-request-id') ?? undefined,
+        ipHash: request.headers.get('x-forwarded-for') ?? undefined,
+      });
+    } catch {
+      /* audit failure must not break main flow */
+    }
 
     return NextResponse.json(successResponse(result));
   },
