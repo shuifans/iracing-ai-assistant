@@ -89,7 +89,9 @@ describe('extractText', () => {
 
     const result = extractText(buffer, 'text/plain');
 
-    expect(result.text).toBe(' bad ');
+    // Both elements (tags + content) are removed entirely
+    expect(result.text).toBe(' ');
+    expect(result.warnings).toContain('Dangerous HTML tags were removed');
   });
 
   it('无危险标签时不产生 warning', () => {
