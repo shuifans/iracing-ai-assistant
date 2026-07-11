@@ -346,6 +346,36 @@ export function listItemsBySyncStatus(syncStatus: string): KnowledgeItem[] {
 }
 
 /**
+ * Update a knowledge item's metadata (for overwrite / re-publish scenarios).
+ */
+export function updateItem(
+  id: string,
+  changes: Partial<
+    Pick<
+      KnowledgeItem,
+      | 'title'
+      | 'category'
+      | 'subcategory'
+      | 'tagsJson'
+      | 'sourceName'
+      | 'sourceUrl'
+      | 'season'
+      | 'wikiSyncStatus'
+      | 'gitCommitSha'
+      | 'publishedBy'
+      | 'publishedAt'
+    >
+  >,
+): void {
+  const db = getDb();
+  const now = utcNow();
+  db.update(knowledgeItems)
+    .set({ ...changes, updatedAt: now })
+    .where(eq(knowledgeItems.id, id))
+    .run();
+}
+
+/**
  * Update the wiki sync status of a knowledge item.
  */
 export function updateSyncStatus(
