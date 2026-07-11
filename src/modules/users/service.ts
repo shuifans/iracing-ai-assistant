@@ -38,10 +38,7 @@ export async function countActiveAdmins(): Promise<number> {
 
 // ── approveUser ──────────────────────────────────────────────────────────────
 
-export async function approveUser(
-  userId: string,
-  approvedBy: string,
-): Promise<User> {
+export async function approveUser(userId: string, approvedBy: string): Promise<User> {
   const db = getDb();
   const now = utcNow();
   const result = await db
@@ -62,10 +59,7 @@ export async function approveUser(
 
 // ── rejectUser ───────────────────────────────────────────────────────────────
 
-export async function rejectUser(
-  userId: string,
-  reason: string,
-): Promise<User> {
+export async function rejectUser(userId: string, reason: string): Promise<User> {
   const db = getDb();
   const now = utcNow();
   const result = await db
@@ -153,10 +147,7 @@ export async function deleteUser(userId: string): Promise<void> {
 
 // ── changeUserRole ───────────────────────────────────────────────────────────
 
-export async function changeUserRole(
-  userId: string,
-  newRole: string,
-): Promise<User> {
+export async function changeUserRole(userId: string, newRole: string): Promise<User> {
   const db = getDb();
   const user = await getUserById(userId);
   if (!user) {
@@ -197,10 +188,7 @@ export async function listUsers(params: UserListParams = {}): Promise<UserListRe
   if (role) conditions.push(eq(users.role, role as User['role']));
   if (search) {
     conditions.push(
-      or(
-        like(users.username, `%${search}%`),
-        like(users.registrationReason, `%${search}%`),
-      )!,
+      or(like(users.username, `%${search}%`), like(users.registrationReason, `%${search}%`))!,
     );
   }
   if (cursor) conditions.push(lt(users.id, cursor));

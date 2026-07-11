@@ -22,10 +22,7 @@ export function clearAccessToken(): void {
  * - 自动附加 Authorization: Bearer header
  * - 401 时尝试 refresh 一次，成功后重试原请求
  */
-export async function authFetch(
-  url: string,
-  options?: RequestInit,
-): Promise<Response> {
+export async function authFetch(url: string, options?: RequestInit): Promise<Response> {
   const headers = new Headers(options?.headers ?? {});
   if (accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`);

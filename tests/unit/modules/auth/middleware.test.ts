@@ -20,16 +20,13 @@ const mockVerifyAccessToken = vi.mocked(verifyAccessToken);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeRequest(opts?: {
-  method?: string;
-  headers?: Record<string, string>;
-}): NextRequest {
+function makeRequest(opts?: { method?: string; headers?: Record<string, string> }): NextRequest {
   const url = 'http://localhost:3000/api/test';
-  const init: RequestInit = {
+  const init = {
     method: opts?.method ?? 'GET',
     headers: new Headers(opts?.headers ?? {}),
   };
-  return new NextRequest(url, init);
+  return new NextRequest(url, init as any);
 }
 
 const adminUser: AuthenticatedUser = {
@@ -184,9 +181,7 @@ describe('validateOrigin', () => {
       method: 'POST',
       headers: { origin: 'https://evil.com', host: 'localhost:3000' },
     });
-    expect(() => validateOrigin(req)).toThrow(
-      expect.objectContaining({ code: 'FORBIDDEN' }),
-    );
+    expect(() => validateOrigin(req)).toThrow(expect.objectContaining({ code: 'FORBIDDEN' }));
   });
 
   it('passes when no Origin header is present', () => {
@@ -202,9 +197,7 @@ describe('validateOrigin', () => {
       method: 'POST',
       headers: { origin: 'not-a-valid-url', host: 'localhost:3000' },
     });
-    expect(() => validateOrigin(req)).toThrow(
-      expect.objectContaining({ code: 'FORBIDDEN' }),
-    );
+    expect(() => validateOrigin(req)).toThrow(expect.objectContaining({ code: 'FORBIDDEN' }));
   });
 });
 
@@ -240,9 +233,7 @@ describe('withErrorHandler', () => {
   });
 
   it('passes through successful handler response', async () => {
-    const handler = vi
-      .fn()
-      .mockResolvedValue(NextResponse.json({ data: 'ok' }, { status: 200 }));
+    const handler = vi.fn().mockResolvedValue(NextResponse.json({ data: 'ok' }, { status: 200 }));
     const wrapped = withErrorHandler(handler);
     const req = makeRequest();
 

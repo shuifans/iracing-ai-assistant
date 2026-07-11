@@ -14,11 +14,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
 
   // Fetch full user details from DB (JWT doesn't contain username)
   const db = getDb();
-  const [dbUser] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, authUser.id))
-    .limit(1);
+  const [dbUser] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1);
 
   if (!dbUser) {
     throw AppError.fromCode('NOT_FOUND', '用户不存在');

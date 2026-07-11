@@ -42,10 +42,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
   // Update last_login_at
   const db = getDb();
-  await db
-    .update(users)
-    .set({ lastLoginAt: utcNow() })
-    .where(eq(users.id, user.id));
+  await db.update(users).set({ lastLoginAt: utcNow() }).where(eq(users.id, user.id));
 
   const accessToken = await createAccessToken(user);
 

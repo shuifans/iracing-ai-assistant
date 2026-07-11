@@ -36,11 +36,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     throw AppError.fromCode('UNAUTHENTICATED', 'Token 记录不存在');
   }
 
-  const [dbUser] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, tokenRecord.userId))
-    .limit(1);
+  const [dbUser] = await db.select().from(users).where(eq(users.id, tokenRecord.userId)).limit(1);
 
   if (!dbUser) {
     throw AppError.fromCode('UNAUTHENTICATED', '用户不存在');
@@ -55,10 +51,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
   const accessToken = await createAccessToken(user);
 
-  const response = NextResponse.json(
-    successResponse({ accessToken }),
-    { status: 200 },
-  );
+  const response = NextResponse.json(successResponse({ accessToken }), { status: 200 });
 
   setRefreshCookie(response, newRawToken);
   return response;

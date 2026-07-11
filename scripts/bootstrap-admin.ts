@@ -28,7 +28,10 @@ export async function bootstrapAdmin(): Promise<BootstrapResult> {
 
   // 1. 读取环境变量
   if (!username || !password) {
-    return { success: false, message: '缺少 BOOTSTRAP_ADMIN_USERNAME 或 BOOTSTRAP_ADMIN_PASSWORD 环境变量' };
+    return {
+      success: false,
+      message: '缺少 BOOTSTRAP_ADMIN_USERNAME 或 BOOTSTRAP_ADMIN_PASSWORD 环境变量',
+    };
   }
 
   // 2. 校验长度
@@ -82,23 +85,28 @@ export async function bootstrapAdmin(): Promise<BootstrapResult> {
   });
 
   // 7. 成功
-  return { success: true, message: `管理员 ${username} 创建成功。请立即移除 BOOTSTRAP_ADMIN_PASSWORD 环境变量。` };
+  return {
+    success: true,
+    message: `管理员 ${username} 创建成功。请立即移除 BOOTSTRAP_ADMIN_PASSWORD 环境变量。`,
+  };
 }
 
 // 直接运行时执行
-const isDirectRun = process.argv[1]?.endsWith('bootstrap-admin.ts')
-  || process.argv[1]?.endsWith('bootstrap-admin');
+const isDirectRun =
+  process.argv[1]?.endsWith('bootstrap-admin.ts') || process.argv[1]?.endsWith('bootstrap-admin');
 
 if (isDirectRun) {
-  bootstrapAdmin().then((result) => {
-    if (result.success) {
-      console.log(result.message);
-    } else {
-      console.error(result.message);
+  bootstrapAdmin()
+    .then((result) => {
+      if (result.success) {
+        console.log(result.message);
+      } else {
+        console.error(result.message);
+        process.exit(1);
+      }
+    })
+    .catch((err: unknown) => {
+      console.error('Bootstrap 脚本执行失败:', err);
       process.exit(1);
-    }
-  }).catch((err: unknown) => {
-    console.error('Bootstrap 脚本执行失败:', err);
-    process.exit(1);
-  });
+    });
 }

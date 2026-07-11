@@ -83,7 +83,9 @@ export async function createRefreshToken(
   const resolvedFamilyId = familyId ?? generateId();
   const now = utcNow();
 
-  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(
+    Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
   const db = getDb();
   await db.insert(refreshTokens).values({
@@ -187,5 +189,7 @@ export function hashToken(rawToken: string): string {
  * 使用 IP_HASH_PEPPER + SHA-256 hash IP 地址。
  */
 export function hashIp(ip: string): string {
-  return createHash('sha256').update(env.IP_HASH_PEPPER + ip).digest('hex');
+  return createHash('sha256')
+    .update(env.IP_HASH_PEPPER + ip)
+    .digest('hex');
 }

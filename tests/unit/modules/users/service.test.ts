@@ -194,7 +194,7 @@ describe('Users Service', () => {
       const admin = makeUser({ role: 'admin', id: 'admin-1' });
 
       selWhere()
-        .mockResolvedValueOnce([admin])      // getUserById
+        .mockResolvedValueOnce([admin]) // getUserById
         .mockResolvedValueOnce([{ count: 1 }]); // countActiveAdmins
 
       try {
@@ -230,7 +230,7 @@ describe('Users Service', () => {
     it('should cascade delete user data', async () => {
       const user = makeUser({ role: 'user' });
       selWhere()
-        .mockResolvedValueOnce([user])       // getUserById
+        .mockResolvedValueOnce([user]) // getUserById
         .mockResolvedValueOnce([{ count: 0 }]); // countActiveAdmins (not admin, but called)
 
       const db = mockGetDb();

@@ -44,7 +44,7 @@ describe('setRefreshCookie', () => {
     );
 
     // 验证 cookie 选项
-    const [, , options] = response.cookies.set.mock.calls[0];
+    const [, , options] = response.cookies.set.mock.calls[0]!;
     expect(options.httpOnly).toBe(true);
     expect(options.secure).toBe(true);
     expect(options.sameSite).toBe('lax');

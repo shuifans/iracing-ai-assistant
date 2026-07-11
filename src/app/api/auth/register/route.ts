@@ -23,10 +23,9 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     const { username, password, registrationReason } = registerSchema.parse(body);
     await registerUser(username, password, registrationReason);
 
-    return NextResponse.json(
-      successResponse({ message: '注册申请已提交，请等待管理员审批' }),
-      { status: 201 },
-    );
+    return NextResponse.json(successResponse({ message: '注册申请已提交，请等待管理员审批' }), {
+      status: 201,
+    });
   } catch (err) {
     if (err instanceof ZodError) {
       throw new AppError('VALIDATION_ERROR', err.issues.map((i) => i.message).join('; '));

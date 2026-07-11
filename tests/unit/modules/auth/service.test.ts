@@ -128,10 +128,7 @@ describe('validateCredentials', () => {
   it('不存在用户抛 INVALID_CREDENTIALS（不泄露用户名）', async () => {
     mockSelect.mockResolvedValueOnce([]);
 
-    await expectAppError(
-      validateCredentials('nonexistent', 'any-password'),
-      'INVALID_CREDENTIALS',
-    );
+    await expectAppError(validateCredentials('nonexistent', 'any-password'), 'INVALID_CREDENTIALS');
   });
 
   it('pending 用户抛 ACCOUNT_PENDING', async () => {

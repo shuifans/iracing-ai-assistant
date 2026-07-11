@@ -52,8 +52,7 @@ export default function RegisterPage() {
 
       if (!res.ok) {
         const msg =
-          (json as { error?: { message?: string } }).error?.message ??
-          '注册失败，请稍后重试';
+          (json as { error?: { message?: string } }).error?.message ?? '注册失败，请稍后重试';
         setError(msg);
         return;
       }
@@ -86,9 +85,7 @@ export default function RegisterPage() {
             </svg>
           </div>
           <h1 className="text-xl font-bold text-gray-900">注册申请已提交</h1>
-          <p className="mt-2 text-sm text-gray-600">
-            请等待管理员审批，审批通过后方可登录。
-          </p>
+          <p className="mt-2 text-sm text-gray-600">请等待管理员审批，审批通过后方可登录。</p>
           <Link
             href="/login"
             className="mt-6 inline-flex h-11 items-center justify-center rounded-lg bg-blue-600 px-6 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:ring-offset-2"
@@ -121,10 +118,7 @@ export default function RegisterPage() {
       <form onSubmit={handleSubmit} className="space-y-5" noValidate>
         {/* Username */}
         <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="reg-username"
-            className="text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="reg-username" className="text-sm font-medium text-gray-700">
             用户名
           </label>
           <input
@@ -141,10 +135,7 @@ export default function RegisterPage() {
 
         {/* Password */}
         <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="reg-password"
-            className="text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="reg-password" className="text-sm font-medium text-gray-700">
             密码
           </label>
           <input
@@ -161,10 +152,7 @@ export default function RegisterPage() {
 
         {/* Confirm Password */}
         <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="reg-confirm-password"
-            className="text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="reg-confirm-password" className="text-sm font-medium text-gray-700">
             确认密码
           </label>
           <input
@@ -181,10 +169,7 @@ export default function RegisterPage() {
 
         {/* Registration Reason (optional) */}
         <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="reg-reason"
-            className="text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="reg-reason" className="text-sm font-medium text-gray-700">
             注册理由
             <span className="ml-1 text-xs font-normal text-gray-400">（选填）</span>
           </label>

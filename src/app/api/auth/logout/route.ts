@@ -30,10 +30,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     }
   }
 
-  const response = NextResponse.json(
-    successResponse({ message: '已退出登录' }),
-    { status: 200 },
-  );
+  const response = NextResponse.json(successResponse({ message: '已退出登录' }), { status: 200 });
 
   clearRefreshCookie(response);
   return response;

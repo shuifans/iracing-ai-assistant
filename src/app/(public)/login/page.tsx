@@ -29,8 +29,7 @@ export default function LoginPage() {
 
       if (!res.ok) {
         const msg =
-          (json as { error?: { message?: string } }).error?.message ??
-          '登录失败，请稍后重试';
+          (json as { error?: { message?: string } }).error?.message ?? '登录失败，请稍后重试';
         setError(msg);
         return;
       }
@@ -66,10 +65,7 @@ export default function LoginPage() {
       <form onSubmit={handleSubmit} className="space-y-5" noValidate>
         {/* Username */}
         <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="login-username"
-            className="text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="login-username" className="text-sm font-medium text-gray-700">
             用户名
           </label>
           <input
@@ -86,10 +82,7 @@ export default function LoginPage() {
 
         {/* Password */}
         <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="login-password"
-            className="text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="login-password" className="text-sm font-medium text-gray-700">
             密码
           </label>
           <input

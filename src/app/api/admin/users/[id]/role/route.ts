@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { withErrorHandler, requireAuth, requireRole, requireActiveUser, validateOrigin } from '@/modules/auth/middleware';
+import {
+  withErrorHandler,
+  requireAuth,
+  requireRole,
+  requireActiveUser,
+  validateOrigin,
+} from '@/modules/auth/middleware';
 import { successResponse } from '@/lib/response';
 import { changeUserRole } from '@/modules/users/service';
 import { AppError } from '@/lib/errors';

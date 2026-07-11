@@ -143,7 +143,7 @@ describe('createRefreshToken', () => {
     expect(result.familyId).toBeDefined();
 
     // 验证插入到 DB 的是 hash，不是原始值
-    const insertedValues = insertMock.mock.calls[0][0];
+    const insertedValues = insertMock.mock.calls[0]![0]!;
     expect(insertedValues.tokenHash).not.toBe(result.token);
     expect(insertedValues.tokenHash).toBe(hashToken(result.token));
   });
