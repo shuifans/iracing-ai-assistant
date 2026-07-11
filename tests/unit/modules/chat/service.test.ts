@@ -31,6 +31,20 @@ vi.mock('@/lib/datetime', () => ({
   utcNow: vi.fn(() => '2026-07-12T00:00:00.000Z'),
 }));
 
+// Mock DB for usage event recording
+const mockInsertValues = vi.fn();
+const mockInsertRun = vi.fn();
+const mockInsert = vi.fn(() => ({ values: mockInsertValues }));
+mockInsertValues.mockReturnValue({ run: mockInsertRun });
+
+vi.mock('@/db/client', () => ({
+  getDb: vi.fn(() => ({ insert: mockInsert })),
+}));
+
+vi.mock('@/db/schema/admin', () => ({
+  usageEvents: Symbol('usageEvents'),
+}));
+
 // Import after mocks
 import {
   getSession,
@@ -42,6 +56,7 @@ import {
 } from '@/modules/chat/repository';
 import { createChatQuery } from '@/modules/agent/client';
 import { streamChatMessage, stopMessage } from '@/modules/chat/service';
+import { getDb } from '@/db/client';
 
 const mockGetSession = vi.mocked(getSession);
 const mockCreateMessage = vi.mocked(createMessage);
@@ -50,6 +65,7 @@ const mockGetMessagesBySession = vi.mocked(getMessagesBySession);
 const mockUpdateSessionTitle = vi.mocked(updateSessionTitle);
 const mockCreateChatQuery = vi.mocked(createChatQuery);
 const mockGetAttachment = vi.mocked(getAttachment);
+const mockGetDb = vi.mocked(getDb);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -109,6 +125,7 @@ function createMockSDKStream(events: Array<{ type: string; [key: string]: unknow
 describe('streamChatMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockInsertValues.mockReturnValue({ run: mockInsertRun });
     mockGetSession.mockReturnValue(mockSession);
     mockCreateMessage.mockImplementation((_sessionId, role, _content, status) =>
       makeMockMessage(role, (status ?? 'pending') as MessageStatus),
@@ -318,6 +335,133 @@ describe('streamChatMessage', () => {
     const doneEvent = events.find((e) => 'grounding' in e);
     expect(doneEvent).toBeDefined();
     expect((doneEvent as any).status).toBe('interrupted');
+  });
+  it('records usage event with result=success on successful stream', async () => {
+    const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
+    const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');
+
+    mockCreateMessage.mockReturnValueOnce(userMsg).mockReturnValueOnce(assistantMsg);
+
+    const mockStream = createMockSDKStream([
+      {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'qoder-sess-001',
+        usage: { input_tokens: 100, output_tokens: 50 },
+        total_cost_usd: 0.001,
+        duration_ms: 2000,
+      },
+    ]);
+    mockCreateChatQuery.mockReturnValue(mockStream as any);
+
+    const generator = streamChatMessage(mockUser, 'sess-001', 'Hello');
+    for await (const _ of generator) {
+      // drain
+    }
+
+    expect(mockInsert).toHaveBeenCalled();
+    expect(mockInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-001',
+        sessionId: 'sess-001',
+        eventType: 'chat',
+        tokenInput: 100,
+        tokenOutput: 50,
+        costMicrousd: 1000,
+        durationMs: 2000,
+        result: 'success',
+        knowledgeHit: 'false',
+      }),
+    );
+    expect(mockInsertRun).toHaveBeenCalled();
+  });
+
+  it('records usage event with result=error on SDK error result', async () => {
+    const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
+    const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');
+
+    mockCreateMessage.mockReturnValueOnce(userMsg).mockReturnValueOnce(assistantMsg);
+
+    const mockStream = createMockSDKStream([
+      {
+        type: 'result',
+        subtype: 'error_during_execution',
+        session_id: 'qoder-sess-001',
+        errors: ['Something went wrong'],
+        usage: { input_tokens: 0, output_tokens: 0 },
+        total_cost_usd: 0,
+        duration_ms: 100,
+      },
+    ]);
+    mockCreateChatQuery.mockReturnValue(mockStream as any);
+
+    const generator = streamChatMessage(mockUser, 'sess-001', 'Hello');
+    for await (const _ of generator) {
+      // drain
+    }
+
+    expect(mockInsert).toHaveBeenCalled();
+    expect(mockInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-001',
+        sessionId: 'sess-001',
+        eventType: 'chat',
+        result: 'error',
+      }),
+    );
+  });
+
+  it('records usage event with knowledgeHit=true when evidence is present', async () => {
+    const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
+    const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');
+
+    mockCreateMessage.mockReturnValueOnce(userMsg).mockReturnValueOnce(assistantMsg);
+
+    const evidencePayload = [
+      {
+        evidenceId: 'ev-001',
+        type: 'wiki',
+        title: 'Test Evidence',
+        wikiPath: '/test.md',
+        excerpt: 'some excerpt',
+      },
+    ];
+
+    const mockStream = createMockSDKStream([
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'text', text: 'Answer with evidence' },
+            {
+              type: 'tool_result',
+              content: JSON.stringify(evidencePayload),
+            },
+          ],
+        },
+      },
+      {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'qoder-sess-001',
+        usage: { input_tokens: 200, output_tokens: 100 },
+        total_cost_usd: 0.002,
+        duration_ms: 3000,
+      },
+    ]);
+    mockCreateChatQuery.mockReturnValue(mockStream as any);
+
+    const generator = streamChatMessage(mockUser, 'sess-001', 'Hello');
+    for await (const _ of generator) {
+      // drain
+    }
+
+    expect(mockInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: 'success',
+        knowledgeHit: 'true',
+      }),
+    );
   });
 });
 

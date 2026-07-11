@@ -22,6 +22,8 @@ import type { AuthenticatedUser } from '@/modules/auth/types';
 import type { SDKMessage } from '@qoder-ai/qoder-agent-sdk';
 import type { AgentConfig } from '@/modules/agent/types';
 import { createChatQuery } from '@/modules/agent/client';
+import { getDb } from '@/db/client';
+import { usageEvents } from '@/db/schema/admin';
 import { AppError } from '@/lib/errors';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
@@ -139,6 +141,45 @@ function makeErrorEvent(
   retryable: boolean,
 ): SSEErrorEvent {
   return { requestId, sessionId, messageId, timestamp: utcNow(), code, message, retryable };
+}
+
+// ---------------------------------------------------------------------------
+// Usage event recording (fire-and-forget)
+// ---------------------------------------------------------------------------
+
+function recordUsageEvent(params: {
+  userId: string;
+  sessionId: string;
+  eventType: string;
+  model?: string;
+  tokenInput?: number;
+  tokenOutput?: number;
+  costMicroUsd?: number;
+  durationMs?: number;
+  result: string;
+  knowledgeHit?: boolean;
+}): void {
+  try {
+    const db = getDb();
+    db.insert(usageEvents)
+      .values({
+        id: generateId(),
+        userId: params.userId,
+        sessionId: params.sessionId,
+        eventType: params.eventType,
+        model: params.model ?? null,
+        tokenInput: params.tokenInput ?? 0,
+        tokenOutput: params.tokenOutput ?? 0,
+        costMicrousd: params.costMicroUsd ?? 0,
+        durationMs: params.durationMs ?? 0,
+        result: params.result,
+        knowledgeHit: params.knowledgeHit ? 'true' : 'false',
+        createdAt: utcNow(),
+      })
+      .run();
+  } catch {
+    // fire-and-forget: usage recording must not break the main flow
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +340,16 @@ export async function* streamChatMessage(
             content: accumulatedContent || '',
             errorCode: msg.subtype,
           });
+          // Record usage event (error from SDK)
+          recordUsageEvent({
+            userId: user.id,
+            sessionId,
+            eventType: 'chat',
+            model: config.model,
+            durationMs: Date.now() - startTime,
+            result: 'error',
+          });
+
           yield makeErrorEvent(
             requestId,
             sessionId,
@@ -379,6 +430,20 @@ export async function* streamChatMessage(
         const { updateSessionTitle } = await import('./repository');
         updateSessionTitle(sessionId, title);
       }
+
+      // Record usage event (success)
+      recordUsageEvent({
+        userId: user.id,
+        sessionId,
+        eventType: 'chat',
+        model: config.model,
+        tokenInput: usageData.inputTokens,
+        tokenOutput: usageData.outputTokens,
+        costMicroUsd: usageData.costMicrousd,
+        durationMs: usageData.durationMs,
+        result: 'success',
+        knowledgeHit: evidenceList.length > 0,
+      });
     }
   } catch (err) {
     // 7b. On failure: mark assistant as interrupted/failed
@@ -391,6 +456,15 @@ export async function* streamChatMessage(
       content: accumulatedContent || '',
       errorCode,
       completedAt: utcNow(),
+    });
+
+    // Record usage event (exception)
+    recordUsageEvent({
+      userId: user.id,
+      sessionId,
+      eventType: 'chat',
+      durationMs: Date.now() - startTime,
+      result: 'error',
     });
 
     if (!isAbort) {

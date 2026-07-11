@@ -7,7 +7,7 @@
  * @module chat/repository
  */
 
-import { eq, and, desc, sql, lt } from 'drizzle-orm';
+import { eq, and, desc, sql, lt, like, gte, lte } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import {
   chatSessions,
@@ -94,6 +94,72 @@ export function listSessions(
     sessions: resultRows,
     nextCursor: hasMore ? resultRows[resultRows.length - 1]!.lastMessageAt : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Admin queries
+// ---------------------------------------------------------------------------
+
+/**
+ * List all sessions (admin) with optional filters and cursor pagination.
+ */
+export function adminListSessions(opts: {
+  userId?: string;
+  keyword?: string;
+  fromDate?: string;
+  toDate?: string;
+  limit?: number;
+  cursor?: string;
+}): { sessions: ChatSession[]; nextCursor: string | null } {
+  const db = getDb();
+  const limit = opts.limit ?? 20;
+
+  const conditions = [];
+  if (opts.userId) {
+    conditions.push(eq(chatSessions.userId, opts.userId));
+  }
+  if (opts.keyword) {
+    conditions.push(like(chatSessions.title, `%${opts.keyword}%`));
+  }
+  if (opts.fromDate) {
+    conditions.push(gte(chatSessions.lastMessageAt, opts.fromDate));
+  }
+  if (opts.toDate) {
+    conditions.push(lte(chatSessions.lastMessageAt, opts.toDate));
+  }
+  if (opts.cursor) {
+    conditions.push(lt(chatSessions.lastMessageAt, opts.cursor));
+  }
+
+  const rows = db
+    .select()
+    .from(chatSessions)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(chatSessions.lastMessageAt))
+    .limit(limit + 1)
+    .all();
+
+  const hasMore = rows.length > limit;
+  const resultRows = hasMore ? rows.slice(0, limit) : rows;
+
+  return {
+    sessions: resultRows,
+    nextCursor: hasMore ? resultRows[resultRows.length - 1]!.lastMessageAt : null,
+  };
+}
+
+/**
+ * Get a session by ID without ownership check (admin only).
+ */
+export function getSessionById(sessionId: string): ChatSession | null {
+  const db = getDb();
+  const result = db
+    .select()
+    .from(chatSessions)
+    .where(eq(chatSessions.id, sessionId))
+    .limit(1)
+    .all();
+  return result[0] ?? null;
 }
 
 /**
