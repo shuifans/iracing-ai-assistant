@@ -27,7 +27,7 @@
 
 ### 1.2 产品定位
 
-面向 iRacing 新手和中等水平玩家的智能问答助手，基于 RAG（检索增强生成）+ Agent 架构，帮助用户提升圈速、驾驶稳定性和比赛策略水平。产品以中文为主要服务语言，填补国内 iRacing 中文智能问答工具的空白。
+面向 iRacing 新手和中等水平玩家的智能问答助手，基于 Markdown Wiki 知识库 + Agent 架构，帮助用户提升圈速、驾驶稳定性和比赛策略水平。产品以中文为主要服务语言，填补国内 iRacing 中文智能问答工具的空白。
 
 ### 1.3 目标用户画像
 
@@ -101,15 +101,15 @@
 #### 3.1.2 问答流程
 
 ```
-用户提问 → Query 改写（结合上下文）→ 知识库检索 → 结果排序 & 过滤 → 组装 Prompt → 调用 LLM Agent → 流式返回回答
+用户提问 → H5 服务后端 → Qoder Agent SDK → [md-wiki 本地检索（Grep/Glob/Read）] + [在线知识源 WebFetch] → 综合生成回答
 ```
 
 详细流程说明：
 
-1. **Query 改写**：结合多轮对话上下文，将用户当前提问改写为更适合检索的独立查询（例如用户说"那刹车呢？"，改写为"Spa 赛道 GT3 车辆刹车调校建议"）
-2. **知识库检索**：通过向量相似度检索 + 关键词检索（混合检索）从知识库中获取相关知识片段
-3. **Prompt 组装**：将检索结果、系统提示词、对话历史组装为 LLM 输入 Prompt
-4. **Agent 推理**：LLM Agent 综合分析后生成回答，必要时调用工具（如 WebFetch 实时查询）
+1. **用户提问**：用户通过 H5 页面提交问题，后端接收并传入 Qoder Agent SDK
+2. **md-wiki 本地检索**：Agent 使用内置工具（Grep 内容搜索、Glob 文件名匹配、Read 文件读取）在本地 Markdown Wiki 目录中快速定位和提取相关知识片段
+3. **在线知识源补充**：当本地 Wiki 中信息不足时，Agent 通过 WebFetch 工具实时访问 knowledge-sources.md 中列出的权威站点（IQS 作为 fallback）
+4. **综合回答生成**：Agent 综合本地 Wiki 和在线检索结果，生成精准、结构化的中文回答
 5. **流式输出**：以 Server-Sent Events (SSE) 方式逐步返回回答内容
 
 #### 3.1.3 追问细化能力
@@ -150,9 +150,10 @@
 
 | 优先级 | 来源类型 | 说明 |
 |--------|---------|------|
-| P0 | 预设文档知识 | 从 knowledge-sources.md 中梳理的第一梯队数据源，通过 WebFetch 采集后入库 |
-| P0 | 权威站点实时查询 | 用户问题在本地知识库无结果时，通过 Agent 的 WebFetch 工具实时访问权威站点（IQS 作为 fallback） |
+| P0 | 本地 md-wiki 知识库 | 由知识库管理员将采集的信息清洗为结构化 Markdown 文件，存储在项目 md-wiki 目录中，Agent 通过 Grep/Glob/Read 直接检索 |
+| P0 | 权威站点实时查询 | 本地 Wiki 信息不足时，Agent 通过 WebFetch 工具实时访问 knowledge-sources.md 中列出的权威站点（IQS 作为 fallback） |
 | P1 | 视频简介搜索 | 基于视频简介（标题、描述）内容进行搜索，返回视频链接（不含时间戳） |
+| P1 | iRacing 官方论坛 | forums.iracing.com — 官方社区讨论区，含赛道攻略、调校分享、新手问答等高质量内容。支持游客浏览大部分帖子，无需登录即可通过 WebFetch 采集。作为在线查询的重要补充源 |
 
 **Phase 2 待做：**
 
@@ -161,26 +162,61 @@
 
 详细知识源清单参见 [knowledge-sources.md](./knowledge-sources.md)。
 
-#### 3.2.2 知识分类体系
+#### 3.2.2 知识分类体系与 md-wiki 目录结构
 
-知识库按三大方向组织，每个方向下设子分类：
+知识库按三大方向组织，映射为 md-wiki 目录结构：
 
 ```
-知识库
-├── 赛道技术
-│   ├── 走线技巧（逐弯攻略、理想线路）
-│   ├── 刹车技术（刹车点、循迹刹车、刹车压力）
-│   ├── 轮胎管理（胎压设定、胎温监控、磨损策略）
-│   └── 悬挂与力学（悬挂参数、车辆动态、力反馈）
-├── 车辆调校
-│   ├── 调校理论（车辆力学、参数含义、调校方法论）
-│   ├── 调校实操（具体车辆/赛道 Setup 推荐）
-│   └── 调校工具（Garage 61、SimHub 等工具使用指南）
-└── 基础知识
-    ├── 新手入门（安装、界面、首场比赛流程）
-    ├── 购车/赛道建议（性价比方案、分级别推荐）
-    ├── 赛事体系（系列赛、联赛、安全评级、iRating）
-    └── 硬件配置（方向盘、踏板、显示器、PC 配置建议）
+md-wiki/
+├── track-technique/           # 赛道技术
+│   ├── driving-line/          # 走线技巧（逐弯攻略、理想线路）
+│   ├── braking/               # 刹车技术（刹车点、循迹刹车、刹车压力）
+│   ├── tire-management/       # 轮胎管理（胎压设定、胎温监控、磨损策略）
+│   └── suspension/            # 悬挂与力学（悬挂参数、车辆动态、力反馈）
+├── car-setup/                 # 车辆调校
+│   ├── theory/                # 调校理论（车辆力学、参数含义、调校方法论）
+│   ├── presets/               # 调校实操（具体车辆/赛道 Setup 推荐）
+│   └── tools/                 # 调校工具（Garage 61、SimHub 等工具使用指南）
+├── basics/                    # 基础知识
+│   ├── getting-started/       # 新手入门（安装、界面、首场比赛流程）
+│   ├── buying-guide/          # 购车/赛道建议（性价比方案、分级别推荐）
+│   ├── series-and-league/     # 赛事体系（系列赛、联赛、安全评级、iRating）
+│   └── hardware/              # 硬件配置（方向盘、踏板、显示器、PC 配置建议）
+└── index.md                   # 知识库索引文件（各分类概述和快速导航）
+```
+
+**md-wiki 文件命名与内容规范：**
+
+| 规范项 | 要求 |
+|--------|------|
+| **文件命名** | 使用小写英文 + 短横线分隔，如 `spa-eau-rouge-guide.md`、`gt3-tire-pressure-basics.md` |
+| **文件格式** | 标准 Markdown 格式，必须包含 YAML Front Matter 头（title、category、subcategory、tags、source、season、updated_at） |
+| **内容长度** | 单个文件建议 500～3000 字，过大则拆分为多个文件 |
+| **来源标注** | 在 Front Matter 的 source 字段标注信息来源 URL 或来源名称 |
+
+**Markdown 文件示例：**
+
+```markdown
+---
+title: Spa 赛道 Eau Rouge 弯道攻略
+category: track-technique
+subcategory: driving-line
+tags: [spa, eau-rouge, gt3, 走线]
+source: https://coachdaveacademy.com/...
+season: 2026S3
+updated_at: 2026-07-11
+---
+
+# Spa 赛道 Eau Rouge 弯道攻略
+
+## 弯道概述
+Eau Rouge 是 Spa 赛道最具标志性的弯道...
+
+## 推荐走线
+...
+
+## 刹车点参考
+...
 ```
 
 #### 3.2.3 知识更新机制
@@ -188,29 +224,33 @@
 **增量更新流程（日常）：**
 
 ```
-管理员手动触发 → 爬取指定站点变更 → 对比差异 → 增量入库 → 重新生成向量索引 → 管理员审核确认上线
+管理员发现/采集新知识（包括浏览 forums.iracing.com 发现有价值的新知识） → 清洗整理为结构化 Markdown → 放入 md-wiki 对应分类目录 → 更新 index.md 索引 → Git 提交变更 → 部署生效
 ```
 
 **全量刷新流程（每赛季大更新）：**
 
 ```
-赛季更新公告 → 管理员触发全量刷新 → 重新爬取所有数据源 → 全量重建知识库 → 重新生成向量索引 → 管理员审核确认上线
+赛季更新公告 → 管理员审查现有 md-wiki 内容时效性 → 标记过时文件并更新/归档 → 重新采集权威站点最新内容 → 清洗为 md 文件 → 更新 index.md → Git 提交变更 → 部署生效
 ```
 
 **更新策略：**
 
 | 类型 | 触发方式 | 频率 | 说明 |
 |------|---------|------|------|
-| 增量更新 | 管理员手动触发 | 每周或按需 | 仅抓取变更内容，对比差异后入库 |
-| 全量刷新 | 管理员手动触发 | 每赛季（约 3 个月） | iRacing 赛季大更新时全量重建 |
+| 增量更新 | 管理员手动触发 | 每周或按需 | 仅更新变更的知识条目，清洗为新 md 文件后入库 |
+| 全量刷新 | 管理员手动触发 | 每赛季（约 3 个月） | iRacing 赛季大更新时全面审查并重建 md-wiki |
 | 自动化定时 | 定时任务（cron） | 后续迭代 | 前期由管理员手动触发，后续改为定时自动执行 |
 
-#### 3.2.4 向量存储方案
+#### 3.2.4 md-wiki 本地检索方案
 
-- **存储引擎**：SQLite + 本地向量扩展（轻量方案，适合 V1 规模）
-- **Embedding 模型**：使用兼容 OpenAI Embedding API 的模型（如 `text-embedding-3-small` 或国产替代方案）
-- **检索策略**：向量相似度检索 + BM25 关键词检索，混合排序后取 Top-K 结果
-- **分块策略**：按段落/章节分块，保持语义完整性，每块 300～800 tokens
+- **存储方式**：结构化 Markdown 文件，按知识分类组织为目录树（见 3.2.2）
+- **检索工具**：Qoder Agent SDK 内置工具
+  - `Grep`：按正则/关键词搜索 md 文件内容，支持上下文行数、大小写等选项
+  - `Glob`：按文件名模式匹配，快速定位特定分类或主题的文件
+  - `Read`：读取完整 md 文件内容，提取详细信息
+- **检索策略**：Agent 自主决定检索路径——先用 Glob 缩小文件范围，再用 Grep 精确定位相关内容，最后用 Read 读取完整上下文
+- **优势**：无需 Embedding 模型、无需向量数据库、无需分块策略，知识以人类可读的 Markdown 格式存储，便于维护和审查
+- **局限**：依赖 Agent 的检索推理能力，知识量过大时（>1000 文件）检索效率可能下降（V1 阶段知识量远小于此阈值）
 
 ### 3.3 用户系统
 
@@ -262,12 +302,12 @@
 
 | 功能 | 说明 |
 |------|------|
-| 知识条目列表 | 分页展示所有知识条目，支持分类筛选和关键词搜索 |
-| 查看知识详情 | 查看知识条目的完整内容、来源、分类、创建/更新时间 |
-| 编辑知识条目 | 修改知识内容、分类、标签等 |
-| 新增知识条目 | 手动添加知识条目（标题、内容、分类、来源、标签） |
-| 删除知识条目 | 删除不再适用的知识条目（软删除，可恢复） |
-| 知识更新审核 | 查看自动采集的增量变更，逐条审核确认入库或拒绝 |
+| md-wiki 文件列表 | 展示所有 md 文件，支持分类目录浏览和关键词搜索 |
+| 查看知识文件 | 查看 Markdown 文件的完整内容和 Front Matter 元数据 |
+| 编辑知识文件 | 在 Web 编辑器中修改 Markdown 内容和 Front Matter |
+| 新增知识文件 | 创建新的 Markdown 文件（提供模板、选择分类目录） |
+| 删除知识文件 | 删除不再适用的知识文件（移入归档目录，可恢复） |
+| 知识变更审核 | 审查 Git 提交中的知识文件变更，确认发布或回滚 |
 
 #### 3.4.4 使用统计
 
@@ -306,7 +346,6 @@
 | **后端** | Next.js API Routes + Qoder Agent SDK | API 层 + Agent 编排层 |
 | **Agent SDK** | `@qoder-ai/qoder-agent-sdk` | 核心 Agent 编排能力 |
 | **LLM** | 兼容 OpenAI/Anthropic 协议的模型 | 如阿里云百炼 qwen3.6-plus、小米 MIMO 等，需支持视觉理解 |
-| **向量数据库** | SQLite + 本地向量扩展 | 轻量方案，V1 够用 |
 | **认证** | JWT（jose 库） | Access Token + Refresh Token |
 | **数据库** | SQLite (better-sqlite3) | 用户、会话、知识条目等结构化数据存储 |
 | **部署** | Docker + Nginx | 容器化部署，Nginx 反向代理 + HTTPS |
@@ -339,9 +378,9 @@ const result = await query({
     // 流式输出
     includePartialMessages: true,
     // 内置工具
-    tools: ['WebFetch', 'WebSearch', 'Read', 'Write', 'Bash', 'Glob', 'Grep'],
+    allowedTools: ['WebFetch', 'WebSearch', 'Read', 'Glob', 'Grep'],
     // 子 Agent 注册
-    agents: [knowledgeRetrievalAgent, webFetchAgent, answerGenerationAgent],
+    agents: { 'wiki-search': wikiSearchAgent, 'web-fetch': webFetchAgent },
     // 会话恢复
     resume: sessionId, // 传入 session ID 恢复历史会话
   },
@@ -441,28 +480,37 @@ const result = await query({
 #### 4.3.1 Agent 编排架构
 
 ```
-主 Agent（对话管理）
-├── 知识检索 Agent  → 从向量数据库检索相关知识片段
-├── 网页采集 Agent  → 通过 WebFetch 从权威站点实时获取信息
-└── 回答生成 Agent  → 综合所有检索结果生成最终回答
+主 Agent（对话管理 + 回答生成）
+├── md-wiki 检索 Agent  → 通过 Grep/Glob/Read 在本地 md-wiki 目录中检索知识
+└── 网页采集 Agent      → 通过 WebFetch 从权威站点实时获取信息（本地不足时补充）
 ```
 
-#### 4.3.2 知识检索 Agent
+#### 4.3.2 md-wiki 检索 Agent
 
 ```typescript
-const knowledgeRetrievalAgent = {
-  name: 'knowledge-retrieval',
-  description: '从本地知识库中检索与用户问题相关的知识片段',
-  prompt: `你是一个知识检索专家。你的任务是从 iRacing 知识库中检索与用户问题最相关的知识片段。
-    
+const wikiSearchAgent = {
+  description: '从本地 md-wiki 知识库中检索与用户问题相关的 Markdown 文件和知识片段',
+  prompt: `你是一个 iRacing 知识库检索专家。你的任务是从本地 md-wiki 目录中检索与用户问题最相关的知识。
+
+    md-wiki 目录结构：
+    - md-wiki/track-technique/  → 赛道技术（走线、刹车、轮胎、悬挂）
+    - md-wiki/car-setup/       → 车辆调校（理论、实操、工具）
+    - md-wiki/basics/          → 基础知识（入门、购车、赛事、硬件）
+
     工作流程：
-    1. 分析用户问题的核心意图
-    2. 将问题拆解为多个检索关键词
-    3. 从知识库中检索 Top-5 相关知识片段
-    4. 对检索结果进行相关性排序和过滤
-    5. 返回结构化的检索结果（包含内容、来源、相关度评分）`,
+    1. 分析用户问题的核心意图，判断属于哪个知识分类
+    2. 使用 Glob 工具匹配对应分类目录下的相关文件（如 *braking*.md）
+    3. 使用 Grep 工具在匹配的文件中搜索关键词，定位具体段落
+    4. 使用 Read 工具读取相关文件的关键内容
+    5. 整理并返回检索结果（包含文件路径、相关内容片段、来源信息）
+
+    检索技巧：
+    - 如果问题涉及特定赛道，优先用赛道名作为搜索关键词
+    - 如果问题涉及特定车辆，优先用车辆名 + 分类作为搜索关键词
+    - 中英文关键词都要尝试（md 文件可能使用英文文件名）
+    - 如果初次搜索结果不足，扩大搜索范围或尝试同义词`,
   tools: ['Read', 'Grep', 'Glob'],
-  maxTurns: 3,
+  maxTurns: 5,
   effort: 'medium',
 };
 ```
@@ -478,6 +526,7 @@ const webFetchAgent = {
     优先访问的站点：
     - iRacing 官方知识库: https://support.iracing.com/
     - iRacing 官方: https://www.iracing.com/
+    - iRacing 官方论坛: https://forums.iracing.com/（游客可浏览，含赛道攻略、调校分享、新手问答）
     - r/iRacing Reddit: https://www.reddit.com/r/iRacing/
     
     工作流程：
@@ -493,32 +542,12 @@ const webFetchAgent = {
 };
 ```
 
-#### 4.3.4 回答生成 Agent
+#### 4.3.4 子 Agent 编排注意事项
 
-```typescript
-const answerGenerationAgent = {
-  name: 'answer-generation',
-  description: '综合知识检索和网页采集的结果，生成精准、结构化的最终回答',
-  prompt: `你是一个 iRacing 赛车游戏专业顾问。你需要综合所有检索到的信息，为用户生成精准、实用的回答。
-    
-    回答原则：
-    1. 严格基于检索结果回答，不编造信息
-    2. 如果信息不足，明确告知用户"目前无法确认此信息"
-    3. 回答中标注信息来源
-    4. 对于调校建议，提醒用户在游戏中实际测试验证
-    5. 使用中文回答，专业术语保留英文原名并附中文解释
-    6. 结构化呈现：使用标题、列表、表格等提高可读性`,
-  tools: [],  // 回答生成 Agent 不需要工具
-  maxTurns: 1,
-  effort: 'high',
-};
-```
-
-#### 4.3.5 子 Agent 编排注意事项
-
+- 回答生成由**主 Agent** 完成，综合子 Agent 的检索结果后直接输出回答
 - 子 Agent 使用**独立上下文**，不共享主 Agent 的对话历史
 - 子 Agent **不能再创建子 Agent**（仅一层深度限制）
-- 通过 `options.agents` 数组注册，每个 Agent 可指定 `description`、`prompt`、`tools`、`model`、`maxTurns`、`effort` 等参数
+- 通过 `options.agents` 对象注册，每个 Agent 可指定 `description`、`prompt`、`tools`、`model`、`maxTurns`、`effort` 等参数
 - 主 Agent 负责协调子 Agent 的执行顺序和结果整合
 
 ### 4.4 部署架构
@@ -539,9 +568,9 @@ const answerGenerationAgent = {
               ┌────────────┼────────────┐
               │            │            │
        ┌──────┴─────┐ ┌───┴────┐ ┌────┴─────┐
-       │  SQLite DB  │ │ Vector │ │ Qoder    │
-       │  (用户/会话  │ │ Store  │ │ Agent    │
-       │   /知识)    │ │(SQLite)│ │ SDK      │
+       │  SQLite DB  │ │md-wiki │ │ Qoder    │
+       │  (用户/会话  │ │ 目录   │ │ Agent    │
+       │   /消息)    │ │ (.md)  │ │ SDK      │
        └────────────┘ └────────┘ └──────────┘
 ```
 
@@ -549,8 +578,8 @@ const answerGenerationAgent = {
 |------|------|
 | **Nginx** | 反向代理，处理 HTTPS 终止（复用 iracing.club 证书），静态资源缓存 |
 | **Next.js App** | 前端页面 + API Routes，运行在 :3000 端口 |
-| **SQLite DB** | 存储用户、会话、消息、知识条目等结构化数据 |
-| **Vector Store** | SQLite + 向量扩展，存储知识片段的 Embedding 向量 |
+| **SQLite DB** | 存储用户、会话、消息、使用统计等结构化数据 |
+| **md-wiki 目录** | Markdown Wiki 知识库文件，按分类目录组织，Agent 通过 Grep/Glob/Read 检索 |
 | **Qoder Agent SDK** | Agent 编排层，需确保部署环境已安装 `qodercli` |
 
 **与 iracing.club 隔离措施**：
@@ -571,7 +600,7 @@ const answerGenerationAgent = {
 | 首字节时间 (TTFB) | < 500ms（API 接口首次流式输出） |
 | 流式输出延迟 | 每 token 输出间隔 < 100ms |
 | 页面加载时间 | < 2s（首屏完整加载，移动端 4G 网络） |
-| 知识库检索 | < 1s（Top-5 结果检索 + 排序） |
+| md-wiki 本地检索 | < 2s（Glob + Grep 定位 + Read 读取相关文件） |
 | 并发支持 | 10 个并发用户（V1 规模，小范围使用） |
 
 ### 5.2 安全
@@ -627,11 +656,11 @@ const answerGenerationAgent = {
 | | 图片上传与视觉理解 | P1 |
 | **Agent 后端** | 主 Agent + 子 Agent 编排 | P0 |
 | | Query 改写 | P0 |
-| | 知识库检索集成 | P0 |
-| **知识库** | 预设文档知识入库（第一梯队数据源） | P0 |
+| | md-wiki 检索集成 | P0 |
+| **知识库** | md-wiki 知识库初始化（第一梯队数据源清洗为 md 文件） | P0 |
 | | 权威站点 WebFetch 采集 | P0 |
 | | 视频简介搜索 + 链接返回 | P1 |
-| | 增量更新流程 | P1 |
+| | 知识文件变更与 Git 管理流程 | P1 |
 | **用户系统** | 注册 + 审批机制 | P0 |
 | | JWT 登录认证 | P0 |
 | | 历史会话保存 | P0 |
@@ -670,6 +699,8 @@ const answerGenerationAgent = {
 | **BYOK 可用性** | 自有模型接入依赖 provider 目录匹配，可能因 provider 变更导致不可用 | 准备多个备选 LLM provider，定期验证连通性 |
 | **DeepSeek API 并发限制** | DeepSeek API 存在账号级并发限制，高并发时可能触发限流 | 实现请求队列和退避重试机制，监控并发数 |
 | **子 Agent 嵌套限制** | 子 Agent 仅支持一层深度，复杂任务无法多层分解 | 合理设计子 Agent 职责粒度，避免需要多层嵌套的场景 |
+| **md-wiki 知识量增长后检索效率** | 当 md 文件数量超过数百个时，Grep/Glob 检索可能变慢 | 合理设计目录层级和文件命名规范，控制单目录文件数量；后续可引入向量检索作为补充 |
+| **md 文件维护成本** | 知识清洗为结构化 Markdown 需要人工投入，管理员负担较重 | 提供 md 文件模板和编辑工具降低门槛；后续引入自动化采集+AI辅助清洗流程 |
 
 ### 7.2 产品风险
 
@@ -736,24 +767,12 @@ const answerGenerationAgent = {
 | subcategory | TEXT | 子分类 |
 | source_url | TEXT | 来源 URL |
 | source_name | TEXT | 来源名称 |
+| file_path | TEXT | md-wiki 中的文件路径（如 track-technique/braking/spa-brake-points.md） |
 | tags | TEXT (JSON) | 标签列表 |
 | season | TEXT | 适用赛季（如 "2026S3"） |
 | status | TEXT | 状态：`draft` / `published` / `archived` |
-| embedding_id | TEXT | 向量数据库中的 ID |
 | created_at | DATETIME | 创建时间 |
 | updated_at | DATETIME | 更新时间 |
-
-#### knowledge_chunks 表（向量化分块）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | TEXT (UUID) | 主键 |
-| knowledge_item_id | TEXT (FK) | 关联知识条目 |
-| chunk_index | INTEGER | 分块序号 |
-| content | TEXT | 分块内容 |
-| token_count | INTEGER | Token 数 |
-| embedding | BLOB | 向量 Embedding 数据 |
-| created_at | DATETIME | 创建时间 |
 
 #### usage_stats 表
 
@@ -860,7 +879,7 @@ iracing-ai-assistant/
 │   ├── lib/                    # 工具库
 │   │   ├── agent/              # Qoder Agent SDK 封装
 │   │   ├── db/                 # 数据库操作
-│   │   ├── vector/             # 向量数据库操作
+│   │   ├── wiki/               # md-wiki 检索工具封装
 │   │   ├── auth/               # 认证工具
 │   │   └── utils/              # 通用工具
 │   ├── hooks/                  # 自定义 React Hooks
@@ -868,7 +887,8 @@ iracing-ai-assistant/
 │   └── config/                 # 配置文件
 ├── scripts/                    # 脚本（数据采集、知识库同步等）
 ├── data/                       # 本地数据文件
-│   └── db.sqlite               # SQLite 数据库
+│   ├── db.sqlite               # SQLite 数据库（用户/会话/消息）
+├── md-wiki/                    # Markdown Wiki 知识库文件（按 3.2.2 目录结构）
 ├── public/                     # 静态资源
 ├── docker/                     # Docker 相关配置
 │   ├── Dockerfile
