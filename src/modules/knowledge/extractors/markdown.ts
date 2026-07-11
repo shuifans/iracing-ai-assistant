@@ -4,13 +4,19 @@ import type { ExtractionResult } from '@/modules/knowledge/types';
 const MAX_TEXT_CHARS = 2_097_152;
 
 /**
- * Strip dangerous HTML tags embedded in Markdown content.
- * Removes <script>, <iframe>, <object> and their closing counterparts
- * (case-insensitive, including attributes).
+ * Strip dangerous HTML elements (tags + inner content) from Markdown.
+ * Removes <script>, <iframe>, <object> entirely (case-insensitive),
+ * while preserving safe Markdown syntax.
  */
 function stripDangerousHtml(input: string): string {
-  const dangerousTagPattern = /<\/?(?:script|iframe|object)\b[^>]*>/gi;
-  return input.replace(dangerousTagPattern, '');
+  // Pass 1: remove full elements including their content
+  let result = input.replace(
+    /<(script|iframe|object)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+    '',
+  );
+  // Pass 2: remove any remaining orphan tags
+  result = result.replace(/<\/?(?:script|iframe|object)\b[^>]*>/gi, '');
+  return result;
 }
 
 /**

@@ -3,10 +3,15 @@ import type { UrlFetchOptions } from '@/modules/knowledge/extractors/url';
 import { AppError } from '@/lib/errors';
 
 // ---------------------------------------------------------------------------
-// Mocks
+// Mocks — use vi.hoisted so variables exist before vi.mock factories run
 // ---------------------------------------------------------------------------
 
-const mockLookup = vi.fn();
+const { mockLookup, mockReadabilityParse, mockJSDOM } = vi.hoisted(() => ({
+  mockLookup: vi.fn(),
+  mockReadabilityParse: vi.fn(),
+  mockJSDOM: vi.fn(),
+}));
+
 vi.mock('dns', () => ({
   default: {
     promises: {
@@ -18,14 +23,12 @@ vi.mock('dns', () => ({
   },
 }));
 
-const mockReadabilityParse = vi.fn();
 vi.mock('@mozilla/readability', () => ({
   Readability: vi.fn().mockImplementation(() => ({
     parse: mockReadabilityParse,
   })),
 }));
 
-const mockJSDOM = vi.fn();
 vi.mock('jsdom', () => ({
   JSDOM: vi.fn().mockImplementation((...args: unknown[]) => mockJSDOM(...args)),
 }));

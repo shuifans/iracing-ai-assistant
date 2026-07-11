@@ -31,7 +31,7 @@ function setupMockDb() {
   // Chain: select().from().where().limit() / .orderBy()
   mockSelect.mockReturnValue({ from: mockFrom });
   mockFrom.mockReturnValue({ where: mockWhere });
-  mockWhere.mockReturnValue({ limit: mockLimit, orderBy: mockOrderBy, run: mockRun });
+  mockWhere.mockReturnValue({ limit: mockLimit, orderBy: mockOrderBy, run: mockRun, all: mockAll });
   mockLimit.mockReturnValue({ all: mockAll, run: mockRun });
   mockAll.mockReturnValue([]);
   mockOrderBy.mockReturnValue({ limit: mockLimit, all: mockAll });
@@ -273,7 +273,7 @@ describe('knowledge/repository', () => {
   describe('supersedeOldDrafts', () => {
     it('supersedes other pending drafts for the same source', async () => {
       // Mock jobs query returning two jobs
-      mockAll.mockReturnValueOnce([
+      mockAll.mockReturnValue([
         { id: 'job-001', sourceId: 'src-001' },
         { id: 'job-002', sourceId: 'src-001' },
       ]);
@@ -293,7 +293,7 @@ describe('knowledge/repository', () => {
     });
 
     it('skips update when no jobs found for source', async () => {
-      mockAll.mockReturnValueOnce([]);
+      mockAll.mockReturnValue([]);
 
       const { supersedeOldDrafts } = await import('@/modules/knowledge/repository');
       supersedeOldDrafts('src-none', 'draft-current');
