@@ -334,6 +334,18 @@ export function restoreItem(id: string): void {
 }
 
 /**
+ * List knowledge items filtered by wiki_sync_status.
+ */
+export function listItemsBySyncStatus(syncStatus: string): KnowledgeItem[] {
+  const db = getDb();
+  return db
+    .select()
+    .from(knowledgeItems)
+    .where(eq(knowledgeItems.wikiSyncStatus, syncStatus))
+    .all();
+}
+
+/**
  * Update the wiki sync status of a knowledge item.
  */
 export function updateSyncStatus(
