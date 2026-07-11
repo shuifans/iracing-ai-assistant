@@ -22,6 +22,7 @@ import {
 } from '@/db/schema/chat';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
+import { users } from '@/db/schema/users';
 import type { AttachmentData, SourceData } from './types';
 
 // ---------------------------------------------------------------------------
@@ -101,7 +102,16 @@ export function listSessions(
 // ---------------------------------------------------------------------------
 
 /**
+ * Admin-enriched session row (includes username and messageCount).
+ */
+export interface AdminSessionRow extends ChatSession {
+  username: string;
+  messageCount: number;
+}
+
+/**
  * List all sessions (admin) with optional filters and cursor pagination.
+ * Enriched with username and message count.
  */
 export function adminListSessions(opts: {
   userId?: string;
@@ -110,9 +120,18 @@ export function adminListSessions(opts: {
   toDate?: string;
   limit?: number;
   cursor?: string;
-}): { sessions: ChatSession[]; nextCursor: string | null } {
+}): { sessions: AdminSessionRow[]; nextCursor: string | null } {
   const db = getDb();
   const limit = opts.limit ?? 20;
+
+  const messageCountSubquery = db
+    .select({
+      sessionId: messages.sessionId,
+      count: sql<number>`count(*)`.as('msg_count'),
+    })
+    .from(messages)
+    .groupBy(messages.sessionId)
+    .as('msg_counts');
 
   const conditions = [];
   if (opts.userId) {
@@ -132,8 +151,24 @@ export function adminListSessions(opts: {
   }
 
   const rows = db
-    .select()
+    .select({
+      id: chatSessions.id,
+      userId: chatSessions.userId,
+      title: chatSessions.title,
+      qoderSessionId: chatSessions.qoderSessionId,
+      status: chatSessions.status,
+      createdAt: chatSessions.createdAt,
+      updatedAt: chatSessions.updatedAt,
+      lastMessageAt: chatSessions.lastMessageAt,
+      username: users.username,
+      messageCount: sql<number>`coalesce(${messageCountSubquery.count}, 0)`.as('message_count'),
+    })
     .from(chatSessions)
+    .leftJoin(users, eq(chatSessions.userId, users.id))
+    .leftJoin(
+      messageCountSubquery,
+      eq(chatSessions.id, messageCountSubquery.sessionId),
+    )
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(chatSessions.lastMessageAt))
     .limit(limit + 1)
@@ -142,9 +177,22 @@ export function adminListSessions(opts: {
   const hasMore = rows.length > limit;
   const resultRows = hasMore ? rows.slice(0, limit) : rows;
 
+  const sessions: AdminSessionRow[] = resultRows.map((row) => ({
+    id: row.id,
+    userId: row.userId,
+    title: row.title,
+    qoderSessionId: row.qoderSessionId,
+    status: row.status,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    lastMessageAt: row.lastMessageAt,
+    username: row.username ?? '未知用户',
+    messageCount: row.messageCount ?? 0,
+  }));
+
   return {
-    sessions: resultRows,
-    nextCursor: hasMore ? resultRows[resultRows.length - 1]!.lastMessageAt : null,
+    sessions,
+    nextCursor: hasMore ? sessions[sessions.length - 1]!.lastMessageAt : null,
   };
 }
 

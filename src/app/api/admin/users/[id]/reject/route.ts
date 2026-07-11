@@ -9,6 +9,7 @@ import {
 import { successResponse } from '@/lib/response';
 import { rejectUser } from '@/modules/users/service';
 import { AppError } from '@/lib/errors';
+import { recordAudit } from '@/modules/audit/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,6 +36,20 @@ export const POST = withErrorHandler(
     }
 
     const rejectedUser = await rejectUser(id, reason);
+
+    try {
+      recordAudit({
+        actorId: user.id,
+        action: 'user.rejected',
+        resource: 'user',
+        resourceId: id,
+        requestId: request.headers.get('x-request-id') ?? undefined,
+        ipHash: request.headers.get('x-forwarded-for') ?? undefined,
+        changes: { reason },
+      });
+    } catch {
+      /* audit failure must not break main flow */
+    }
 
     return NextResponse.json(successResponse({ user: rejectedUser }));
   },

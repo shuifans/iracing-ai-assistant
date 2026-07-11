@@ -11,6 +11,7 @@ import { AppError } from '@/lib/errors';
 import { submitFileSource } from '@/modules/knowledge/service';
 import { ALLOWED_KNOWLEDGE_MIMES } from '@/modules/knowledge/schemas';
 import { env } from '@/config/env';
+import { recordAudit } from '@/modules/audit/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,6 +63,20 @@ export const POST = withErrorHandler(async (request: NextRequest): Promise<NextR
     mimeType: file.type,
     submittedBy: user.id,
   });
+
+  try {
+    recordAudit({
+      actorId: user.id,
+      action: 'knowledge.submitted',
+      resource: 'knowledge_source',
+      resourceId: result.sourceId,
+      requestId: request.headers.get('x-request-id') ?? undefined,
+      ipHash: request.headers.get('x-forwarded-for') ?? undefined,
+      changes: { type: 'file', originalName: file.name },
+    });
+  } catch {
+    /* audit failure must not break main flow */
+  }
 
   // 6. Return 201
   return NextResponse.json(successResponse(result), { status: 201 });

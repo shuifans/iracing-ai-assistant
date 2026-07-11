@@ -9,6 +9,7 @@ import {
 import { successResponse } from '@/lib/response';
 import { submitUrlSource } from '@/modules/knowledge/service';
 import { submitUrlSchema } from '@/modules/knowledge/schemas';
+import { recordAudit } from '@/modules/audit/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,20 @@ export const POST = withErrorHandler(async (request: NextRequest): Promise<NextR
     title: parsed.title,
     submittedBy: user.id,
   });
+
+  try {
+    recordAudit({
+      actorId: user.id,
+      action: 'knowledge.submitted',
+      resource: 'knowledge_source',
+      resourceId: result.sourceId,
+      requestId: request.headers.get('x-request-id') ?? undefined,
+      ipHash: request.headers.get('x-forwarded-for') ?? undefined,
+      changes: { type: 'url', url: parsed.url },
+    });
+  } catch {
+    /* audit failure must not break main flow */
+  }
 
   // 4. Return 201
   return NextResponse.json(successResponse(result), { status: 201 });
