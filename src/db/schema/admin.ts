@@ -23,9 +23,7 @@ export const usageEvents = sqliteTable(
     knowledgeHit: text('knowledge_hit'),
     createdAt: text('created_at').notNull(),
   },
-  (table) => [
-    index('idx_usage_events_created_type').on(table.createdAt, table.eventType),
-  ],
+  (table) => [index('idx_usage_events_created_type').on(table.createdAt, table.eventType)],
 );
 
 export type UsageEvent = typeof usageEvents.$inferSelect;
@@ -46,9 +44,7 @@ export const rateLimitConfigs = sqliteTable(
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
-  (table) => [
-    uniqueIndex('idx_rate_limit_configs_scope_key').on(table.scope, table.scopeKey),
-  ],
+  (table) => [uniqueIndex('idx_rate_limit_configs_scope_key').on(table.scope, table.scopeKey)],
 );
 
 export type RateLimitConfig = typeof rateLimitConfigs.$inferSelect;
@@ -116,9 +112,7 @@ export const systemSettings = sqliteTable(
     description: text('description'),
     updatedAt: text('updated_at').notNull(),
   },
-  (table) => [
-    uniqueIndex('idx_system_settings_key').on(table.key),
-  ],
+  (table) => [uniqueIndex('idx_system_settings_key').on(table.key)],
 );
 
 export type SystemSetting = typeof systemSettings.$inferSelect;

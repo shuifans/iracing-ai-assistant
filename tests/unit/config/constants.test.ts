@@ -74,8 +74,15 @@ describe('JOB_STATUSES', () => {
   it('covers all 9 statuses', () => {
     expect(JOB_STATUSES).toHaveLength(9);
     for (const s of [
-      'queued', 'extracting', 'cleaning', 'pending_review',
-      'publishing', 'published', 'rejected', 'failed', 'cancelled',
+      'queued',
+      'extracting',
+      'cleaning',
+      'pending_review',
+      'publishing',
+      'published',
+      'rejected',
+      'failed',
+      'cancelled',
     ]) {
       expect(JOB_STATUSES).toContain(s);
     }
@@ -119,7 +126,10 @@ describe('KNOWLEDGE_CATEGORIES', () => {
 
   it('track-technique has correct subcategories', () => {
     expect(KNOWLEDGE_CATEGORIES['track-technique']).toEqual([
-      'driving-line', 'braking', 'tire-management', 'suspension',
+      'driving-line',
+      'braking',
+      'tire-management',
+      'suspension',
     ]);
   });
 
@@ -129,7 +139,10 @@ describe('KNOWLEDGE_CATEGORIES', () => {
 
   it('basics has correct subcategories', () => {
     expect(KNOWLEDGE_CATEGORIES['basics']).toEqual([
-      'getting-started', 'buying-guide', 'series-and-league', 'hardware',
+      'getting-started',
+      'buying-guide',
+      'series-and-league',
+      'hardware',
     ]);
   });
 });

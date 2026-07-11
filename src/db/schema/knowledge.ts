@@ -92,9 +92,7 @@ export const knowledgeDrafts = sqliteTable(
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
-  (table) => [
-    uniqueIndex('idx_knowledge_drafts_job_id').on(table.jobId),
-  ],
+  (table) => [uniqueIndex('idx_knowledge_drafts_job_id').on(table.jobId)],
 );
 
 export type KnowledgeDraft = typeof knowledgeDrafts.$inferSelect;

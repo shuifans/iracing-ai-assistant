@@ -77,9 +77,10 @@ describeIf('Database migration', () => {
 
   // ── 3. __migrations table records applied migrations ───────────────────────
   it('records applied migrations in __migrations table', () => {
-    const rows = db
-      .prepare('SELECT name, applied_at FROM __migrations')
-      .all() as { name: string; applied_at: string }[];
+    const rows = db.prepare('SELECT name, applied_at FROM __migrations').all() as {
+      name: string;
+      applied_at: string;
+    }[];
 
     expect(rows.length).toBeGreaterThan(0);
     expect(rows[0].name).toBe('20260711000000_A_initial_schema.sql');
@@ -125,18 +126,14 @@ describeIf('Database migration', () => {
     ).run(userId);
 
     // Verify token exists
-    const before = db
-      .prepare('SELECT id FROM refresh_tokens WHERE id = ?')
-      .get('rt-1');
+    const before = db.prepare('SELECT id FROM refresh_tokens WHERE id = ?').get('rt-1');
     expect(before).toBeDefined();
 
     // Delete user
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 
     // Token should be gone
-    const after = db
-      .prepare('SELECT id FROM refresh_tokens WHERE id = ?')
-      .get('rt-1');
+    const after = db.prepare('SELECT id FROM refresh_tokens WHERE id = ?').get('rt-1');
     expect(after).toBeUndefined();
   });
 

@@ -41,9 +41,10 @@ export function runMigrations(dbPath: string): void {
 
     const runMigration = db.transaction(() => {
       db.exec(sql);
-      db.prepare(
-        'INSERT INTO __migrations (name, applied_at) VALUES (?, ?)',
-      ).run(file, new Date().toISOString());
+      db.prepare('INSERT INTO __migrations (name, applied_at) VALUES (?, ?)').run(
+        file,
+        new Date().toISOString(),
+      );
     });
 
     try {

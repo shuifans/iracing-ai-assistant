@@ -20,9 +20,9 @@ iRacing AI 助手整合官方文档、权威社区、专业教程等知识源，
 
 ### 目标用户
 
-| 用户类型 | 经验 | 核心诉求 |
-|---------|------|---------|
-| 模拟器新手 | 0～50 小时 | 入门流程、购车建议、赛事体系 |
+| 用户类型     | 经验         | 核心诉求                     |
+| ------------ | ------------ | ---------------------------- |
+| 模拟器新手   | 0～50 小时   | 入门流程、购车建议、赛事体系 |
 | 进阶提升玩家 | 50～500 小时 | 降低圈速、理解调校、赛道攻略 |
 
 ---
@@ -51,14 +51,14 @@ iRacing AI 助手整合官方文档、权威社区、专业教程等知识源，
 
 ### 技术栈
 
-| 层级 | 技术 |
-|------|------|
-| 语言 | TypeScript（全栈） |
-| 框架 | Next.js 14+ (App Router) |
-| 前端 | React + Tailwind CSS |
+| 层级      | 技术                        |
+| --------- | --------------------------- |
+| 语言      | TypeScript（全栈）          |
+| 框架      | Next.js 14+ (App Router)    |
+| 前端      | React + Tailwind CSS        |
 | Agent SDK | `@qoder-ai/qoder-agent-sdk` |
-| 数据库 | SQLite (better-sqlite3) |
-| 部署 | Docker + Nginx |
+| 数据库    | SQLite (better-sqlite3)     |
+| 部署      | Docker + Nginx              |
 
 ### Agent 架构
 
@@ -85,12 +85,14 @@ md-wiki/
 ### 知识来源
 
 **第一梯队（核心必采）：**
+
 - iRacing 官方 — Support KB、New Racer Guide、Sporting Code
 - r/iRacing Reddit — 全球最大 iRacing 社区
 - HiPole 嗨跑赛车 — 国内最系统中文入门教程
 - Coach Dave Academy — Setup 教学与遥测分析
 
 **第二梯队（重要补充）：**
+
 - Porsche × Max Benecke — 职业车手调校方法论
 - iRacing 官方论坛 — 赛道攻略、调校分享、新手问答
 
@@ -100,11 +102,11 @@ md-wiki/
 
 ## 部署
 
-| 项目 | 说明 |
-|------|------|
-| 服务器 | hkserver (8.218.234.193) |
-| 域名 | `ai.iracing.club` |
-| HTTPS | 复用 `iracing.club` SSL 证书 |
+| 项目   | 说明                         |
+| ------ | ---------------------------- |
+| 服务器 | hkserver (8.218.234.193)     |
+| 域名   | `ai.iracing.club`            |
+| HTTPS  | 复用 `iracing.club` SSL 证书 |
 
 ---
 

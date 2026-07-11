@@ -23,9 +23,7 @@ export const chatSessions = sqliteTable(
     updatedAt: text('updated_at').notNull(),
     lastMessageAt: text('last_message_at').notNull(),
   },
-  (table) => [
-    index('idx_chat_sessions_user_last_msg').on(table.userId, table.lastMessageAt),
-  ],
+  (table) => [index('idx_chat_sessions_user_last_msg').on(table.userId, table.lastMessageAt)],
 );
 
 export type ChatSession = typeof chatSessions.$inferSelect;
@@ -52,9 +50,7 @@ export const messages = sqliteTable(
     createdAt: text('created_at').notNull(),
     completedAt: text('completed_at'),
   },
-  (table) => [
-    index('idx_messages_session_created').on(table.sessionId, table.createdAt),
-  ],
+  (table) => [index('idx_messages_session_created').on(table.sessionId, table.createdAt)],
 );
 
 export type Message = typeof messages.$inferSelect;
@@ -62,23 +58,20 @@ export type NewMessage = typeof messages.$inferInsert;
 
 // ─── message_attachments ─────────────────────────────────────────────────────
 
-export const messageAttachments = sqliteTable(
-  'message_attachments',
-  {
-    id: text('id').primaryKey(),
-    messageId: text('message_id')
-      .notNull()
-      .references(() => messages.id, { onDelete: 'cascade' }),
-    kind: text('kind').notNull().default('image'),
-    relativePath: text('relative_path').notNull(),
-    mimeType: text('mime_type').notNull(),
-    sizeBytes: integer('size_bytes').notNull(),
-    sha256: text('sha256').notNull(),
-    width: integer('width'),
-    height: integer('height'),
-    createdAt: text('created_at').notNull(),
-  },
-);
+export const messageAttachments = sqliteTable('message_attachments', {
+  id: text('id').primaryKey(),
+  messageId: text('message_id')
+    .notNull()
+    .references(() => messages.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull().default('image'),
+  relativePath: text('relative_path').notNull(),
+  mimeType: text('mime_type').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  sha256: text('sha256').notNull(),
+  width: integer('width'),
+  height: integer('height'),
+  createdAt: text('created_at').notNull(),
+});
 
 export type MessageAttachment = typeof messageAttachments.$inferSelect;
 export type NewMessageAttachment = typeof messageAttachments.$inferInsert;
@@ -101,9 +94,7 @@ export const messageSources = sqliteTable(
     season: text('season'),
     retrievedAt: text('retrieved_at').notNull(),
   },
-  (table) => [
-    index('idx_message_sources_msg_ordinal').on(table.messageId, table.ordinal),
-  ],
+  (table) => [index('idx_message_sources_msg_ordinal').on(table.messageId, table.ordinal)],
 );
 
 export type MessageSource = typeof messageSources.$inferSelect;
@@ -126,9 +117,7 @@ export const messageFeedback = sqliteTable(
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
-  (table) => [
-    uniqueIndex('idx_message_feedback_msg_user').on(table.messageId, table.userId),
-  ],
+  (table) => [uniqueIndex('idx_message_feedback_msg_user').on(table.messageId, table.userId)],
 );
 
 export type MessageFeedback = typeof messageFeedback.$inferSelect;
