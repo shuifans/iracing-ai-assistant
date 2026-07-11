@@ -120,10 +120,10 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={() => removeAttachment(idx)}
-                className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-xs text-white"
+                className="absolute -right-2 -top-2 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-white"
                 aria-label="移除图片"
               >
-                ×
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-xs">×</span>
               </button>
             </div>
           ))}

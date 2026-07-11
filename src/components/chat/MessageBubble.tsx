@@ -39,9 +39,9 @@ function renderMarkdown(text: string): string {
   );
 
   // 标题 ### h3, ## h2, # h1
-  html = html.replace(/^### (.+)$/gm, '<h3 class="mt-4 mb-2 text-lg font-bold">$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2 class="mt-4 mb-2 text-xl font-bold">$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1 class="mt-4 mb-2 text-2xl font-bold">$1</h1>');
+  html = html.replace(/^### (.+)$/gm, '<h3 class="mt-4 mb-2 text-base font-bold sm:text-lg">$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2 class="mt-4 mb-2 text-lg font-bold sm:text-xl">$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1 class="mt-4 mb-2 text-xl font-bold sm:text-2xl">$1</h1>');
 
   // 粗体 **text** 和斜体 *text*
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -50,7 +50,7 @@ function renderMarkdown(text: string): string {
   // 链接 [text](url)
   html = html.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline hover:text-blue-800">$1</a>',
+    '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline hover:text-blue-800 break-words">$1</a>',
   );
 
   // 表格（简易实现：| a | b | 格式）
@@ -137,7 +137,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         {/* 消息内容 */}
         {isAssistant ? (
           <div
-            className="prose prose-sm max-w-none overflow-hidden break-words"
+            className="prose prose-sm max-w-none overflow-x-auto break-words"
             dangerouslySetInnerHTML={{ __html: renderedContent }}
           />
         ) : (

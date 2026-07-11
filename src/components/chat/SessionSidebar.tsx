@@ -176,7 +176,7 @@ export function SessionSidebar({ isOpen, onClose }: SessionSidebarProps) {
                 <button
                   type="button"
                   onClick={(e) => handleDeleteSession(e, session.id)}
-                  className="ml-2 flex min-h-[32px] min-w-[32px] flex-shrink-0 items-center justify-center rounded text-gray-500 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100 focus:opacity-100"
+                  className="ml-2 flex min-h-[44px] min-w-[44px] flex-shrink-0 items-center justify-center rounded text-gray-500 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100 focus:opacity-100"
                   aria-label="删除会话"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

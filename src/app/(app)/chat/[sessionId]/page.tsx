@@ -491,7 +491,7 @@ export default function SessionPage() {
       </div>
 
       {/* 输入框 */}
-      <div className="mx-auto w-full max-w-2xl">
+      <div className="mx-auto w-full max-w-2xl px-3 sm:px-0">
         <ChatInput
           sessionId={sessionId}
           isStreaming={isStreaming}
