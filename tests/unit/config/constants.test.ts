@@ -165,9 +165,9 @@ describe('FEEDBACK_RATINGS', () => {
 });
 
 describe('ERROR_CODES', () => {
-  it('covers exactly 21 error codes', () => {
+  it('covers exactly 22 error codes', () => {
     const keys = Object.keys(ERROR_CODES);
-    expect(keys).toHaveLength(21);
+    expect(keys).toHaveLength(22);
   });
 
   it('each error code has http status and code string', () => {

@@ -75,10 +75,11 @@ export type RateLimitScope = (typeof RATE_LIMIT_SCOPES)[number];
 export const FEEDBACK_RATINGS = ['up', 'down'] as const;
 export type FeedbackRating = (typeof FEEDBACK_RATINGS)[number];
 
-// 业务错误码（SPEC 14.6 完整覆盖 — 21 个）
+// 业务错误码（SPEC 14.6 完整覆盖 — 22 个）
 export const ERROR_CODES = {
   VALIDATION_ERROR: { http: 400, code: 'VALIDATION_ERROR' as const },
   UNAUTHENTICATED: { http: 401, code: 'UNAUTHENTICATED' as const },
+  INVALID_CREDENTIALS: { http: 401, code: 'INVALID_CREDENTIALS' as const },
   TOKEN_REUSED: { http: 401, code: 'TOKEN_REUSED' as const },
   FORBIDDEN: { http: 403, code: 'FORBIDDEN' as const },
   ACCOUNT_PENDING: { http: 403, code: 'ACCOUNT_PENDING' as const },
