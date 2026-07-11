@@ -40,6 +40,7 @@ export function createSession(userId: string, title?: string): ChatSession {
     userId,
     title: title ?? '新会话',
     status: 'active' as const,
+    qoderSessionId: null,
     createdAt: now,
     updatedAt: now,
     lastMessageAt: now,
@@ -58,7 +59,8 @@ export function getSession(sessionId: string, userId: string): ChatSession | nul
     .select()
     .from(chatSessions)
     .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)))
-    .limit(1);
+    .limit(1)
+    .all();
   return result[0] ?? null;
 }
 
@@ -82,7 +84,8 @@ export function listSessions(
     .from(chatSessions)
     .where(and(...conditions))
     .orderBy(desc(chatSessions.lastMessageAt))
-    .limit(limit + 1);
+    .limit(limit + 1)
+    .all();
 
   const hasMore = rows.length > limit;
   const resultRows = hasMore ? rows.slice(0, limit) : rows;
@@ -206,7 +209,8 @@ export function getMessagesBySession(sessionId: string): Message[] {
     .select()
     .from(messages)
     .where(eq(messages.sessionId, sessionId))
-    .orderBy(messages.createdAt);
+    .orderBy(messages.createdAt)
+    .all();
 }
 
 /**
@@ -214,7 +218,7 @@ export function getMessagesBySession(sessionId: string): Message[] {
  */
 export function getMessage(id: string): Message | null {
   const db = getDb();
-  const result = db.select().from(messages).where(eq(messages.id, id)).limit(1);
+  const result = db.select().from(messages).where(eq(messages.id, id)).limit(1).all();
   return result[0] ?? null;
 }
 
@@ -251,7 +255,7 @@ export function createAttachment(messageId: string, data: AttachmentData): Messa
  */
 export function getAttachment(id: string): MessageAttachment | null {
   const db = getDb();
-  const result = db.select().from(messageAttachments).where(eq(messageAttachments.id, id)).limit(1);
+  const result = db.select().from(messageAttachments).where(eq(messageAttachments.id, id)).limit(1).all();
   return result[0] ?? null;
 }
 
@@ -263,7 +267,8 @@ export function getAttachmentsByMessage(messageId: string): MessageAttachment[] 
   return db
     .select()
     .from(messageAttachments)
-    .where(eq(messageAttachments.messageId, messageId));
+    .where(eq(messageAttachments.messageId, messageId))
+    .all();
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +307,8 @@ export function getSourcesByMessage(messageId: string): MessageSource[] {
     .select()
     .from(messageSources)
     .where(eq(messageSources.messageId, messageId))
-    .orderBy(messageSources.ordinal);
+    .orderBy(messageSources.ordinal)
+    .all();
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +327,8 @@ export function upsertFeedback(messageId: string, userId: string, rating: string
     .select()
     .from(messageFeedback)
     .where(and(eq(messageFeedback.messageId, messageId), eq(messageFeedback.userId, userId)))
-    .limit(1);
+    .limit(1)
+    .all();
 
   if (existing.length > 0) {
     db
@@ -366,6 +373,7 @@ export function getFeedback(messageId: string, userId: string): { rating: string
     .select()
     .from(messageFeedback)
     .where(and(eq(messageFeedback.messageId, messageId), eq(messageFeedback.userId, userId)))
-    .limit(1);
+    .limit(1)
+    .all();
   return result[0] ? { rating: result[0].rating, reason: result[0].reason } : null;
 }
