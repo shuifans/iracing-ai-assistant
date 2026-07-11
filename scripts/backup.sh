@@ -10,10 +10,20 @@ BACKUP_DIR="${BACKUP_ROOT}/${DATE}"
 echo "[$(date)] Starting backup to ${BACKUP_DIR}"
 mkdir -p "${BACKUP_DIR}"
 
-# 1. SQLite online backup (does not lock the database)
-sqlite3 "${DATABASE_PATH}" ".backup '${BACKUP_DIR}/app.sqlite'"
+# 1. SQLite online backup via better-sqlite3 backup API (does not lock the database)
+node -e "
+const Database = require('better-sqlite3');
+const db = new Database('${DATABASE_PATH}', { readonly: true });
+db.backup('${BACKUP_DIR}/app.sqlite').then(() => {
+  db.close();
+  console.log('[$(date)] Database backed up');
+}).catch(err => {
+  db.close();
+  console.error('Backup failed:', err.message);
+  process.exit(1);
+});
+"
 sha256sum "${BACKUP_DIR}/app.sqlite" > "${BACKUP_DIR}/app.sqlite.sha256"
-echo "[$(date)] Database backed up"
 
 # 2. Wiki Git bundle
 if [ -d "${WIKI_ROOT}/.git" ]; then
