@@ -76,15 +76,13 @@ function isUrlAllowlisted(url: string): boolean {
  * - File tools (Read/Glob/Grep): path must be under wikiRoot
  * - Web tools  (WebFetch/WebSearch): target must match WEB_ALLOWLIST
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const preToolUseHook = async (input: any): Promise<any> => {
   const toolName: string = input?.tool_name ?? '';
 
   // File read tools — enforce wikiRoot boundary
   if (['Read', 'Glob', 'Grep'].includes(toolName)) {
     const toolInput = input?.tool_input ?? {};
-    const filePath: string =
-      toolInput.file_path ?? toolInput.path ?? toolInput.pattern ?? '';
+    const filePath: string = toolInput.file_path ?? toolInput.path ?? toolInput.pattern ?? '';
     const wikiRoot = path.resolve(input?.cwd ?? '/');
 
     if (filePath && !path.resolve(wikiRoot, filePath).startsWith(wikiRoot)) {
@@ -125,7 +123,6 @@ const preToolUseHook = async (input: any): Promise<any> => {
  * PostToolUse hook — extracts evidence JSON emitted by sub-agents so the
  * orchestration layer can persist it alongside the chat message.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const postToolUseHook = async (input: any): Promise<any> => {
   const toolOutput: string = input?.tool_output ?? '';
   if (!toolOutput) return {};
@@ -138,8 +135,7 @@ const postToolUseHook = async (input: any): Promise<any> => {
     if (!Array.isArray(parsed)) return {};
 
     const evidence = parsed.filter(
-      (e: Record<string, unknown>) =>
-        typeof e === 'object' && e !== null && 'evidenceId' in e,
+      (e: Record<string, unknown>) => typeof e === 'object' && e !== null && 'evidenceId' in e,
     );
     if (evidence.length === 0) return {};
 
@@ -239,12 +235,7 @@ export function createCleaningQuery(
       description: 'Clean raw extracted text into structured Markdown for the Wiki',
       prompt: KNOWLEDGE_CLEANER_PROMPT,
       tools: ['Read', 'Write'],
-      disallowedTools: [
-        ...DISALLOWED_TOOLS,
-        'Agent',
-        'WebSearch',
-        'WebFetch',
-      ],
+      disallowedTools: [...DISALLOWED_TOOLS, 'Agent', 'WebSearch', 'WebFetch'],
       maxTurns: 8,
       effort: 'high',
     },

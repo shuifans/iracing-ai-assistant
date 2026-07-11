@@ -172,9 +172,7 @@ export default function SessionPage() {
         }
         setError(errorMsg);
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantPlaceholder.id ? { ...m, status: 'failed' } : m,
-          ),
+          prev.map((m) => (m.id === assistantPlaceholder.id ? { ...m, status: 'failed' } : m)),
         );
         setIsStreaming(false);
         return;
@@ -210,9 +208,7 @@ export default function SessionPage() {
                 streamMessageIdRef.current = assistantMessageId;
                 setMessages((prev) =>
                   prev.map((m) =>
-                    m.id === assistantPlaceholder.id
-                      ? { ...m, id: assistantMessageId }
-                      : m,
+                    m.id === assistantPlaceholder.id ? { ...m, id: assistantMessageId } : m,
                   ),
                 );
               } else if (currentEventType === 'delta') {
@@ -283,9 +279,7 @@ export default function SessionPage() {
       if ((err as Error).name !== 'AbortError') {
         setError('网络异常，请重试');
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantPlaceholder.id ? { ...m, status: 'failed' } : m,
-          ),
+          prev.map((m) => (m.id === assistantPlaceholder.id ? { ...m, status: 'failed' } : m)),
         );
       } else {
         setMessages((prev) =>
@@ -345,9 +339,7 @@ export default function SessionPage() {
 
       if (!res.ok || !res.body) {
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === retryPlaceholder.id ? { ...m, status: 'failed' } : m,
-          ),
+          prev.map((m) => (m.id === retryPlaceholder.id ? { ...m, status: 'failed' } : m)),
         );
         setIsStreaming(false);
         return;
@@ -379,9 +371,7 @@ export default function SessionPage() {
               if (currentEventType === 'start') {
                 newMessageId = event.messageId;
                 setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === retryPlaceholder.id ? { ...m, id: newMessageId } : m,
-                  ),
+                  prev.map((m) => (m.id === retryPlaceholder.id ? { ...m, id: newMessageId } : m)),
                 );
               } else if (currentEventType === 'delta') {
                 const deltaEvent = event as SSEDeltaEvent;
@@ -439,9 +429,7 @@ export default function SessionPage() {
       if ((err as Error).name !== 'AbortError') {
         setError('网络异常，请重试');
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === retryPlaceholder.id ? { ...m, status: 'failed' } : m,
-          ),
+          prev.map((m) => (m.id === retryPlaceholder.id ? { ...m, status: 'failed' } : m)),
         );
       }
     } finally {

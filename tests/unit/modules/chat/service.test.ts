@@ -32,7 +32,14 @@ vi.mock('@/lib/datetime', () => ({
 }));
 
 // Import after mocks
-import { getSession, createMessage, updateMessage, getMessagesBySession, updateSessionTitle, getAttachment } from '@/modules/chat/repository';
+import {
+  getSession,
+  createMessage,
+  updateMessage,
+  getMessagesBySession,
+  updateSessionTitle,
+  getAttachment,
+} from '@/modules/chat/repository';
 import { createChatQuery } from '@/modules/agent/client';
 import { streamChatMessage, stopMessage } from '@/modules/chat/service';
 
@@ -66,7 +73,9 @@ const mockSession = {
   lastMessageAt: '2026-07-12T00:00:00.000Z',
 };
 
-function makeMockMessage(role: string, status: string, id?: string) {
+type MessageStatus = 'pending' | 'streaming' | 'complete' | 'interrupted' | 'failed';
+
+function makeMockMessage(role: string, status: MessageStatus, id?: string) {
   return {
     id: id ?? `msg-${role}-${Math.random().toString(36).slice(2, 8)}`,
     sessionId: 'sess-001',
@@ -121,9 +130,7 @@ describe('streamChatMessage', () => {
     const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
     const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');
 
-    mockCreateMessage
-      .mockReturnValueOnce(userMsg)
-      .mockReturnValueOnce(assistantMsg);
+    mockCreateMessage.mockReturnValueOnce(userMsg).mockReturnValueOnce(assistantMsg);
 
     // Mock SDK stream with text delta and result
     const mockStream = createMockSDKStream([
@@ -179,9 +186,7 @@ describe('streamChatMessage', () => {
     const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
     const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');
 
-    mockCreateMessage
-      .mockReturnValueOnce(userMsg)
-      .mockReturnValueOnce(assistantMsg);
+    mockCreateMessage.mockReturnValueOnce(userMsg).mockReturnValueOnce(assistantMsg);
 
     const mockStream = createMockSDKStream([
       {
@@ -212,20 +217,18 @@ describe('streamChatMessage', () => {
     const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
     const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');
 
-    mockCreateMessage
-      .mockReturnValueOnce(userMsg)
-      .mockReturnValueOnce(assistantMsg);
+    mockCreateMessage.mockReturnValueOnce(userMsg).mockReturnValueOnce(assistantMsg);
 
     // Only one assistant message (the current one being created)
-    mockGetMessagesBySession.mockReturnValue([
-      userMsg,
-      { ...assistantMsg, status: 'complete' },
-    ]);
+    mockGetMessagesBySession.mockReturnValue([userMsg, { ...assistantMsg, status: 'complete' }]);
 
     const mockStream = createMockSDKStream([
       {
         type: 'stream_event',
-        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'First response' } },
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: 'First response' },
+        },
         session_id: 'qoder-sess-001',
       },
       {
@@ -252,9 +255,7 @@ describe('streamChatMessage', () => {
     const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
     const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');
 
-    mockCreateMessage
-      .mockReturnValueOnce(userMsg)
-      .mockReturnValueOnce(assistantMsg);
+    mockCreateMessage.mockReturnValueOnce(userMsg).mockReturnValueOnce(assistantMsg);
 
     const mockStream = createMockSDKStream([
       {
@@ -285,9 +286,7 @@ describe('streamChatMessage', () => {
     const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
     const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');
 
-    mockCreateMessage
-      .mockReturnValueOnce(userMsg)
-      .mockReturnValueOnce(assistantMsg);
+    mockCreateMessage.mockReturnValueOnce(userMsg).mockReturnValueOnce(assistantMsg);
 
     // Create a stream that throws AbortError
     const abortError = new Error('Aborted');

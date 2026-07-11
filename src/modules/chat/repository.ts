@@ -102,8 +102,7 @@ export function listSessions(
 export function updateSessionTitle(sessionId: string, title: string): void {
   const db = getDb();
   const now = utcNow();
-  db
-    .update(chatSessions)
+  db.update(chatSessions)
     .set({ title, updatedAt: now })
     .where(eq(chatSessions.id, sessionId))
     .run();
@@ -114,8 +113,7 @@ export function updateSessionTitle(sessionId: string, title: string): void {
  */
 export function deleteSession(sessionId: string, userId: string): void {
   const db = getDb();
-  db
-    .delete(chatSessions)
+  db.delete(chatSessions)
     .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)))
     .run();
 }
@@ -126,8 +124,7 @@ export function deleteSession(sessionId: string, userId: string): void {
 export function updateQoderSessionId(sessionId: string, qoderSessionId: string): void {
   const db = getDb();
   const now = utcNow();
-  db
-    .update(chatSessions)
+  db.update(chatSessions)
     .set({ qoderSessionId, updatedAt: now })
     .where(eq(chatSessions.id, sessionId))
     .run();
@@ -139,8 +136,7 @@ export function updateQoderSessionId(sessionId: string, qoderSessionId: string):
 export function updateSessionLastMessageAt(sessionId: string): void {
   const db = getDb();
   const now = utcNow();
-  db
-    .update(chatSessions)
+  db.update(chatSessions)
     .set({ lastMessageAt: now, updatedAt: now })
     .where(eq(chatSessions.id, sessionId))
     .run();
@@ -167,7 +163,8 @@ export function createMessage(
     id,
     sessionId,
     role: role as 'user' | 'assistant' | 'system',
-    status: (status ?? 'pending') as 'pending' | 'streaming' | 'complete' | 'interrupted' | 'failed',
+    status: (status ?? 'pending') as
+      'pending' | 'streaming' | 'complete' | 'interrupted' | 'failed',
     content: content ?? '',
     replyToMessageId: replyToMessageId ?? null,
     createdAt: now,
@@ -194,7 +191,19 @@ export function createMessage(
  */
 export function updateMessage(
   id: string,
-  updates: Partial<Pick<Message, 'content' | 'status' | 'errorCode' | 'tokenInput' | 'tokenOutput' | 'costMicrousd' | 'durationMs' | 'completedAt'>>,
+  updates: Partial<
+    Pick<
+      Message,
+      | 'content'
+      | 'status'
+      | 'errorCode'
+      | 'tokenInput'
+      | 'tokenOutput'
+      | 'costMicrousd'
+      | 'durationMs'
+      | 'completedAt'
+    >
+  >,
 ): void {
   const db = getDb();
   db.update(messages).set(updates).where(eq(messages.id, id)).run();
@@ -255,7 +264,12 @@ export function createAttachment(messageId: string, data: AttachmentData): Messa
  */
 export function getAttachment(id: string): MessageAttachment | null {
   const db = getDb();
-  const result = db.select().from(messageAttachments).where(eq(messageAttachments.id, id)).limit(1).all();
+  const result = db
+    .select()
+    .from(messageAttachments)
+    .where(eq(messageAttachments.id, id))
+    .limit(1)
+    .all();
   return result[0] ?? null;
 }
 
@@ -278,7 +292,11 @@ export function getAttachmentsByMessage(messageId: string): MessageAttachment[] 
 /**
  * Create a source citation for a message.
  */
-export function createMessageSource(messageId: string, ordinal: number, source: SourceData): MessageSource {
+export function createMessageSource(
+  messageId: string,
+  ordinal: number,
+  source: SourceData,
+): MessageSource {
   const db = getDb();
   const id = generateId();
   const newSource = {
@@ -318,7 +336,12 @@ export function getSourcesByMessage(messageId: string): MessageSource[] {
 /**
  * Create or update feedback for a message.
  */
-export function upsertFeedback(messageId: string, userId: string, rating: string, reason?: string): void {
+export function upsertFeedback(
+  messageId: string,
+  userId: string,
+  rating: string,
+  reason?: string,
+): void {
   const db = getDb();
   const now = utcNow();
 
@@ -331,15 +354,13 @@ export function upsertFeedback(messageId: string, userId: string, rating: string
     .all();
 
   if (existing.length > 0) {
-    db
-      .update(messageFeedback)
+    db.update(messageFeedback)
       .set({ rating: rating as 'up' | 'down', reason: reason ?? null, updatedAt: now })
       .where(eq(messageFeedback.id, existing[0]!.id))
       .run();
   } else {
     const id = generateId();
-    db
-      .insert(messageFeedback)
+    db.insert(messageFeedback)
       .values({
         id,
         messageId,
@@ -358,8 +379,7 @@ export function upsertFeedback(messageId: string, userId: string, rating: string
  */
 export function deleteFeedback(messageId: string, userId: string): void {
   const db = getDb();
-  db
-    .delete(messageFeedback)
+  db.delete(messageFeedback)
     .where(and(eq(messageFeedback.messageId, messageId), eq(messageFeedback.userId, userId)))
     .run();
 }
@@ -367,7 +387,10 @@ export function deleteFeedback(messageId: string, userId: string): void {
 /**
  * Get feedback for a message by user.
  */
-export function getFeedback(messageId: string, userId: string): { rating: string; reason?: string | null } | null {
+export function getFeedback(
+  messageId: string,
+  userId: string,
+): { rating: string; reason?: string | null } | null {
   const db = getDb();
   const result = db
     .select()

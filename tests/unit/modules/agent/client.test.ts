@@ -36,9 +36,7 @@ vi.mock('@qoder-ai/qoder-agent-sdk', async () => {
 });
 
 // After mock setup, import the module under test
-const { createChatQuery, createCleaningQuery } = await import(
-  '@/modules/agent/client'
-);
+const { createChatQuery, createCleaningQuery } = await import('@/modules/agent/client');
 const { query: rawQuery } = await import('@qoder-ai/qoder-agent-sdk');
 const mockQuery = rawQuery as unknown as Mock;
 

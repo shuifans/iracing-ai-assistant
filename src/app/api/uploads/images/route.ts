@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { withErrorHandler, requireAuth, requireActiveUser, validateOrigin } from '@/modules/auth/middleware';
+import {
+  withErrorHandler,
+  requireAuth,
+  requireActiveUser,
+  validateOrigin,
+} from '@/modules/auth/middleware';
 import { successResponse } from '@/lib/response';
 import { createAttachment } from '@/modules/chat/repository';
 import { generateId } from '@/lib/uuid';
@@ -108,7 +113,10 @@ export const POST = withErrorHandler(async (request: NextRequest): Promise<NextR
 /**
  * Parse image dimensions from buffer header (supports JPEG, PNG, WebP).
  */
-function getImageDimensions(buffer: Buffer, mimeType: string): { width: number; height: number } | null {
+function getImageDimensions(
+  buffer: Buffer,
+  mimeType: string,
+): { width: number; height: number } | null {
   try {
     if (mimeType === 'image/png' && buffer.length >= 24) {
       // PNG: IHDR chunk at offset 16 (width) and 20 (height), 4 bytes each, big-endian
@@ -163,8 +171,10 @@ function getImageDimensions(buffer: Buffer, mimeType: string): { width: number; 
         }
         if (chunkType === 'VP8X' && buffer.length >= 30) {
           // Extended: width (24-bit LE) at offset 24, height (24-bit LE) at offset 27
-          const width = 1 + (buffer.readUInt8(24) | (buffer.readUInt8(25) << 8) | (buffer.readUInt8(26) << 16));
-          const height = 1 + (buffer.readUInt8(27) | (buffer.readUInt8(28) << 8) | (buffer.readUInt8(29) << 16));
+          const width =
+            1 + (buffer.readUInt8(24) | (buffer.readUInt8(25) << 8) | (buffer.readUInt8(26) << 16));
+          const height =
+            1 + (buffer.readUInt8(27) | (buffer.readUInt8(28) << 8) | (buffer.readUInt8(29) << 16));
           return { width, height };
         }
       }

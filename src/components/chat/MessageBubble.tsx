@@ -131,9 +131,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
         className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 ${
-          isUser
-            ? 'bg-blue-600 text-white'
-            : 'border border-gray-200 bg-white text-gray-900'
+          isUser ? 'bg-blue-600 text-white' : 'border border-gray-200 bg-white text-gray-900'
         }`}
       >
         {/* 消息内容 */}

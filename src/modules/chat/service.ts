@@ -89,7 +89,14 @@ function makeSourceEvent(
   requestId: string,
   sessionId: string,
   messageId: string,
-  source: { id: string; ordinal: number; type: string; title: string; wikiPath?: string; url?: string },
+  source: {
+    id: string;
+    ordinal: number;
+    type: string;
+    title: string;
+    wikiPath?: string;
+    url?: string;
+  },
 ): SSESourceEvent {
   return { requestId, sessionId, messageId, timestamp: utcNow(), source };
 }
@@ -102,7 +109,15 @@ function makeUsageEvent(
   outputTokens: number,
   durationMs: number,
 ): SSEUsageEvent {
-  return { requestId, sessionId, messageId, timestamp: utcNow(), inputTokens, outputTokens, durationMs };
+  return {
+    requestId,
+    sessionId,
+    messageId,
+    timestamp: utcNow(),
+    inputTokens,
+    outputTokens,
+    durationMs,
+  };
 }
 
 function makeDoneEvent(
@@ -172,7 +187,12 @@ export async function* streamChatMessage(
   let seq = 0;
   const evidenceList: Evidence[] = [];
   let qoderSessionId: string | undefined;
-  let usageData: { inputTokens: number; outputTokens: number; costMicrousd: number; durationMs: number } | null = null;
+  let usageData: {
+    inputTokens: number;
+    outputTokens: number;
+    costMicrousd: number;
+    durationMs: number;
+  } | null = null;
   let grounding: 'grounded' | 'inferred' | 'insufficient' = 'inferred';
   let completed = false;
   const startTime = Date.now();
@@ -232,10 +252,13 @@ export async function* streamChatMessage(
         // Extract evidence from tool_result blocks (from PostToolUse hook)
         for (const block of assistantMsg.content) {
           if (block.type === 'tool_result') {
-            const resultBlock = block as { content?: string | Array<{ type: string; text?: string }> };
-            const rawContent = typeof resultBlock.content === 'string'
-              ? resultBlock.content
-              : resultBlock.content?.map((c) => c.text ?? '').join('');
+            const resultBlock = block as {
+              content?: string | Array<{ type: string; text?: string }>;
+            };
+            const rawContent =
+              typeof resultBlock.content === 'string'
+                ? resultBlock.content
+                : resultBlock.content?.map((c) => c.text ?? '').join('');
             if (rawContent) {
               try {
                 const parsed = JSON.parse(rawContent);
@@ -263,19 +286,27 @@ export async function* streamChatMessage(
             inputTokens: usage.input_tokens,
             outputTokens: usage.output_tokens,
             costMicrousd: Math.round((msg.total_cost_usd ?? 0) * 1_000_000),
-            durationMs: msg.duration_ms ?? (Date.now() - startTime),
+            durationMs: msg.duration_ms ?? Date.now() - startTime,
           };
           grounding = evidenceList.length > 0 ? 'grounded' : 'inferred';
           completed = true;
         } else {
           // Error result — mark as failed
-          const errorMsg = 'errors' in msg ? (msg.errors?.join('; ') ?? 'Query failed') : 'Query failed';
+          const errorMsg =
+            'errors' in msg ? (msg.errors?.join('; ') ?? 'Query failed') : 'Query failed';
           updateMessage(assistantMsgId, {
             status: 'failed',
             content: accumulatedContent || '',
             errorCode: msg.subtype,
           });
-          yield makeErrorEvent(requestId, sessionId, assistantMsgId, 'AGENT_UNAVAILABLE', errorMsg, true);
+          yield makeErrorEvent(
+            requestId,
+            sessionId,
+            assistantMsgId,
+            'AGENT_UNAVAILABLE',
+            errorMsg,
+            true,
+          );
           return;
         }
       }
@@ -364,7 +395,14 @@ export async function* streamChatMessage(
 
     if (!isAbort) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-      yield makeErrorEvent(requestId, sessionId, assistantMsgId, 'AGENT_UNAVAILABLE', errorMsg, true);
+      yield makeErrorEvent(
+        requestId,
+        sessionId,
+        assistantMsgId,
+        'AGENT_UNAVAILABLE',
+        errorMsg,
+        true,
+      );
     } else if (accumulatedContent) {
       // Interrupted but has content — yield done with interrupted status
       yield makeDoneEvent(requestId, sessionId, assistantMsgId, 'interrupted', 'inferred');

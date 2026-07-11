@@ -59,12 +59,9 @@ describe('WEB_RESEARCH_PROMPT', () => {
     'newsroom.porsche.com',
   ];
 
-  it.each(ALLOWLISTED_DOMAINS)(
-    'includes allowlisted domain: %s',
-    (domain) => {
-      expect(WEB_RESEARCH_PROMPT).toContain(domain);
-    },
-  );
+  it.each(ALLOWLISTED_DOMAINS)('includes allowlisted domain: %s', (domain) => {
+    expect(WEB_RESEARCH_PROMPT).toContain(domain);
+  });
 
   it('mentions evidence', () => {
     expect(WEB_RESEARCH_PROMPT).toContain('evidence');

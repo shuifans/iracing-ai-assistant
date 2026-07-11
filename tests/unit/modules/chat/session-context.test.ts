@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { loadHistoryContext, generateSessionTitle, MAX_TURNS, MAX_HISTORY_CHARS } from '@/modules/chat/session-context';
+import {
+  loadHistoryContext,
+  generateSessionTitle,
+  MAX_TURNS,
+  MAX_HISTORY_CHARS,
+} from '@/modules/chat/session-context';
 
 // Mock the repository module
 vi.mock('@/modules/chat/repository', () => ({
@@ -90,7 +95,9 @@ describe('loadHistoryContext', () => {
     mockGetMessages.mockReturnValue(messages);
 
     const result = loadHistoryContext('sess-001');
-    const lines = result.split('\n').filter((l) => l.startsWith('User:') || l.startsWith('Assistant:'));
+    const lines = result
+      .split('\n')
+      .filter((l) => l.startsWith('User:') || l.startsWith('Assistant:'));
 
     // Should have at most MAX_TURNS * 2 = 40 messages
     expect(lines.length).toBeLessThanOrEqual(MAX_TURNS * 2);
@@ -124,7 +131,9 @@ describe('loadHistoryContext', () => {
     mockGetMessages.mockReturnValue(messages);
 
     const result = loadHistoryContext('sess-001');
-    const lines = result.split('\n').filter((l) => l.startsWith('User:') || l.startsWith('Assistant:'));
+    const lines = result
+      .split('\n')
+      .filter((l) => l.startsWith('User:') || l.startsWith('Assistant:'));
 
     expect(lines.length).toBe(MAX_TURNS * 2);
   });
@@ -140,7 +149,8 @@ describe('generateSessionTitle', () => {
   });
 
   it('truncates to 30 characters with ellipsis', () => {
-    const longText = '这是一个非常非常非常长的标题内容，用来测试截断功能是否在超过三十个字符时正常工作';
+    const longText =
+      '这是一个非常非常非常长的标题内容，用来测试截断功能是否在超过三十个字符时正常工作';
     const result = generateSessionTitle(longText);
     // Should be at most 33 chars (30 + "...")
     expect(Array.from(result).length).toBeLessThanOrEqual(33);
@@ -167,11 +177,15 @@ describe('generateSessionTitle', () => {
   });
 
   it('strips inline code (`code`)', () => {
-    expect(generateSessionTitle('Use `trailBraking()` function')).toBe('Use trailBraking() function');
+    expect(generateSessionTitle('Use `trailBraking()` function')).toBe(
+      'Use trailBraking() function',
+    );
   });
 
   it('strips links [text](url)', () => {
-    expect(generateSessionTitle('See [this guide](https://example.com) for details')).toBe('See this guide for details');
+    expect(generateSessionTitle('See [this guide](https://example.com) for details')).toBe(
+      'See this guide for details',
+    );
   });
 
   it('strips blockquotes (>)', () => {

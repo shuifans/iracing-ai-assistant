@@ -20,9 +20,9 @@ export function ChatInput({
 }: ChatInputProps) {
   const [content, setContent] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [attachments, setAttachments] = useState<
-    { id: string; preview: string; name: string }[]
-  >([]);
+  const [attachments, setAttachments] = useState<{ id: string; preview: string; name: string }[]>(
+    [],
+  );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -115,11 +115,8 @@ export function ChatInput({
         <div className="mb-2 flex flex-wrap gap-2">
           {attachments.map((att, idx) => (
             <div key={att.id} className="relative">
-              <img
-                src={att.preview}
-                alt={att.name}
-                className="h-16 w-16 rounded-lg object-cover"
-              />
+              {/* eslint-disable-next-line @next/next/no-img-element -- blob URL preview, cannot use next/image */}
+              <img src={att.preview} alt={att.name} className="h-16 w-16 rounded-lg object-cover" />
               <button
                 type="button"
                 onClick={() => removeAttachment(idx)}

@@ -34,8 +34,27 @@ export function SessionSidebar({ isOpen, onClose }: SessionSidebarProps) {
   }, []);
 
   useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await authFetch('/api/chat/sessions?limit=50');
+        if (!cancelled && res.ok) {
+          const json = (await res.json()) as {
+            data: { sessions: ChatSessionSummary[] };
+          };
+          setSessions(json.data.sessions);
+        }
+      } catch {
+        // 静默失败
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleNewSession() {
     try {
@@ -79,11 +98,7 @@ export function SessionSidebar({ isOpen, onClose }: SessionSidebarProps) {
     <>
       {/* 遮罩层 */}
       {isOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/30 md:hidden"
-          onClick={onClose}
-          aria-hidden
-        />
+        <div className="fixed inset-0 z-40 bg-black/30 md:hidden" onClick={onClose} aria-hidden />
       )}
 
       {/* 侧边栏 */}
@@ -121,7 +136,12 @@ export function SessionSidebar({ isOpen, onClose }: SessionSidebarProps) {
             className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-600 px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
             </svg>
             新建会话
           </button>

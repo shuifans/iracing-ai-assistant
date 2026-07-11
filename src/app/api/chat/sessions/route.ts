@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { withErrorHandler, requireAuth, requireActiveUser, validateOrigin } from '@/modules/auth/middleware';
+import {
+  withErrorHandler,
+  requireAuth,
+  requireActiveUser,
+  validateOrigin,
+} from '@/modules/auth/middleware';
 import { successResponse } from '@/lib/response';
 import { createSession, listSessions } from '@/modules/chat/repository';
 

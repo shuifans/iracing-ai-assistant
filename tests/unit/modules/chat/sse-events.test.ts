@@ -29,9 +29,7 @@ describe('formatSSEEvent', () => {
   it('outputs correct SSE wire format (event: xxx\\ndata: {...}\\n\\n)', () => {
     const start: SSEStartEvent = { ...BASE };
     const output = formatSSEEvent('start', start);
-    expect(output).toBe(
-      `event: start\ndata: ${JSON.stringify(start)}\n\n`,
-    );
+    expect(output).toBe(`event: start\ndata: ${JSON.stringify(start)}\n\n`);
   });
 
   it('serializes a delta event with seq field', () => {

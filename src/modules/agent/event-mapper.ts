@@ -34,10 +34,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 /** Maps SDK error sub-types to business error codes and retryable flags. */
-const ERROR_MAP: Record<
-  string,
-  { code: string; message: string; retryable: boolean }
-> = {
+const ERROR_MAP: Record<string, { code: string; message: string; retryable: boolean }> = {
   error_overloaded: {
     code: 'AGENT_OVERLOADED',
     message: 'AI 服务当前负载较高，请稍后重试',
@@ -118,7 +115,6 @@ export class SSEEventMapper {
    * One SDK message may produce multiple SSE events (e.g. result/success
    * produces both a usage and a done event).
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   processMessage(sdkMessage: any): SSEEvent[] {
     const type: string = sdkMessage?.type ?? '';
 
@@ -160,7 +156,6 @@ export class SSEEventMapper {
   // Private — system messages
   // ---------------------------------------------------------------------------
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private processSystem(msg: any): SSEEvent[] {
     const subtype: string = msg?.subtype ?? '';
 
@@ -186,7 +181,6 @@ export class SSEEventMapper {
   // Private — stream_event (partial tokens)
   // ---------------------------------------------------------------------------
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private processStreamEvent(msg: any): SSEEvent[] {
     const event: string = msg?.event ?? '';
 
@@ -195,6 +189,7 @@ export class SSEEventMapper {
         const text: string = msg?.delta ?? msg?.text ?? '';
         if (!text) return [];
 
+        this.contentParts.push(text);
         this.seq += 1;
         const delta: SSEDeltaEvent = {
           ...this.base,
@@ -222,12 +217,10 @@ export class SSEEventMapper {
   // Private — assistant (complete message blocks)
   // ---------------------------------------------------------------------------
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private processAssistant(msg: any): SSEEvent[] {
     const content: unknown[] = msg?.content ?? [];
 
     for (const block of content) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const b = block as any;
       const blockType: string = b?.type ?? '';
 
@@ -253,7 +246,6 @@ export class SSEEventMapper {
   // Private — result (terminal)
   // ---------------------------------------------------------------------------
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private processResult(msg: any): SSEEvent[] {
     const subtype: string = msg?.subtype ?? '';
 
@@ -269,7 +261,6 @@ export class SSEEventMapper {
     return [];
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private buildSuccessEvents(msg: any): SSEEvent[] {
     const usage: SSEUsageEvent = {
       ...this.base,
@@ -293,7 +284,6 @@ export class SSEEventMapper {
     return [...sourceEvents, usage, done];
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private buildErrorEvent(msg: any): SSEEvent[] {
     const subtype: string = msg?.subtype ?? '';
     const mapped = ERROR_MAP[subtype] ?? DEFAULT_ERROR;
@@ -338,7 +328,6 @@ export class SSEEventMapper {
    * Falls back to 'inferred' when evidence is present but not conclusive,
    * or 'insufficient' when there is no content at all.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private resolveGrounding(msg: any): 'grounded' | 'inferred' | 'insufficient' {
     // If the SDK result carries an explicit grounding field, use it
     const explicit: string | undefined = msg?.grounding;

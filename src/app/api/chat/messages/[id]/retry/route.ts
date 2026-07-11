@@ -34,9 +34,7 @@ export async function POST(
           }
         } catch (err) {
           const errorData = createSSEErrorData(err);
-          controller.enqueue(
-            encoder.encode(formatSSEEvent('error', errorData)),
-          );
+          controller.enqueue(encoder.encode(formatSSEEvent('error', errorData)));
         } finally {
           controller.close();
         }

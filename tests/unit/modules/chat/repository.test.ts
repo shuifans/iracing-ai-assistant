@@ -15,6 +15,7 @@ vi.mock('@/lib/datetime', () => ({
 
 // Create mock DB with chainable methods
 const mockRun = vi.fn();
+const mockAll = vi.fn();
 const mockReturning = vi.fn();
 const mockLimit = vi.fn();
 const mockOrderBy = vi.fn();
@@ -28,12 +29,13 @@ const mockDelete = vi.fn();
 const mockSelect = vi.fn();
 
 function setupMockDb() {
-  // Chain: select().from().where().limit()
+  // Chain: select().from().where().limit() / .orderBy()
   mockSelect.mockReturnValue({ from: mockFrom });
   mockFrom.mockReturnValue({ where: mockWhere });
   mockWhere.mockReturnValue({ limit: mockLimit, orderBy: mockOrderBy, run: mockRun });
-  mockLimit.mockReturnValue([]);
-  mockOrderBy.mockReturnValue({ limit: mockLimit });
+  mockLimit.mockReturnValue({ all: mockAll, run: mockRun });
+  mockAll.mockReturnValue([]);
+  mockOrderBy.mockReturnValue({ limit: mockLimit, all: mockAll });
 
   // Chain: insert().values().run()
   mockInsert.mockReturnValue({ values: mockValues });
@@ -100,7 +102,7 @@ describe('repository', () => {
         lastMessageAt: '2026-07-12T00:00:00.000Z',
         qoderSessionId: null,
       };
-      mockLimit.mockReturnValue([mockSession]);
+      mockAll.mockReturnValue([mockSession]);
 
       const { getSession } = await import('@/modules/chat/repository');
       const result = getSession('sess-001', 'user-001');
@@ -109,7 +111,7 @@ describe('repository', () => {
     });
 
     it('returns null when session not found', async () => {
-      mockLimit.mockReturnValue([]);
+      mockAll.mockReturnValue([]);
 
       const { getSession } = await import('@/modules/chat/repository');
       const result = getSession('nonexistent', 'user-001');
@@ -130,7 +132,7 @@ describe('repository', () => {
         lastMessageAt: new Date(Date.now() - i * 1000).toISOString(),
         qoderSessionId: null,
       }));
-      mockLimit.mockReturnValue(sessions);
+      mockAll.mockReturnValue(sessions);
 
       const { listSessions } = await import('@/modules/chat/repository');
       const result = listSessions('user-001', 10);
@@ -150,7 +152,7 @@ describe('repository', () => {
         lastMessageAt: new Date(Date.now() - i * 1000).toISOString(),
         qoderSessionId: null,
       }));
-      mockLimit.mockReturnValue(sessions);
+      mockAll.mockReturnValue(sessions);
 
       const { listSessions } = await import('@/modules/chat/repository');
       const result = listSessions('user-001', 10);
@@ -204,7 +206,7 @@ describe('repository', () => {
 
   describe('upsertFeedback', () => {
     it('creates new feedback when none exists', async () => {
-      mockLimit.mockReturnValue([]); // No existing feedback
+      mockAll.mockReturnValue([]); // No existing feedback
 
       const { upsertFeedback } = await import('@/modules/chat/repository');
       upsertFeedback('msg-001', 'user-001', 'up', 'Very helpful');
@@ -213,7 +215,7 @@ describe('repository', () => {
     });
 
     it('updates existing feedback', async () => {
-      mockLimit.mockReturnValue([{ id: 'fb-001', rating: 'up', reason: null }]);
+      mockAll.mockReturnValue([{ id: 'fb-001', rating: 'up', reason: null }]);
 
       const { upsertFeedback } = await import('@/modules/chat/repository');
       upsertFeedback('msg-001', 'user-001', 'down', 'Not helpful');

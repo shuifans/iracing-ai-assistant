@@ -70,12 +70,7 @@ export interface SSEErrorEvent extends SSEEventBase {
 // ---------------------------------------------------------------------------
 
 export type SSEEvent =
-  | SSEStartEvent
-  | SSEDeltaEvent
-  | SSESourceEvent
-  | SSEUsageEvent
-  | SSEDoneEvent
-  | SSEErrorEvent;
+  SSEStartEvent | SSEDeltaEvent | SSESourceEvent | SSEUsageEvent | SSEDoneEvent | SSEErrorEvent;
 
 // ---------------------------------------------------------------------------
 // Serialization
