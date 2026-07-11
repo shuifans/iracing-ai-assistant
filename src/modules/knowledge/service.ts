@@ -518,3 +518,19 @@ export async function restoreItem(id: string): Promise<void> {
   }
   knowledgeRepo.restoreItem(id);
 }
+
+// ---------------------------------------------------------------------------
+// Git sync retry
+// ---------------------------------------------------------------------------
+
+/**
+ * Retry git sync for items in push_failed state.
+ * Resets their sync status to push_pending so the publisher picks them up.
+ */
+export async function retryGitSync(): Promise<number> {
+  const failedItems = knowledgeRepo.listItemsBySyncStatus('push_failed');
+  for (const item of failedItems) {
+    knowledgeRepo.updateSyncStatus(item.id, 'push_pending');
+  }
+  return failedItems.length;
+}
