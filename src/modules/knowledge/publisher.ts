@@ -133,7 +133,7 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
       itemId = existing.id;
       knowledgeRepo.updateItem(itemId, {
         title: parsed.frontMatter.title,
-        category: parsed.frontMatter.category,
+        category: parsed.frontMatter.category as 'track-technique' | 'car-setup' | 'basics',
         subcategory: parsed.frontMatter.subcategory,
         tagsJson: JSON.stringify(parsed.frontMatter.tags),
         sourceName: parsed.frontMatter.source_name ?? null,
@@ -149,7 +149,7 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
         sourceId: (jobsRepo.getJob(jobId) as any).sourceId,
         draftId,
         title: parsed.frontMatter.title,
-        category: parsed.frontMatter.category,
+        category: parsed.frontMatter.category as 'track-technique' | 'car-setup' | 'basics',
         subcategory: parsed.frontMatter.subcategory,
         tagsJson: JSON.stringify(parsed.frontMatter.tags),
         sourceName: parsed.frontMatter.source_name ?? null,

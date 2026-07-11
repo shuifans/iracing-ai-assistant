@@ -111,7 +111,7 @@ describe('streamChatMessage', () => {
     vi.clearAllMocks();
     mockGetSession.mockReturnValue(mockSession);
     mockCreateMessage.mockImplementation((_sessionId, role, _content, status) =>
-      makeMockMessage(role, status ?? 'pending'),
+      makeMockMessage(role, (status ?? 'pending') as MessageStatus),
     );
     mockGetMessagesBySession.mockReturnValue([]);
   });

@@ -46,7 +46,7 @@ function ipv4ToNumber(ip: string): number | null {
   if (!match) return null;
   const parts = [match[1], match[2], match[3], match[4]].map(Number);
   if (parts.some((p) => p > 255)) return null;
-  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+  return ((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>> 0;
 }
 
 /**

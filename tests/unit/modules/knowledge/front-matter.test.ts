@@ -64,8 +64,8 @@ another: also ignored
 body`;
     const result = parseFrontMatter(doc);
     expect(result.frontMatter.title).toBe('Extra Fields');
-    expect((result.frontMatter as Record<string, unknown>)['extra_field']).toBeUndefined();
-    expect((result.frontMatter as Record<string, unknown>)['another']).toBeUndefined();
+    expect((result.frontMatter as unknown as Record<string, unknown>)['extra_field']).toBeUndefined();
+    expect((result.frontMatter as unknown as Record<string, unknown>)['another']).toBeUndefined();
   });
 
   it('body 中包含 --- 不影响解析', () => {

@@ -215,7 +215,7 @@ describe('jobs/repository', () => {
 
       expect(mockUpdate).toHaveBeenCalled();
       expect(mockSet).toHaveBeenCalled();
-      const setArg = mockSet.mock.calls[0][0];
+      const setArg = mockSet.mock.calls[0]![0];
       expect(setArg.leaseExpiresAt).toBeDefined();
       expect(setArg.heartbeatAt).toBe('2026-07-12T00:00:00.000Z');
       expect(mockRun).toHaveBeenCalled();
@@ -314,7 +314,7 @@ describe('jobs/repository', () => {
 
       expect(result).toBe(true);
       expect(mockUpdate).toHaveBeenCalled();
-      const setArg = mockSet.mock.calls[0][0];
+      const setArg = mockSet.mock.calls[0]![0];
       expect(setArg.status).toBe('queued');
       expect(setArg.attempt).toBe(2);
       expect(setArg.errorCode).toBeNull();

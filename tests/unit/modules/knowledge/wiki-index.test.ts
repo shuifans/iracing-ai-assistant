@@ -37,7 +37,7 @@ function mockFs(files: Record<string, string>) {
     return allPaths.some((f) => f.startsWith(dir));
   });
 
-  vi.mocked(fs.readdirSync).mockImplementation((dirPath: fs.PathLike) => {
+  vi.mocked(fs.readdirSync).mockImplementation(((dirPath: fs.PathLike) => {
     const dir = dirPath.toString().replace(/\\/g, '/');
     // collect immediate children (files + dirs)
     const children = new Set<string>();
@@ -45,11 +45,11 @@ function mockFs(files: Record<string, string>) {
       if (f.startsWith(dir + '/')) {
         const rest = f.slice(dir.length + 1);
         const first = rest.split('/')[0];
-        children.add(first);
+        if (first) children.add(first);
       }
     }
-    return Array.from(children) as fs.Dirent[];
-  });
+    return Array.from(children) as unknown as fs.Dirent[];
+  }) as unknown as typeof fs.readdirSync);
 
   vi.mocked(fs.statSync).mockImplementation((p: fs.PathLike) => {
     const fp = p.toString().replace(/\\/g, '/');
@@ -57,12 +57,12 @@ function mockFs(files: Record<string, string>) {
     return { isFile: () => isFile, isDirectory: () => !isFile } as fs.Stats;
   });
 
-  vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathLike) => {
+  vi.mocked(fs.readFileSync).mockImplementation(((p: fs.PathLike) => {
     const fp = p.toString().replace(/\\/g, '/');
     const content = files[fp];
     if (content === undefined) throw new Error(`ENOENT: ${fp}`);
     return content;
-  });
+  }) as typeof fs.readFileSync);
 }
 
 // ---------------------------------------------------------------------------

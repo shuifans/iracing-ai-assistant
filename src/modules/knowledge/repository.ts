@@ -6,7 +6,7 @@
  * @module knowledge/repository
  */
 
-import { eq, and, desc, lt, inArray, ne } from 'drizzle-orm';
+import { eq, and, desc, lt, inArray, ne, type SQL } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import {
   knowledgeSources,
@@ -73,7 +73,7 @@ export function listSources(
 
   const conditions = [];
   if (params.status) {
-    conditions.push(eq(knowledgeSources.status, params.status));
+    conditions.push(eq(knowledgeSources.status, params.status as typeof knowledgeSources.status._.data));
   }
   if (params.cursor) {
     conditions.push(lt(knowledgeSources.createdAt, params.cursor));
@@ -283,10 +283,10 @@ export function listItems(
 
   const conditions = [];
   if (params.category) {
-    conditions.push(eq(knowledgeItems.category, params.category));
+    conditions.push(eq(knowledgeItems.category, params.category as typeof knowledgeItems.category._.data));
   }
   if (params.status) {
-    conditions.push(eq(knowledgeItems.status, params.status));
+    conditions.push(eq(knowledgeItems.status, params.status as typeof knowledgeItems.status._.data));
   }
   if (params.cursor) {
     conditions.push(lt(knowledgeItems.publishedAt, params.cursor));
@@ -341,7 +341,7 @@ export function listItemsBySyncStatus(syncStatus: string): KnowledgeItem[] {
   return db
     .select()
     .from(knowledgeItems)
-    .where(eq(knowledgeItems.wikiSyncStatus, syncStatus))
+    .where(eq(knowledgeItems.wikiSyncStatus, syncStatus as typeof knowledgeItems.wikiSyncStatus._.data))
     .all();
 }
 

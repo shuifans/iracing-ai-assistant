@@ -63,7 +63,7 @@ function makeMockJob(overrides: Record<string, any> = {}) {
   return {
     id: 'job-001',
     sourceId: 'source-001',
-    status: 'queued',
+    status: 'queued' as const,
     attempt: 0,
     maxAttempts: 3,
     availableAt: '2026-07-12T00:00:00.000Z',

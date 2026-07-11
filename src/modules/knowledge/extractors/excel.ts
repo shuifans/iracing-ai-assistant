@@ -44,14 +44,14 @@ function toMarkdownTable(rows: unknown[][]): string {
   };
 
   // Build header row from the first data row
-  const headerRow = rows[0];
+  const headerRow = rows[0]!;
   const header = `| ${Array.from({ length: colCount }, (_, c) => normalise(headerRow[c])).join(' | ')} |`;
   const separator = `| ${Array.from({ length: colCount }, () => '------').join(' | ')} |`;
 
   // Build data rows, skipping empty trailing rows
   const dataRows: string[] = [];
   for (let r = 1; r < rows.length; r++) {
-    const row = rows[r];
+    const row = rows[r]!;
     const cells = Array.from({ length: colCount }, (_, c) => normalise(row[c]));
     // Skip completely empty rows
     if (cells.every((c) => c === '')) continue;

@@ -17,7 +17,7 @@ const MAX_TEXT_CHARS = 2_097_152;
  * @throws {AppError} EXTRACTION_FAILED if mammoth fails or document is empty.
  */
 export async function extractDocx(buffer: Buffer): Promise<ExtractionResult> {
-  let result: mammoth.ExtractedContent;
+  let result: Awaited<ReturnType<typeof mammoth.extractRawText>>;
 
   try {
     result = await mammoth.extractRawText({ buffer });

@@ -98,7 +98,7 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
     // File-based source — read the stored file and extract
     const filePath = path.join(env.DATA_ROOT as string, source.relativePath!);
     const fileBuffer = fs.readFileSync(filePath);
-    const result = await extract(fileBuffer, source.mimeType);
+    const result = await extract(fileBuffer, source.mimeType ?? 'text/plain');
     extractedText = result.text;
   }
 

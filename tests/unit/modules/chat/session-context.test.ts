@@ -19,7 +19,9 @@ const mockGetMessages = vi.mocked(getMessagesBySession);
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeMessage(role: string, content: string, status = 'complete') {
+type MessageStatus = 'pending' | 'streaming' | 'complete' | 'interrupted' | 'failed';
+
+function makeMessage(role: string, content: string, status: MessageStatus = 'complete') {
   return {
     id: `msg-${Math.random().toString(36).slice(2)}`,
     sessionId: 'sess-001',
