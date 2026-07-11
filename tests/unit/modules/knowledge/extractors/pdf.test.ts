@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AppError } from '@/lib/errors';
 
-// Mock pdf-parse before importing the extractor
-const mockGetText = vi.fn();
-const mockDestroy = vi.fn();
+// Use vi.hoisted so mock fns are available when vi.mock factory runs (it is hoisted)
+const { mockGetText, mockDestroy } = vi.hoisted(() => ({
+  mockGetText: vi.fn(),
+  mockDestroy: vi.fn(),
+}));
 
 vi.mock('pdf-parse', () => {
   return {
@@ -14,7 +16,6 @@ vi.mock('pdf-parse', () => {
   };
 });
 
-import { PDFParse } from 'pdf-parse';
 import { extractPdf } from '@/modules/knowledge/extractors/pdf';
 
 beforeEach(() => {

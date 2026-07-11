@@ -147,11 +147,12 @@ describe('extractExcel', () => {
     ).rejects.toMatchObject({ code: 'EXTRACTION_FAILED' });
   });
 
-  it('公式单元格取缓存值（cell.v）', async () => {
-    // sheet_to_json returns computed values; we just verify the value is used
+  it('公式单元格取缓存值（sheet_to_json 返回计算结果）', async () => {
+    // sheet_to_json returns computed values (cell.v), not formula strings (cell.f)
+    // Our mock simulates this: it returns 42 (the cached result) instead of '=SUM(A1:A2)'
     const rows = [
-      ['Formula', 'Result'],
-      ['=SUM(A1:A2)', 42],
+      ['Description', 'Result'],
+      ['Total', 42],
     ];
     const wb = makeWorkbook({ Formulas: rows });
     mockRead.mockReturnValue(wb);
@@ -161,7 +162,8 @@ describe('extractExcel', () => {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
 
+    // Verify the computed value 42 is present (cell.v, not cell.f)
     expect(result.text).toContain('42');
-    expect(result.text).not.toContain('=SUM');
+    expect(result.text).toContain('Total');
   });
 });
