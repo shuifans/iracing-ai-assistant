@@ -82,7 +82,7 @@ export default function ChatPage() {
       </div>
 
       {/* 底部输入框 */}
-      <div className="w-full max-w-2xl mx-auto">
+      <div className="mx-auto w-full max-w-2xl px-3 sm:px-0">
         <ChatInput
           sessionId=""
           disabled={creating}

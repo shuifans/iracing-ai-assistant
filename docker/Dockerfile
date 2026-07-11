@@ -82,6 +82,5 @@ EXPOSE 3000
 # tini provides init: true equivalent — proper PID 1 signal handling
 ENTRYPOINT ["/sbin/tini", "--"]
 
-# Default: start Next.js server
-# Worker is started separately via docker-compose (see F2 entrypoint script)
-CMD ["node", "server.js"]
+# Default: start both Web and Worker via entrypoint script
+CMD ["/app/scripts/start-container.sh"]
