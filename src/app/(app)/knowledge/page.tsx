@@ -1,0 +1,576 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { Tabs, Pagination, FilterBar, ConfirmDialog, Toast } from '@/components/common';
+import { DataTable } from '@/components/common';
+import { authFetch } from '@/lib/auth-client';
+import { SourceUploadForm } from '@/components/knowledge/SourceUploadForm';
+import { JobStatusBadge, SourceStatusBadge } from '@/components/knowledge/JobStatusBadge';
+import { ItemTable } from '@/components/knowledge/ItemTable';
+import type { JobStatus } from '@/config/constants';
+import { JOB_STATUSES, KNOWLEDGE_CATEGORIES } from '@/config/constants';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface Source {
+  id: string;
+  inputType: string;
+  originalName?: string | null;
+  sourceUrl?: string | null;
+  status: 'stored' | 'queued' | 'processing' | 'ready' | 'failed' | 'archived';
+  createdAt: string;
+  [key: string]: unknown;
+}
+
+interface Job {
+  id: string;
+  sourceId: string;
+  status: JobStatus;
+  attempt: number;
+  maxAttempts: number;
+  progress: number;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  createdAt: string;
+  [key: string]: unknown;
+}
+
+interface KnowledgeItem {
+  id: string;
+  title: string;
+  category: string;
+  subcategory: string;
+  status: 'published' | 'archived';
+  wikiSyncStatus: 'committed' | 'push_pending' | 'synced' | 'push_failed';
+  season: string;
+  wikiPath: string;
+  publishedAt: string;
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Page component
+// ---------------------------------------------------------------------------
+
+export default function KnowledgePage() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState('sources');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  // ── Sources ─────────────────────────────────────────────────────────────
+  const [sources, setSources] = useState<Source[]>([]);
+  const [sourcesLoading, setSourcesLoading] = useState(false);
+  const [sourcesCursor, setSourcesCursor] = useState<string | null>(null);
+  const [sourcesCursorStack, setSourcesCursorStack] = useState<(string | null)[]>([]);
+
+  const fetchSources = useCallback(async (cursor?: string) => {
+    setSourcesLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '20' });
+      if (cursor) params.set('cursor', cursor);
+      const res = await authFetch(`/api/knowledge/sources?${params.toString()}`);
+      if (!res.ok) throw new Error('加载来源失败');
+      const json = (await res.json()) as {
+        data: { sources: Source[] };
+        pagination?: { nextCursor: string | null };
+      };
+      setSources(json.data.sources);
+      setSourcesCursor(json.pagination?.nextCursor ?? null);
+    } catch {
+      setToast({ message: '加载来源失败', type: 'error' });
+    } finally {
+      setSourcesLoading(false);
+    }
+  }, []);
+
+  // ── Jobs ────────────────────────────────────────────────────────────────
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsCursor, setJobsCursor] = useState<string | null>(null);
+  const [jobsCursorStack, setJobsCursorStack] = useState<(string | null)[]>([]);
+  const [jobStatusFilter, setJobStatusFilter] = useState('');
+
+  const fetchJobs = useCallback(async (cursor?: string, status?: string) => {
+    setJobsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '20' });
+      if (cursor) params.set('cursor', cursor);
+      if (status) params.set('status', status);
+      const res = await authFetch(`/api/knowledge/jobs?${params.toString()}`);
+      if (!res.ok) throw new Error('加载任务失败');
+      const json = (await res.json()) as {
+        data: { jobs: Job[] };
+        pagination?: { nextCursor: string | null };
+      };
+      setJobs(json.data.jobs);
+      setJobsCursor(json.pagination?.nextCursor ?? null);
+    } catch {
+      setToast({ message: '加载任务失败', type: 'error' });
+    } finally {
+      setJobsLoading(false);
+    }
+  }, []);
+
+  // ── Items ───────────────────────────────────────────────────────────────
+  const [items, setItems] = useState<KnowledgeItem[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsCursor, setItemsCursor] = useState<string | null>(null);
+  const [itemsCursorStack, setItemsCursorStack] = useState<(string | null)[]>([]);
+  const [itemFilters, setItemFilters] = useState({ category: '', status: '' });
+
+  const fetchItems = useCallback(async (cursor?: string, filters?: Record<string, string>) => {
+    setItemsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '20' });
+      if (cursor) params.set('cursor', cursor);
+      if (filters?.category) params.set('category', filters.category);
+      if (filters?.status) params.set('status', filters.status);
+      const res = await authFetch(`/api/knowledge/items?${params.toString()}`);
+      if (!res.ok) throw new Error('加载知识条目失败');
+      const json = (await res.json()) as {
+        data: { items: KnowledgeItem[] };
+        pagination?: { nextCursor: string | null };
+      };
+      setItems(json.data.items);
+      setItemsCursor(json.pagination?.nextCursor ?? null);
+    } catch {
+      setToast({ message: '加载知识条目失败', type: 'error' });
+    } finally {
+      setItemsLoading(false);
+    }
+  }, []);
+
+  // ── Tab change ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (activeTab === 'sources') fetchSources();
+    else if (activeTab === 'jobs') fetchJobs(undefined, jobStatusFilter || undefined);
+    else if (activeTab === 'items') fetchItems(undefined, itemFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // ── Job actions ─────────────────────────────────────────────────────────
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const retryJob = async (id: string) => {
+    try {
+      const res = await authFetch(`/api/knowledge/jobs/${id}/retry`, { method: 'POST' });
+      if (!res.ok) throw new Error('重试失败');
+      setToast({ message: '任务已重新排队', type: 'success' });
+      fetchJobs(undefined, jobStatusFilter || undefined);
+    } catch {
+      setToast({ message: '重试失败', type: 'error' });
+    }
+  };
+
+  const cancelJob = async (id: string) => {
+    try {
+      const res = await authFetch(`/api/knowledge/jobs/${id}/cancel`, { method: 'POST' });
+      if (!res.ok) throw new Error('取消失败');
+      setToast({ message: '任务已取消', type: 'success' });
+      fetchJobs(undefined, jobStatusFilter || undefined);
+    } catch {
+      setToast({ message: '取消失败', type: 'error' });
+    }
+  };
+
+  // ── Item actions ────────────────────────────────────────────────────────
+  const archiveItem = async (id: string) => {
+    try {
+      const res = await authFetch(`/api/knowledge/items/${id}/archive`, { method: 'POST' });
+      if (!res.ok) throw new Error('归档失败');
+      setToast({ message: '条目已归档', type: 'success' });
+      fetchItems(undefined, itemFilters);
+    } catch {
+      setToast({ message: '归档失败', type: 'error' });
+    }
+  };
+
+  const restoreItem = async (id: string) => {
+    try {
+      const res = await authFetch(`/api/knowledge/items/${id}/restore`, { method: 'POST' });
+      if (!res.ok) throw new Error('恢复失败');
+      setToast({ message: '条目已恢复', type: 'success' });
+      fetchItems(undefined, itemFilters);
+    } catch {
+      setToast({ message: '恢复失败', type: 'error' });
+    }
+  };
+
+  // ── Job columns ─────────────────────────────────────────────────────────
+  const jobColumns = [
+    {
+      key: 'id',
+      header: 'ID',
+      render: (job: Job) => (
+        <button
+          type="button"
+          onClick={() => {
+            // Find draft id via job id — go to review page if pending_review
+            if (job.status === 'pending_review') {
+              router.push(`/knowledge/review/${job.id}`);
+            }
+          }}
+          className="font-mono text-xs text-blue-600 hover:underline focus:outline-none"
+        >
+          {job.id.slice(0, 8)}…
+        </button>
+      ),
+    },
+    {
+      key: 'sourceId',
+      header: '来源 ID',
+      render: (job: Job) => (
+        <span className="font-mono text-xs text-gray-500">{job.sourceId.slice(0, 8)}…</span>
+      ),
+    },
+    {
+      key: 'status',
+      header: '状态',
+      render: (job: Job) => <JobStatusBadge status={job.status} />,
+    },
+    {
+      key: 'attempt',
+      header: '尝试次数',
+      render: (job: Job) => (
+        <span className="text-gray-600">
+          {job.attempt}/{job.maxAttempts}
+        </span>
+      ),
+    },
+    {
+      key: 'progress',
+      header: '进度',
+      render: (job: Job) => (
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-gray-200">
+            <div
+              className="h-full rounded-full bg-blue-600 transition-all"
+              style={{ width: `${job.progress}%` }}
+            />
+          </div>
+          <span className="text-xs text-gray-500">{job.progress}%</span>
+        </div>
+      ),
+    },
+    {
+      key: 'errorMessage',
+      header: '错误信息',
+      render: (job: Job) => (
+        <span className="max-w-[200px] truncate text-xs text-red-500" title={job.errorMessage ?? ''}>
+          {job.errorMessage ?? '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'createdAt',
+      header: '创建时间',
+      render: (job: Job) => (
+        <span className="text-xs text-gray-500">
+          {new Date(job.createdAt).toLocaleString()}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '操作',
+      render: (job: Job) => (
+        <div className="flex gap-2">
+          {job.status === 'failed' && (
+            <button
+              type="button"
+              onClick={() =>
+                setConfirmAction({
+                  title: '重试任务',
+                  message: `确定要重试任务 ${job.id.slice(0, 8)} 吗？`,
+                  onConfirm: () => {
+                    setConfirmAction(null);
+                    retryJob(job.id);
+                  },
+                })
+              }
+              className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            >
+              重试
+            </button>
+          )}
+          {(job.status === 'queued') && (
+            <button
+              type="button"
+              onClick={() =>
+                setConfirmAction({
+                  title: '取消任务',
+                  message: `确定要取消任务 ${job.id.slice(0, 8)} 吗？`,
+                  onConfirm: () => {
+                    setConfirmAction(null);
+                    cancelJob(job.id);
+                  },
+                })
+              }
+              className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500/40"
+            >
+              取消
+            </button>
+          )}
+          {job.status === 'pending_review' && (
+            <button
+              type="button"
+              onClick={() => router.push(`/knowledge/review/${job.id}`)}
+              className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            >
+              审核
+            </button>
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  // ── Source columns ───────────────────────────────────────────────────────
+  const sourceColumns = [
+    {
+      key: 'originalName',
+      header: '名称',
+      render: (s: Source) => (
+        <span className="font-medium text-gray-900">
+          {s.inputType === 'file' ? s.originalName : s.sourceUrl}
+        </span>
+      ),
+    },
+    {
+      key: 'inputType',
+      header: '类型',
+      render: (s: Source) => (
+        <span className="text-gray-600">{s.inputType === 'file' ? '文件' : 'URL'}</span>
+      ),
+    },
+    {
+      key: 'status',
+      header: '状态',
+      render: (s: Source) => (
+        <SourceStatusBadge status={s.status as Source['status']} />
+      ),
+    },
+    {
+      key: 'createdAt',
+      header: '上传时间',
+      render: (s: Source) => (
+        <span className="text-xs text-gray-500">{new Date(s.createdAt).toLocaleString()}</span>
+      ),
+    },
+  ];
+
+  // ── Item filter config ──────────────────────────────────────────────────
+  const itemFilterConfig = [
+    {
+      name: 'category',
+      label: '分类',
+      type: 'select' as const,
+      options: Object.keys(KNOWLEDGE_CATEGORIES).map((k) => ({ value: k, label: k })),
+    },
+    {
+      name: 'status',
+      label: '状态',
+      type: 'select' as const,
+      options: [
+        { value: 'published', label: '已发布' },
+        { value: 'archived', label: '已归档' },
+      ],
+    },
+  ];
+
+  // ── Job filter config ───────────────────────────────────────────────────
+  const jobFilterConfig = [
+    {
+      name: 'status',
+      label: '状态',
+      type: 'select' as const,
+      options: JOB_STATUSES.map((s) => ({ value: s, label: s })),
+    },
+  ];
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Toast */}
+      {toast && (
+        <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
+      )}
+
+      {/* Confirm dialog */}
+      {confirmAction && (
+        <ConfirmDialog
+          isOpen={true}
+          title={confirmAction.title}
+          message={confirmAction.message}
+          onConfirm={confirmAction.onConfirm}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
+
+      {/* Page header */}
+      <div className="border-b border-gray-200 bg-white px-6 py-4">
+        <h1 className="text-xl font-semibold text-gray-900">知识管理</h1>
+        <p className="mt-1 text-sm text-gray-500">管理知识来源、处理任务和知识条目</p>
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-gray-200 bg-white px-6">
+        <Tabs
+          tabs={[
+            { id: 'sources', label: '来源管理' },
+            { id: 'jobs', label: '任务列表' },
+            { id: 'items', label: '知识条目' },
+          ]}
+          activeTab={activeTab}
+          onChange={setActiveTab}
+        />
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-auto p-6">
+        {/* ── Sources tab ─────────────────────────────────────────────── */}
+        {activeTab === 'sources' && (
+          <div className="space-y-6">
+            <SourceUploadForm
+              onSuccess={() => {
+                setToast({ message: '来源已提交', type: 'success' });
+                fetchSources();
+              }}
+              onError={(msg) => setToast({ message: msg, type: 'error' })}
+            />
+
+            <DataTable<Source>
+              columns={sourceColumns}
+              data={sources}
+              loading={sourcesLoading}
+              emptyMessage="暂无来源"
+            />
+
+            <Pagination
+              nextCursor={sourcesCursor}
+              hasPrev={sourcesCursorStack.length > 0}
+              onPrev={() => {
+                const stack = [...sourcesCursorStack];
+                stack.pop();
+                const prev = stack[stack.length - 1] ?? undefined;
+                setSourcesCursorStack(stack);
+                fetchSources(prev);
+              }}
+              onNext={(cursor) => {
+                setSourcesCursorStack([...sourcesCursorStack, sourcesCursor]);
+                setSourcesCursor(cursor);
+                fetchSources(cursor);
+              }}
+            />
+          </div>
+        )}
+
+        {/* ── Jobs tab ────────────────────────────────────────────────── */}
+        {activeTab === 'jobs' && (
+          <div className="space-y-6">
+            <FilterBar
+              filters={jobFilterConfig}
+              values={{ status: jobStatusFilter }}
+              onChange={(name, value) => {
+                if (name === 'status') {
+                  setJobStatusFilter(value);
+                  fetchJobs(undefined, value || undefined);
+                }
+              }}
+            />
+
+            <DataTable<Job>
+              columns={jobColumns}
+              data={jobs}
+              loading={jobsLoading}
+              emptyMessage="暂无任务"
+            />
+
+            <Pagination
+              nextCursor={jobsCursor}
+              hasPrev={jobsCursorStack.length > 0}
+              onPrev={() => {
+                const stack = [...jobsCursorStack];
+                stack.pop();
+                const prev = stack[stack.length - 1] ?? undefined;
+                setJobsCursorStack(stack);
+                fetchJobs(prev, jobStatusFilter || undefined);
+              }}
+              onNext={(cursor) => {
+                setJobsCursorStack([...jobsCursorStack, jobsCursor]);
+                setJobsCursor(cursor);
+                fetchJobs(cursor, jobStatusFilter || undefined);
+              }}
+            />
+          </div>
+        )}
+
+        {/* ── Items tab ───────────────────────────────────────────────── */}
+        {activeTab === 'items' && (
+          <div className="space-y-6">
+            <FilterBar
+              filters={itemFilterConfig}
+              values={itemFilters}
+              onChange={(name, value) => {
+                const newFilters = { ...itemFilters, [name]: value };
+                setItemFilters(newFilters);
+              }}
+              onSearch={() => {
+                setItemsCursorStack([]);
+                fetchItems(undefined, itemFilters);
+              }}
+            />
+
+            <ItemTable
+              data={items}
+              loading={itemsLoading}
+              onArchive={(id) =>
+                setConfirmAction({
+                  title: '归档条目',
+                  message: '确定要归档该知识条目吗？',
+                  onConfirm: () => {
+                    setConfirmAction(null);
+                    archiveItem(id);
+                  },
+                })
+              }
+              onRestore={(id) =>
+                setConfirmAction({
+                  title: '恢复条目',
+                  message: '确定要恢复该知识条目吗？',
+                  onConfirm: () => {
+                    setConfirmAction(null);
+                    restoreItem(id);
+                  },
+                })
+              }
+            />
+
+            <Pagination
+              nextCursor={itemsCursor}
+              hasPrev={itemsCursorStack.length > 0}
+              onPrev={() => {
+                const stack = [...itemsCursorStack];
+                stack.pop();
+                const prev = stack[stack.length - 1] ?? undefined;
+                setItemsCursorStack(stack);
+                fetchItems(prev, itemFilters);
+              }}
+              onNext={(cursor) => {
+                setItemsCursorStack([...itemsCursorStack, itemsCursor]);
+                setItemsCursor(cursor);
+                fetchItems(cursor, itemFilters);
+              }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
