@@ -82,14 +82,15 @@ export function listJobs(params: {
     conditions.push(eq(knowledgeJobs.sourceId, params.sourceId));
   }
   if (params.cursor) {
-    conditions.push(lt(knowledgeJobs.createdAt, params.cursor));
+    // Use id (UUIDv7, time-ordered) as cursor to avoid same-timestamp pagination gaps
+    conditions.push(lt(knowledgeJobs.id, params.cursor));
   }
 
   const rows = db
     .select()
     .from(knowledgeJobs)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(knowledgeJobs.createdAt))
+    .orderBy(desc(knowledgeJobs.id))
     .limit(limit + 1)
     .all();
 
@@ -98,7 +99,7 @@ export function listJobs(params: {
 
   return {
     jobs: resultRows,
-    nextCursor: hasMore ? resultRows[resultRows.length - 1]!.createdAt : null,
+    nextCursor: hasMore ? resultRows[resultRows.length - 1]!.id : null,
   };
 }
 

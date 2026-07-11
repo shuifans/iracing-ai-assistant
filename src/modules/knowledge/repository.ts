@@ -76,14 +76,15 @@ export function listSources(
     conditions.push(eq(knowledgeSources.status, params.status as typeof knowledgeSources.status._.data));
   }
   if (params.cursor) {
-    conditions.push(lt(knowledgeSources.createdAt, params.cursor));
+    // Use id (UUIDv7, time-ordered) as cursor to avoid same-timestamp pagination gaps
+    conditions.push(lt(knowledgeSources.id, params.cursor));
   }
 
   const rows = db
     .select()
     .from(knowledgeSources)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(knowledgeSources.createdAt))
+    .orderBy(desc(knowledgeSources.id))
     .limit(limit + 1)
     .all();
 
@@ -92,7 +93,7 @@ export function listSources(
 
   return {
     items,
-    nextCursor: hasMore ? items[items.length - 1]!.createdAt : null,
+    nextCursor: hasMore ? items[items.length - 1]!.id : null,
   };
 }
 

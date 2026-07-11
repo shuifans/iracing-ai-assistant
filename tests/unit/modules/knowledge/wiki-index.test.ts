@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { rebuildIndex, writeIndex } from '@/modules/knowledge/wiki-index';
 import * as fs from 'fs';
 
-vi.mock('fs');
+vi.mock('fs', () => ({
+  existsSync: vi.fn(),
+  readdirSync: vi.fn(),
+  statSync: vi.fn(),
+  readFileSync: vi.fn(),
+  writeFileSync: vi.fn(),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers

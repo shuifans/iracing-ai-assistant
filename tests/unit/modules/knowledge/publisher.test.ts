@@ -17,10 +17,15 @@ vi.mock('fs', () => ({
   unlinkSync: vi.fn(),
 }));
 
-vi.mock('child_process', () => ({
-  execSync: vi.fn(() => Buffer.from('')),
-  spawn: vi.fn(() => ({ on: vi.fn() })),
-}));
+vi.mock('child_process', () => {
+  const execSync = vi.fn(() => Buffer.from(''));
+  const spawn = vi.fn(() => ({ on: vi.fn() }));
+  return {
+    default: { execSync, spawn },
+    execSync,
+    spawn,
+  };
+});
 
 vi.mock('@/modules/knowledge/wiki-index', () => ({
   rebuildIndex: vi.fn(() => '# Knowledge Index\n'),

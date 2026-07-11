@@ -144,11 +144,11 @@ export function getUsageTrend(
   const conditions = dateRangeConditions(fromDate, toDate);
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-  const dateExpr = sql<string>`strftime(${fmt}, ${usageEvents.createdAt})`.as('date');
+  const dateExpr = sql`strftime(${fmt}, ${usageEvents.createdAt})`;
 
   const rows = db
     .select({
-      date: dateExpr,
+      date: sql<string>`strftime(${fmt}, ${usageEvents.createdAt})`,
       calls: sql<number>`count(*)`.mapWith(Number),
       errors: sql<number>`sum(case when ${usageEvents.result} = 'error' then 1 else 0 end)`.mapWith(Number),
       activeUsers: sql<number>`count(distinct ${usageEvents.userId})`.mapWith(Number),
