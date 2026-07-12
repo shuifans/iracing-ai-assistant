@@ -75,7 +75,9 @@ function useStats() {
   }, []);
 
   useEffect(() => {
-    loadStats(period);
+    startTransition(() => {
+      loadStats(period);
+    });
   }, [period, loadStats]);
 
   return { period, setPeriod, loading, overview, usage, questions, costs, feedback };
