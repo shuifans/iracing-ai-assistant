@@ -445,12 +445,12 @@ export default function SessionPage() {
   return (
     <div className="flex h-full flex-col">
       {/* 消息区 */}
-      <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-6">
-        <div className="mx-auto max-w-2xl space-y-4">
+      <div className="flex-1 overflow-y-auto px-3 py-3 sm:px-6 sm:py-4">
+        <div className="mx-auto max-w-3xl space-y-3">
           {messages.length === 0 && loaded && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <p className="text-lg font-medium text-gray-400">开始一段新对话</p>
-              <p className="mt-1 text-sm text-gray-400">输入问题或点击上方推荐问题</p>
+              <p className="text-base font-medium text-gray-400">开始一段新对话</p>
+              <p className="mt-1 text-xs text-gray-400 sm:text-sm">输入问题或点击上方推荐问题</p>
             </div>
           )}
 
@@ -491,7 +491,7 @@ export default function SessionPage() {
       </div>
 
       {/* 输入框 */}
-      <div className="mx-auto w-full max-w-2xl px-3 sm:px-0">
+      <div className="mx-auto w-full max-w-3xl px-3 sm:px-4">
         <ChatInput
           sessionId={sessionId}
           isStreaming={isStreaming}

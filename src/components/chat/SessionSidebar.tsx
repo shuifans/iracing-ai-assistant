@@ -103,14 +103,14 @@ export function SessionSidebar({ isOpen, onClose }: SessionSidebarProps) {
 
       {/* 侧边栏 */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-gray-900 text-white transition-transform duration-200 md:relative md:z-auto md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-gray-950 text-white transition-transform duration-200 md:relative md:z-auto md:translate-x-0 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
         aria-label="会话历史"
       >
         {/* 顶部 */}
-        <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
-          <h2 className="text-base font-semibold">iRacing AI 助手</h2>
+        <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
+          <h2 className="text-sm font-semibold tracking-tight">iRacing AI 助手</h2>
           <button
             type="button"
             onClick={onClose}
@@ -133,7 +133,7 @@ export function SessionSidebar({ isOpen, onClose }: SessionSidebarProps) {
           <button
             type="button"
             onClick={handleNewSession}
-            className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-600 px-4 py-2 text-sm font-medium transition-colors hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-700 px-3.5 py-1.5 text-[13px] font-medium transition-colors hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -150,10 +150,10 @@ export function SessionSidebar({ isOpen, onClose }: SessionSidebarProps) {
         {/* 会话列表 */}
         <nav className="flex-1 overflow-y-auto px-2 pb-4" aria-label="会话列表">
           {loading && sessions.length === 0 && (
-            <p className="px-3 py-4 text-center text-sm text-gray-400">加载中…</p>
+            <p className="px-3 py-4 text-center text-[13px] text-gray-400">加载中…</p>
           )}
           {!loading && sessions.length === 0 && (
-            <p className="px-3 py-4 text-center text-sm text-gray-400">暂无会话历史</p>
+            <p className="px-3 py-4 text-center text-[13px] text-gray-400">暂无会话历史</p>
           )}
           {sessions.map((session) => {
             const isActive = pathname.includes(session.id);
@@ -166,9 +166,9 @@ export function SessionSidebar({ isOpen, onClose }: SessionSidebarProps) {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleSessionClick(session.id);
                 }}
-                className={`group mb-1 flex min-h-[44px] cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
+                className={`group mb-1 flex min-h-[44px] cursor-pointer items-center justify-between rounded-lg px-3 py-1.5 text-[13px] leading-5 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
                   isActive
-                    ? 'bg-gray-700 text-white'
+                    ? 'bg-gray-800 text-white'
                     : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                 }`}
               >
@@ -194,7 +194,7 @@ export function SessionSidebar({ isOpen, onClose }: SessionSidebarProps) {
         </nav>
 
         {/* 底部退出 */}
-        <div className="border-t border-gray-700 px-3 py-3">
+        <div className="border-t border-gray-800 px-3 py-3">
           <button
             type="button"
             onClick={async () => {
@@ -205,7 +205,7 @@ export function SessionSidebar({ isOpen, onClose }: SessionSidebarProps) {
               }
               window.location.href = '/login';
             }}
-            className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] leading-5 text-gray-300 transition-colors hover:bg-gray-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path

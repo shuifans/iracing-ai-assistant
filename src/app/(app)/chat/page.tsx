@@ -51,26 +51,28 @@ export default function ChatPage() {
     <div className="flex h-full flex-col">
       {/* 主内容区 */}
       <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
-        <div className="w-full max-w-2xl">
+        <div className="w-full max-w-3xl">
           {/* 标题 */}
-          <div className="mb-8 text-center">
-            <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">iRacing AI 助手</h1>
-            <p className="mt-2 text-sm text-gray-500 sm:text-base">
+          <div className="mb-7 text-center">
+            <h1 className="text-xl font-semibold text-gray-900 sm:text-2xl">iRacing AI 助手</h1>
+            <p className="mt-2 text-[13px] leading-5 text-gray-500 sm:text-sm">
               面向 iRacing 玩家的智能问答助手，问我任何关于赛车调校、驾驶技巧和赛事规则的问题
             </p>
           </div>
 
           {/* 推荐问题 */}
-          <div className="mb-8">
-            <h2 className="mb-3 text-sm font-medium text-gray-600">试试这些问题</h2>
-            <div className="space-y-2">
+          <div className="mb-7">
+            <h2 className="mb-2.5 text-[13px] font-medium text-gray-600 sm:text-sm">
+              试试这些问题
+            </h2>
+            <div className="space-y-1.5">
               {SUGGESTED_QUESTIONS.map((q) => (
                 <button
                   key={q}
                   type="button"
                   onClick={() => handleSuggestedQuestion(q)}
                   disabled={creating}
-                  className="flex min-h-[44px] w-full items-center rounded-xl border border-gray-200 bg-white px-4 py-3 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50"
+                  className="flex min-h-[44px] w-full items-center rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-left text-[13px] leading-5 text-gray-700 transition-colors hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50 sm:text-sm"
                 >
                   <span className="mr-2 flex-shrink-0 text-blue-500">💡</span>
                   <span>{q}</span>
@@ -82,7 +84,7 @@ export default function ChatPage() {
       </div>
 
       {/* 底部输入框 */}
-      <div className="mx-auto w-full max-w-2xl px-3 sm:px-0">
+      <div className="mx-auto w-full max-w-3xl px-3 sm:px-4">
         <ChatInput
           sessionId=""
           disabled={creating}

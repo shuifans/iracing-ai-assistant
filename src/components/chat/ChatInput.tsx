@@ -109,14 +109,14 @@ export function ChatInput({
   }
 
   return (
-    <div className="border-t border-gray-200 bg-white px-3 py-2 sm:px-4 sm:py-3">
+    <div className="border-t border-gray-200/80 bg-gray-50/80 px-3 py-2 sm:px-4 sm:py-3">
       {/* 图片预览区 */}
       {attachments.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
+        <div className="mb-2 flex flex-wrap gap-1.5">
           {attachments.map((att, idx) => (
             <div key={att.id} className="relative">
               {/* eslint-disable-next-line @next/next/no-img-element -- blob URL preview, cannot use next/image */}
-              <img src={att.preview} alt={att.name} className="h-16 w-16 rounded-lg object-cover" />
+              <img src={att.preview} alt={att.name} className="h-14 w-14 rounded-lg object-cover" />
               <button
                 type="button"
                 onClick={() => removeAttachment(idx)}
@@ -130,7 +130,7 @@ export function ChatInput({
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex items-end gap-2">
+      <form onSubmit={handleSubmit} className="flex items-end gap-1.5 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-sm">
         {/* 图片上传按钮 */}
         <label
           className={`flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center rounded-xl text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 ${
@@ -148,7 +148,7 @@ export function ChatInput({
             disabled={uploading || disabled}
           />
           <svg
-            className="h-6 w-6"
+            className="h-5 w-5"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -172,7 +172,7 @@ export function ChatInput({
           placeholder="输入您的问题…"
           disabled={disabled}
           rows={1}
-          className="max-h-[120px] min-h-[44px] flex-1 resize-none rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50"
+          className="max-h-[120px] min-h-[42px] flex-1 resize-none rounded-2xl border-0 bg-transparent px-3.5 py-2 text-[14px] leading-5 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-0 disabled:opacity-50"
           aria-label="消息输入"
         />
 
