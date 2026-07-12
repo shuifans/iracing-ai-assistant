@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { setAccessToken } from '@/lib/auth-client';
+import { setAccessToken, authFetch } from '@/lib/auth-client';
 import { AdminNav } from '@/components/admin/AdminNav';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -12,7 +12,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   useEffect(() => {
     async function checkAuth() {
       try {
-        const res = await fetch('/api/auth/me', { credentials: 'include' });
+        const res = await authFetch('/api/auth/me');
         if (res.ok) {
           const json = (await res.json()) as {
             data: { accessToken?: string; user: { role: string } };
@@ -26,33 +26,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           }
           setAuthChecked(true);
         } else {
-          // 尝试刷新 token
-          const refreshRes = await fetch('/api/auth/refresh', {
-            method: 'POST',
-            credentials: 'include',
-          });
-          if (refreshRes.ok) {
-            const refreshJson = (await refreshRes.json()) as {
-              data: { accessToken: string };
-            };
-            setAccessToken(refreshJson.data.accessToken);
-            // 刷新成功后重新检查权限
-            const meRes = await fetch('/api/auth/me', { credentials: 'include' });
-            if (meRes.ok) {
-              const meJson = (await meRes.json()) as {
-                data: { user: { role: string } };
-              };
-              if (meJson.data.user.role !== 'admin') {
-                router.replace('/chat');
-                return;
-              }
-              setAuthChecked(true);
-            } else {
-              router.replace('/login');
-            }
-          } else {
-            router.replace('/login');
-          }
+          router.replace('/login');
         }
       } catch {
         router.replace('/login');
