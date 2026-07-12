@@ -1,7 +1,7 @@
 # ==============================================================================
 # Stage 1: Builder — install deps, run tests, build Next.js standalone
 # ==============================================================================
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Build tools for native modules (better-sqlite3, bcrypt)
@@ -23,7 +23,7 @@ RUN npm run build
 # ==============================================================================
 # Stage 2: Runner — production-only image
 # ==============================================================================
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 # Runtime env
@@ -39,7 +39,7 @@ RUN apk add --no-cache tini
 # Next.js standalone output includes its own minimal server + node_modules.
 # We still need full production node_modules for the Worker process which
 # imports from src/ modules (better-sqlite3, drizzle-orm, etc.).
-# Both stages use identical node:20-alpine base, so native modules are compatible.
+# Both stages use identical node:22-alpine base, so native modules are compatible.
 COPY --from=builder /app/node_modules ./node_modules
 
 # Next.js standalone server (includes server.js + minimal deps)
