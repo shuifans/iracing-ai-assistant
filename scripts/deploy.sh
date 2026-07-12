@@ -9,7 +9,11 @@ fi
 
 cd /opt/iracing-ai-assistant
 
-git pull origin master
+if [ -d .git ]; then
+  git pull origin master
+else
+  echo "No git repository found, skipping git pull"
+fi
 npm ci --production=false
 npm run build
 cp -r .next/static .next/standalone/.next/static
