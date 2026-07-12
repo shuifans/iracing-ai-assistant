@@ -92,76 +92,84 @@ async function apiCall(url: string, options?: RequestInit): Promise<{ ok: boolea
   }
 }
 
+// ── Custom hook ──────────────────────────────────────────────────────────────
+
+function useUsers(activeTab: string, filterValues: Record<string, string>, cursor: string | undefined, refreshTrigger: number) {
+  const [users, setUsers] = useState<UserSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchUsers() {
+      setLoading(true);
+      try {
+        if (activeTab === 'pending') {
+          const res = await authFetch('/api/admin/users/pending');
+          if (cancelled) return;
+          if (res.ok) {
+            const json = (await res.json()) as { data: { users: UserSummary[] } };
+            setUsers(json.data.users);
+          } else {
+            setUsers([]);
+          }
+        } else {
+          const params = new URLSearchParams();
+          params.set('limit', '20');
+          if (filterValues.role) params.set('role', filterValues.role);
+          if (filterValues.status) params.set('status', filterValues.status);
+          if (filterValues.search) params.set('search', filterValues.search);
+          if (cursor) params.set('cursor', cursor);
+
+          const res = await authFetch(`/api/admin/users?${params.toString()}`);
+          if (cancelled) return;
+          if (res.ok) {
+            const json = (await res.json()) as {
+              data: { users: UserSummary[] };
+              pagination?: { nextCursor: string | null };
+            };
+            setUsers(json.data.users);
+          } else {
+            setUsers([]);
+          }
+        }
+      } catch {
+        if (!cancelled) setUsers([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    fetchUsers();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, filterValues, cursor, refreshTrigger]);
+
+  return { users, loading };
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdminUsersPage() {
   const [activeTab, setActiveTab] = useState('pending');
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [users, setUsers] = useState<UserSummary[]>([]);
-  const [loading, setLoading] = useState(true);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Modal / dialog state
   const [modal, setModal] = useState<ModalState | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
 
-  // ── Fetch users ────────────────────────────────────────────────────────────
+  const currentCursor = cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
+  const { users, loading } = useUsers(activeTab, filterValues, currentCursor, refreshTrigger);
 
-  const fetchUsers = useCallback(async (cursor?: string) => {
-    setLoading(true);
-    try {
-      if (activeTab === 'pending') {
-        const res = await authFetch('/api/admin/users/pending');
-        if (res.ok) {
-          const json = (await res.json()) as { data: { users: UserSummary[] } };
-          setUsers(json.data.users);
-          setNextCursor(null);
-        } else {
-          setUsers([]);
-          setNextCursor(null);
-        }
-      } else {
-        const params = new URLSearchParams();
-        params.set('limit', '20');
-        if (filterValues.role) params.set('role', filterValues.role);
-        if (filterValues.status) params.set('status', filterValues.status);
-        if (filterValues.search) params.set('search', filterValues.search);
-        if (cursor) params.set('cursor', cursor);
-
-        const res = await authFetch(`/api/admin/users?${params.toString()}`);
-        if (res.ok) {
-          const json = (await res.json()) as {
-            data: { users: UserSummary[] };
-            pagination?: { nextCursor: string | null };
-          };
-          setUsers(json.data.users);
-          setNextCursor(json.pagination?.nextCursor ?? null);
-        } else {
-          setUsers([]);
-          setNextCursor(null);
-        }
-      }
-    } catch {
-      setUsers([]);
-      setNextCursor(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeTab, filterValues]);
-
-  useEffect(() => {
+  function refreshList() {
     setCursorStack([]);
     setNextCursor(null);
-    void fetchUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
-
-  function applyFilters() {
-    setCursorStack([]);
-    setNextCursor(null);
-    void fetchUsers();
+    setRefreshTrigger((t) => t + 1);
   }
 
   // ── Action handlers ────────────────────────────────────────────────────────
@@ -207,7 +215,7 @@ export default function AdminUsersPage() {
       );
     }
 
-    void fetchUsers(cursorStack[cursorStack.length - 1]);
+    setRefreshTrigger((t) => t + 1);
   }
 
   async function executeModal(data: { reason?: string; role?: string }) {
@@ -235,22 +243,19 @@ export default function AdminUsersPage() {
       );
     }
 
-    void fetchUsers(cursorStack[cursorStack.length - 1]);
+    setRefreshTrigger((t) => t + 1);
   }
 
   // ── Pagination ─────────────────────────────────────────────────────────────
 
   function handleNext(cursor: string) {
     setCursorStack((prev) => [...prev, cursor]);
-    void fetchUsers(cursor);
   }
 
   function handlePrev() {
     setCursorStack((prev) => {
       const next = [...prev];
       next.pop();
-      const prevCursor = next[next.length - 1];
-      void fetchUsers(prevCursor);
       return next;
     });
   }
@@ -314,7 +319,7 @@ export default function AdminUsersPage() {
           onChange={(name, value) =>
             setFilterValues((prev) => ({ ...prev, [name]: value }))
           }
-          onSearch={applyFilters}
+          onSearch={refreshList}
         />
       )}
 

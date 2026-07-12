@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, startTransition } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { authFetch } from '@/lib/auth-client';
 import { Toast } from '@/components/common';
@@ -27,17 +27,12 @@ interface DraftDetail {
   renderedMarkdown: string;
 }
 
-export default function ReviewPage() {
-  const params = useParams<{ draftId: string }>();
-  const router = useRouter();
-  const draftId = params.draftId;
-
+function useDraftDetail(draftId: string) {
   const [data, setData] = useState<DraftDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
-  const fetchDraft = async () => {
+  const fetchDraft = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -53,12 +48,24 @@ export default function ReviewPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [draftId]);
 
   useEffect(() => {
-    if (draftId) fetchDraft();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftId]);
+    startTransition(() => {
+      if (draftId) fetchDraft();
+    });
+  }, [draftId, fetchDraft]);
+
+  return { data, loading, error, fetchDraft };
+}
+
+export default function ReviewPage() {
+  const params = useParams<{ draftId: string }>();
+  const router = useRouter();
+  const draftId = params.draftId;
+
+  const { data, loading, error, fetchDraft } = useDraftDetail(draftId);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   if (loading) {
     return (

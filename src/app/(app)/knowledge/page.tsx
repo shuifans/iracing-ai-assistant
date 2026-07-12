@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, startTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Tabs, Pagination, FilterBar, ConfirmDialog, Toast } from '@/components/common';
 import { DataTable } from '@/components/common';
@@ -52,13 +52,11 @@ interface KnowledgeItem {
 }
 
 // ---------------------------------------------------------------------------
-// Page component
+// Custom hook for tab-based data fetching
 // ---------------------------------------------------------------------------
 
-export default function KnowledgePage() {
-  const router = useRouter();
+function useKnowledgePageData() {
   const [activeTab, setActiveTab] = useState('sources');
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   // ── Sources ─────────────────────────────────────────────────────────────
   const [sources, setSources] = useState<Source[]>([]);
@@ -80,7 +78,7 @@ export default function KnowledgePage() {
       setSources(json.data.sources);
       setSourcesCursor(json.pagination?.nextCursor ?? null);
     } catch {
-      setToast({ message: '加载来源失败', type: 'error' });
+      // handled by toast in component
     } finally {
       setSourcesLoading(false);
     }
@@ -108,7 +106,7 @@ export default function KnowledgePage() {
       setJobs(json.data.jobs);
       setJobsCursor(json.pagination?.nextCursor ?? null);
     } catch {
-      setToast({ message: '加载任务失败', type: 'error' });
+      // handled by toast in component
     } finally {
       setJobsLoading(false);
     }
@@ -137,7 +135,7 @@ export default function KnowledgePage() {
       setItems(json.data.items);
       setItemsCursor(json.pagination?.nextCursor ?? null);
     } catch {
-      setToast({ message: '加载知识条目失败', type: 'error' });
+      // handled by toast in component
     } finally {
       setItemsLoading(false);
     }
@@ -145,11 +143,41 @@ export default function KnowledgePage() {
 
   // ── Tab change ──────────────────────────────────────────────────────────
   useEffect(() => {
-    if (activeTab === 'sources') fetchSources();
-    else if (activeTab === 'jobs') fetchJobs(undefined, jobStatusFilter || undefined);
-    else if (activeTab === 'items') fetchItems(undefined, itemFilters);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+    startTransition(() => {
+      if (activeTab === 'sources') fetchSources();
+      else if (activeTab === 'jobs') fetchJobs(undefined, jobStatusFilter || undefined);
+      else if (activeTab === 'items') fetchItems(undefined, itemFilters);
+    });
+  }, [activeTab, fetchSources, fetchJobs, fetchItems, jobStatusFilter, itemFilters]);
+
+  return {
+    activeTab, setActiveTab,
+    sources, sourcesLoading, sourcesCursor, sourcesCursorStack, setSourcesCursor, setSourcesCursorStack,
+    jobs, jobsLoading, jobsCursor, jobsCursorStack, setJobsCursor, setJobsCursorStack,
+    jobStatusFilter, setJobStatusFilter,
+    items, itemsLoading, itemsCursor, itemsCursorStack, setItemsCursor, setItemsCursorStack,
+    itemFilters, setItemFilters,
+    fetchSources, fetchJobs, fetchItems,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Page component
+// ---------------------------------------------------------------------------
+
+export default function KnowledgePage() {
+  const router = useRouter();
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const {
+    activeTab, setActiveTab,
+    sources, sourcesLoading, sourcesCursor, sourcesCursorStack, setSourcesCursor, setSourcesCursorStack,
+    jobs, jobsLoading, jobsCursor, jobsCursorStack, setJobsCursor, setJobsCursorStack,
+    jobStatusFilter, setJobStatusFilter,
+    items, itemsLoading, itemsCursor, itemsCursorStack, setItemsCursor, setItemsCursorStack,
+    itemFilters, setItemFilters,
+    fetchSources, fetchJobs, fetchItems,
+  } = useKnowledgePageData();
 
   // ── Job actions ─────────────────────────────────────────────────────────
   const [confirmAction, setConfirmAction] = useState<{

@@ -11,6 +11,7 @@
  */
 
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import {
   query,
   accessTokenFromEnv,
@@ -18,6 +19,7 @@ import {
   type SDKMessage,
 } from '@qoder-ai/qoder-agent-sdk';
 import type { AgentDefinition } from '@qoder-ai/qoder-agent-sdk';
+import type { ModelPolicyProvider } from '@qoder-ai/qoder-agent-sdk';
 import type { ChatQueryOptions, AgentConfig } from './types';
 import {
   CHAT_SYSTEM_PROMPT,
@@ -50,6 +52,19 @@ export const DISALLOWED_TOOLS: string[] = [
   'EnterWorktree',
   'ExitWorktree',
 ];
+
+/**
+ * Resolve the qodercli entry point.
+ * On Windows the .cmd wrapper causes EINVAL with Node's spawn;
+ * point directly to the JS bundle instead.
+ */
+function resolveCliPath(): string | undefined {
+  if (process.platform !== 'win32') return undefined;
+  const candidates = [
+    path.join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@qoder-ai', 'qodercli', 'bundle', 'qodercli.js'),
+  ];
+  return candidates.find(existsSync);
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -151,6 +166,21 @@ const postToolUseHook = async (input: any): Promise<any> => {
 };
 
 // ---------------------------------------------------------------------------
+// Model policy — enable thinking for the main agent (pull-mode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a resolveModel callback that enables thinking/reasoning.
+ * Pull-mode: the SDK asks us before each LLM call which model to use.
+ */
+function createModelPolicy(model?: string): ModelPolicyProvider {
+  return async (_ctx) => ({
+    model: model ?? 'qmodel',
+    parameters: { reasoningEffort: 'high' },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Sub-agent definitions (SPEC 10.2)
 // ---------------------------------------------------------------------------
 
@@ -194,11 +224,15 @@ export function createChatQuery(
     options.historyContext ?? '',
   );
 
+  const cliPath = resolveCliPath();
+
   const queryOptions: Options = {
     auth: accessTokenFromEnv(),
     cwd: config.wikiRoot,
     model: config.model,
     maxTurns: 15,
+    ...(cliPath ? { pathToQoderCLIExecutable: cliPath } : {}),
+    resolveModel: createModelPolicy(config.model),
     systemPrompt,
     tools: ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Agent'],
     allowedTools: ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Agent'],
@@ -241,11 +275,15 @@ export function createCleaningQuery(
     },
   };
 
+  const cliPath = resolveCliPath();
+
   const queryOptions: Options = {
     auth: accessTokenFromEnv(),
     cwd: path.resolve(config.wikiRoot, '..'), // data directory, not wiki
     model: config.model,
     maxTurns: 8,
+    ...(cliPath ? { pathToQoderCLIExecutable: cliPath } : {}),
+    resolveModel: createModelPolicy(config.model),
     disallowedTools: DISALLOWED_TOOLS,
     agents,
     includePartialMessages: false,

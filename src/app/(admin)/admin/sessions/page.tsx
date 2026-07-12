@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, startTransition } from 'react';
 import { authFetch } from '@/lib/auth-client';
 import { Pagination } from '@/components/common/Pagination';
 import { SessionTable } from '@/components/admin/SessionTable';
@@ -28,23 +28,11 @@ interface SessionMessage {
 
 const PAGE_LIMIT = 20;
 
-export default function AdminSessionsPage() {
-  // Filters
-  const [userId, setUserId] = useState('');
-  const [keyword, setKeyword] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-
-  // Data
+function useAdminSessions(userId: string, keyword: string, fromDate: string, toDate: string) {
   const [sessions, setSessions] = useState<AdminSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
-
-  // Detail modal
-  const [selectedSession, setSelectedSession] = useState<AdminSession | null>(null);
-  const [detailMessages, setDetailMessages] = useState<SessionMessage[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
 
   const currentCursor = cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
 
@@ -75,7 +63,9 @@ export default function AdminSessionsPage() {
   }, [userId, keyword, fromDate, toDate, currentCursor]);
 
   useEffect(() => {
-    fetchSessions();
+    startTransition(() => {
+      fetchSessions();
+    });
   }, [fetchSessions]);
 
   function handleSearch() {
@@ -90,6 +80,23 @@ export default function AdminSessionsPage() {
   function handlePrev() {
     setCursorStack((prev) => prev.slice(0, -1));
   }
+
+  return { sessions, loading, nextCursor, cursorStack, handleSearch, handleNext, handlePrev };
+}
+
+export default function AdminSessionsPage() {
+  // Filters
+  const [userId, setUserId] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+
+  const { sessions, loading, nextCursor, cursorStack, handleSearch, handleNext, handlePrev } = useAdminSessions(userId, keyword, fromDate, toDate);
+
+  // Detail modal
+  const [selectedSession, setSelectedSession] = useState<AdminSession | null>(null);
+  const [detailMessages, setDetailMessages] = useState<SessionMessage[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   async function handleSelectSession(session: AdminSession) {
     setSelectedSession(session);

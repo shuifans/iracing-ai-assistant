@@ -20,6 +20,7 @@ build/
 data/*.sqlite
 data/*.sqlite-wal
 data/*.sqlite-shm
+data/db/
 
 # Test
 coverage/
@@ -37,11 +38,12 @@ Thumbs.db
 # Debug
 npm-debug.log*
 
+# QA
+qa-report/
+
 # Qoder
 .qoder
 
 # Misc
 *.tsbuildinfo
 next-env.d.ts
-# Qoder
-.qoder

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, startTransition } from 'react';
 import { authFetch } from '@/lib/auth-client';
 import { FilterBar } from '@/components/common/FilterBar';
 import { Pagination } from '@/components/common/Pagination';
@@ -34,7 +34,7 @@ interface ApiResult {
   meta: { nextCursor: string | null };
 }
 
-export default function AuditPage() {
+function useAuditLogs() {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -70,12 +70,13 @@ export default function AuditPage() {
   );
 
   useEffect(() => {
-    fetchLogs(currentCursor);
+    startTransition(() => {
+      fetchLogs(currentCursor);
+    });
   }, [fetchLogs, currentCursor]);
 
   function handleFilterChange(name: string, value: string) {
     setFilterValues((prev) => ({ ...prev, [name]: value }));
-    // Reset pagination when filter changes
     setCursorStack([]);
     setCurrentCursor(undefined);
   }
@@ -93,6 +94,12 @@ export default function AuditPage() {
       return next;
     });
   }
+
+  return { logs, loading, nextCursor, cursorStack, filterValues, handleFilterChange, handleNext, handlePrev };
+}
+
+export default function AuditPage() {
+  const { logs, loading, nextCursor, cursorStack, filterValues, handleFilterChange, handleNext, handlePrev } = useAuditLogs();
 
   return (
     <div className="space-y-6">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useReducer } from 'react';
 
 interface RateLimitFormProps {
   initial: {
@@ -34,20 +34,48 @@ function validatePositiveInt(value: number, label: string): string | undefined {
   return undefined;
 }
 
-export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFormProps) {
-  const [perMinuteLimit, setPerMinuteLimit] = useState(initial.perMinuteLimit);
-  const [perDayLimit, setPerDayLimit] = useState(initial.perDayLimit);
-  const [maxSessionTurns, setMaxSessionTurns] = useState(initial.maxSessionTurns);
-  const [enabled, setEnabled] = useState(initial.enabled);
-  const [errors, setErrors] = useState<FieldErrors>({});
+interface FormState {
+  perMinuteLimit: number;
+  perDayLimit: number;
+  maxSessionTurns: number;
+  enabled: boolean;
+  errors: FieldErrors;
+}
 
-  useEffect(() => {
-    setPerMinuteLimit(initial.perMinuteLimit);
-    setPerDayLimit(initial.perDayLimit);
-    setMaxSessionTurns(initial.maxSessionTurns);
-    setEnabled(initial.enabled);
-    setErrors({});
-  }, [initial]);
+type FormAction =
+  | { type: 'setPerMinuteLimit'; value: number }
+  | { type: 'setPerDayLimit'; value: number }
+  | { type: 'setMaxSessionTurns'; value: number }
+  | { type: 'setEnabled'; value: boolean }
+  | { type: 'setErrors'; value: FieldErrors };
+
+function formReducer(state: FormState, action: FormAction): FormState {
+  switch (action.type) {
+    case 'setPerMinuteLimit':
+      return { ...state, perMinuteLimit: action.value };
+    case 'setPerDayLimit':
+      return { ...state, perDayLimit: action.value };
+    case 'setMaxSessionTurns':
+      return { ...state, maxSessionTurns: action.value };
+    case 'setEnabled':
+      return { ...state, enabled: action.value };
+    case 'setErrors':
+      return { ...state, errors: action.value };
+    default:
+      return state;
+  }
+}
+
+export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFormProps) {
+  const [state, dispatch] = useReducer(formReducer, {
+    perMinuteLimit: initial.perMinuteLimit,
+    perDayLimit: initial.perDayLimit,
+    maxSessionTurns: initial.maxSessionTurns,
+    enabled: initial.enabled,
+    errors: {},
+  });
+
+  const { perMinuteLimit, perDayLimit, maxSessionTurns, enabled, errors } = state;
 
   function validate(): boolean {
     const next: FieldErrors = {
@@ -55,7 +83,7 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
       perDayLimit: validatePositiveInt(perDayLimit, '每日限制'),
       maxSessionTurns: validatePositiveInt(maxSessionTurns, '最大会话轮数'),
     };
-    setErrors(next);
+    dispatch({ type: 'setErrors', value: next });
     return !next.perMinuteLimit && !next.perDayLimit && !next.maxSessionTurns;
   }
 
@@ -86,7 +114,7 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
           min={1}
           step={1}
           value={perMinuteLimit}
-          onChange={(e) => setPerMinuteLimit(parseInt(e.target.value, 10) || 0)}
+          onChange={(e) => dispatch({ type: 'setPerMinuteLimit', value: parseInt(e.target.value, 10) || 0 })}
           className={`w-full rounded-lg border px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
             errors.perMinuteLimit ? 'border-red-400' : 'border-gray-300'
           }`}
@@ -107,7 +135,7 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
           min={1}
           step={1}
           value={perDayLimit}
-          onChange={(e) => setPerDayLimit(parseInt(e.target.value, 10) || 0)}
+          onChange={(e) => dispatch({ type: 'setPerDayLimit', value: parseInt(e.target.value, 10) || 0 })}
           className={`w-full rounded-lg border px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
             errors.perDayLimit ? 'border-red-400' : 'border-gray-300'
           }`}
@@ -128,7 +156,7 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
           min={1}
           step={1}
           value={maxSessionTurns}
-          onChange={(e) => setMaxSessionTurns(parseInt(e.target.value, 10) || 0)}
+          onChange={(e) => dispatch({ type: 'setMaxSessionTurns', value: parseInt(e.target.value, 10) || 0 })}
           className={`w-full rounded-lg border px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
             errors.maxSessionTurns ? 'border-red-400' : 'border-gray-300'
           }`}
@@ -148,7 +176,7 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
           type="button"
           role="switch"
           aria-checked={enabled}
-          onClick={() => setEnabled((v) => !v)}
+          onClick={() => dispatch({ type: 'setEnabled', value: !enabled })}
           className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
             enabled ? 'bg-blue-600' : 'bg-gray-300'
           }`}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, startTransition } from 'react';
 import { authFetch } from '@/lib/auth-client';
 import type {
   StatsOverview as StatsOverviewType,
@@ -38,17 +38,19 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
-export default function StatsPage() {
+function useStats() {
   const [period, setPeriod] = useState<Period>('7d');
   const [loading, setLoading] = useState(true);
-
   const [overview, setOverview] = useState<StatsOverviewType | null>(null);
   const [usage, setUsage] = useState<UsageTrend[]>([]);
   const [questions, setQuestions] = useState<PopularQuestion[]>([]);
   const [costs, setCosts] = useState<CostSummary[]>([]);
   const [feedback, setFeedback] = useState<FeedbackStatsType | null>(null);
 
-  const load = useCallback(async (p: Period) => {
+  // Fix: useEffect 中直接 setState 会触发 react-hooks/set-state-in-effect
+  // 将 fetch 逻辑封装为 useCallback，并通过 startTransition 包裹 setState
+  // 批量合并状态更新，减少不必要的中间渲染
+  const loadStats = useCallback(async (p: Period) => {
     setLoading(true);
     const { fromDate, toDate } = getDateRange(p);
     const qs = `fromDate=${fromDate}&toDate=${toDate}`;
@@ -61,17 +63,26 @@ export default function StatsPage() {
       fetchJson<FeedbackStatsType>(`/api/admin/stats/feedback?${qs}`),
     ]);
 
-    setOverview(ov);
-    setUsage(us ?? []);
-    setQuestions(qs2 ?? []);
-    setCosts(cs ?? []);
-    setFeedback(fb);
-    setLoading(false);
+    // 使用 startTransition 批量合并 setState，减少不必要的渲染
+    startTransition(() => {
+      setOverview(ov);
+      setUsage(us ?? []);
+      setQuestions(qs2 ?? []);
+      setCosts(cs ?? []);
+      setFeedback(fb);
+      setLoading(false);
+    });
   }, []);
 
   useEffect(() => {
-    load(period);
-  }, [period, load]);
+    loadStats(period);
+  }, [period, loadStats]);
+
+  return { period, setPeriod, loading, overview, usage, questions, costs, feedback };
+}
+
+export default function StatsPage() {
+  const { period, setPeriod, loading, overview, usage, questions, costs, feedback } = useStats();
 
   const periodOptions: { value: Period; label: string }[] = [
     { value: '7d', label: '最近 7 天' },
