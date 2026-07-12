@@ -38,6 +38,9 @@ Thumbs.db
 # Debug
 npm-debug.log*
 
+# SSL certificates
+ssl_cert/
+
 # QA
 qa-report/
 
