@@ -3,7 +3,7 @@ const nextConfig = {
   output: 'standalone',
   experimental: {
     instrumentationHook: true,
-    serverComponentsExternalPackages: ['better-sqlite3', '@qoder-ai/qoder-agent-sdk'],
+    serverComponentsExternalPackages: ['better-sqlite3', '@qoder-ai/qoder-agent-sdk', 'bcrypt'],
   },
 };
 
