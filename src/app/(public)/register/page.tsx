@@ -2,8 +2,13 @@
 
 import { useState, FormEvent } from 'react';
 import Link from 'next/link';
-
-const MIN_PASSWORD_LENGTH = 8;
+import {
+  MAX_USERNAME_LENGTH,
+  MIN_PASSWORD_LENGTH,
+  MIN_USERNAME_LENGTH,
+  USERNAME_ALLOWED_DESC,
+  USERNAME_REGEX,
+} from '@/modules/auth/constants';
 
 export default function RegisterPage() {
   const [username, setUsername] = useState('');
@@ -15,6 +20,15 @@ export default function RegisterPage() {
   const [success, setSuccess] = useState(false);
 
   function validate(): string | null {
+    if (username.length < MIN_USERNAME_LENGTH) {
+      return `用户名至少 ${MIN_USERNAME_LENGTH} 个字符`;
+    }
+    if (username.length > MAX_USERNAME_LENGTH) {
+      return `用户名最多 ${MAX_USERNAME_LENGTH} 个字符`;
+    }
+    if (!USERNAME_REGEX.test(username)) {
+      return `用户名只允许${USERNAME_ALLOWED_DESC}`;
+    }
     if (password.length < MIN_PASSWORD_LENGTH) {
       return `密码长度不能少于 ${MIN_PASSWORD_LENGTH} 位`;
     }
@@ -48,11 +62,12 @@ export default function RegisterPage() {
         body: JSON.stringify(body),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => null);
 
       if (!res.ok) {
         const msg =
-          (json as { error?: { message?: string } }).error?.message ?? '注册失败，请稍后重试';
+          (json as { error?: { message?: string } } | null)?.error?.message ??
+          '服务器错误，请稍后重试';
         setError(msg);
         return;
       }

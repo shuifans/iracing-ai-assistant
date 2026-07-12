@@ -25,11 +25,12 @@ export default function LoginPage() {
         body: JSON.stringify({ username, password }),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => null);
 
       if (!res.ok) {
         const msg =
-          (json as { error?: { message?: string } }).error?.message ?? '登录失败，请稍后重试';
+          (json as { error?: { message?: string } } | null)?.error?.message ??
+          '服务器错误，请稍后重试';
         setError(msg);
         return;
       }
