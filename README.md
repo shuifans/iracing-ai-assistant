@@ -84,15 +84,25 @@ Docker: iracing-ai-assistant
 
 ## 知识库
 
-知识库按三大方向组织，存储为结构化 Markdown 文件：
+知识库按三大方向组织，存储为结构化 Markdown 文件（含 YAML Front Matter）：
 
 ```
 md-wiki/
 ├── track-technique/    # 赛道技术（走线、刹车、轮胎、悬挂）
-├── car-setup/          # 车辆调校（理论、实操、工具）
+│   ├── braking/        # 刹车技术
+│   └── driving-line/   # 走线与赛车线
+├── car-setup/          # 车辆调校（理论、预设、工具）
+│   ├── presets/        # 调校预设
+│   └── theory/         # 调校理论（轮胎模型、物理引擎）
 ├── basics/             # 基础知识（入门、购车、赛事、硬件）
-└── index.md            # 知识库索引
+│   ├── getting-started/# 新手入门
+│   ├── buying-guide/   # 购车指南
+│   ├── hardware/       # 硬件设备
+│   └── series-and-league/ # 赛事与联赛
+└── index.md            # 知识库索引（自动生成）
 ```
+
+**当前状态**：已初始化 18 篇知识文档，覆盖官方新手指南、iRating 说明、驾照等级、赛车线基础、刹车曲线分析、NTM V7 轮胎模型等核心主题。
 
 ### 知识来源
 
@@ -137,7 +147,15 @@ src/
 worker/                     # 离线知识清洗 Worker
 tests/                      # 单元 / 集成 / 契约 / E2E 测试
 docker/                     # Dockerfile + Compose + Nginx
-scripts/                    # 运维脚本（备份、恢复、引导管理员）
+scripts/                    # 运维脚本
+├── deploy.sh             # 生产部署（git pull + build + PM2 restart）
+├── backup.sh             # 数据库备份
+├── restore.sh            # 数据库恢复
+├── bootstrap-admin.ts    # 初始化管理员
+├── seed-wiki.ts          # 知识库种子清洗（LLM API 优先，Qoder SDK 兜底）
+├── validate-wiki.ts      # Wiki 文件 Front Matter 验证
+├── rebuild-index.ts      # 重建 index.md 索引
+└── test-model.ts         # LLM 模型可用性测试
 ```
 
 ---
@@ -183,6 +201,17 @@ npm run dev
 | `npm run db:migrate`   | 执行数据库迁移       |
 | `npm run db:studio`    | Drizzle 数据库管理台 |
 
+### 知识库脚本
+
+| 命令                                          | 说明                           |
+| --------------------------------------------- | ------------------------------ |
+| `npx tsx scripts/seed-wiki.ts`                | 抓取 URL 并清洗为 Wiki 文档    |
+| `npx tsx scripts/seed-wiki.ts --dry-run`     | 仅抓取不清洗，验证 URL 可用性  |
+| `npx tsx scripts/seed-wiki.ts --force`       | 强制重刷已有内容               |
+| `npx tsx scripts/validate-wiki.ts`           | 验证所有 Wiki 文件格式         |
+| `npx tsx scripts/rebuild-index.ts`           | 重建 index.md                  |
+| `npx tsx scripts/test-model.ts`              | 测试 LLM 模型连通性            |
+
 ---
 
 ## 部署
@@ -217,7 +246,7 @@ npm run dev
 - [x] 离线 Worker（知识清洗任务调度、租约、重试）
 - [x] Docker 部署配置（Dockerfile、Compose、Nginx）
 - [x] 运维脚本（备份、恢复、引导管理员）
-- [ ] md-wiki 知识库内容初始化
+- [x] md-wiki 知识库内容初始化（18 篇，覆盖官方指南、驾驶技术、调校理论）
 - [ ] E2E 测试完善
 - [ ] 生产部署上线与验收
 
