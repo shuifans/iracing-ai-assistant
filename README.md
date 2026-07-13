@@ -69,7 +69,7 @@ PM2 Process Manager (shserver, Ubuntu 24.04)
 | Token       | jose (JWT HS256)                      |
 | 文档解析    | mammoth / pdf-parse / xlsx            |
 | 测试        | Vitest + Testing Library + Playwright |
-| 部署        | Docker Compose + Nginx                |
+| 部署        | PM2 + Nginx + Let's Encrypt           |
 
 ### Agent 架构
 
@@ -146,7 +146,7 @@ src/
 └── lib/                    # 公共工具
 worker/                     # 离线知识清洗 Worker
 tests/                      # 单元 / 集成 / 契约 / E2E 测试
-docker/                     # Dockerfile + Compose + Nginx
+config/nginx/                # Nginx 站点配置
 scripts/                    # 运维脚本
 ├── deploy.sh             # 生产部署（git pull + build + PM2 restart）
 ├── backup.sh             # 数据库备份
@@ -255,7 +255,7 @@ npm run dev
 - [x] 知识管理（文件/URL 上传 → 异步清洗 → 审核 → 发布 → Git 版本化）
 - [x] 管理后台（用户管理、会话质检、统计、限流、审计日志）
 - [x] 离线 Worker（知识清洗任务调度、租约、重试）
-- [x] Docker 部署配置（Dockerfile、Compose、Nginx）
+- [x] PM2 部署配置（ecosystem.config.cjs、Nginx）
 - [x] 运维脚本（备份、恢复、引导管理员）
 - [x] md-wiki 知识库内容初始化（18 篇，覆盖官方指南、驾驶技术、调校理论）
 - [x] E2E 测试完善

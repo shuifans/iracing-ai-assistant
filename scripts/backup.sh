@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DATABASE_PATH="${DATABASE_PATH:-/data/db/app.sqlite}"
-WIKI_ROOT="${WIKI_ROOT:-/data/md-wiki}"
-BACKUP_ROOT="${BACKUP_ROOT:-/data/backups}"
+DATABASE_PATH="${DATABASE_PATH:-/srv/iracing-ai-assistant/data/db/app.sqlite}"
+WIKI_ROOT="${WIKI_ROOT:-/srv/iracing-ai-assistant/data/md-wiki}"
+BACKUP_ROOT="${BACKUP_ROOT:-/srv/iracing-ai-assistant/data/backups}"
 DATE=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="${BACKUP_ROOT}/${DATE}"
 
@@ -32,12 +32,12 @@ if [ -d "${WIKI_ROOT}/.git" ]; then
 fi
 
 # 3. Upload/draft file manifests
-find /data/uploads -type f 2>/dev/null | sort > "${BACKUP_DIR}/uploads-manifest.txt" || true
-find /data/drafts -type f 2>/dev/null | sort > "${BACKUP_DIR}/drafts-manifest.txt" || true
+find ${DATA_ROOT:-/srv/iracing-ai-assistant/data}/uploads -type f 2>/dev/null | sort > "${BACKUP_DIR}/uploads-manifest.txt" || true
+find ${DATA_ROOT:-/srv/iracing-ai-assistant/data}/drafts -type f 2>/dev/null | sort > "${BACKUP_DIR}/drafts-manifest.txt" || true
 
 # 4. Env variable names (no values)
-if [ -f /app/.env ]; then
-  grep -v '^#' /app/.env | grep -v '^$' | cut -d= -f1 > "${BACKUP_DIR}/env-keys.txt" 2>/dev/null || true
+if [ -f /opt/iracing-ai-assistant/.env ]; then
+  grep -v '^#' /opt/iracing-ai-assistant/.env | grep -v '^$' | cut -d= -f1 > "${BACKUP_DIR}/env-keys.txt" 2>/dev/null || true
 fi
 
 # 5. Cleanup old backups (keep 7 daily + 4 weekly)

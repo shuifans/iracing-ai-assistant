@@ -74,9 +74,9 @@
 
 | 项目       | 说明                                                                                     |
 | ---------- | ---------------------------------------------------------------------------------------- |
-| **服务器** | hkserver（IP: 8.218.234.193）                                                            |
+| **服务器** | shserver（IP: 106.14.113.247, 上海阿里云）                                               |
 | **域名**   | `ai.iracing.club`（与已有 `iracing.club` 社区网站区分）                                  |
-| **HTTPS**  | 复用 `iracing.club` 的 SSL 证书，配置到 `ai.iracing.club` 子域名                         |
+| **HTTPS**  | Let's Encrypt (Certbot, 自动续期)，配置到 `ai.iracing.club` 子域名                       |
 | **独立性** | V1 作为独立应用开发和部署，拥有独立代码仓库和部署服务器，后续可视需求对接 `iracing.club` |
 
 ### 2.3 后续发布渠道（Phase 2+）
@@ -351,7 +351,7 @@ Eau Rouge 是 Spa 赛道最具标志性的弯道...
 | **LLM**       | 兼容 OpenAI/Anthropic 协议的模型     | 如阿里云百炼 qwen3.6-plus、小米 MIMO 等，需支持视觉理解 |
 | **认证**      | JWT（jose 库）                       | Access Token + Refresh Token                            |
 | **数据库**    | SQLite (better-sqlite3)              | 用户、会话、知识条目等结构化数据存储                    |
-| **部署**      | Docker + Nginx                       | 容器化部署，Nginx 反向代理 + HTTPS                      |
+| **部署**      | PM2 + Nginx                        | PM2 进程管理，Nginx 反向代理 + HTTPS                    |
 
 ### 4.2 Agent 架构设计
 
@@ -587,7 +587,7 @@ const webFetchAgent = {
 
 **与 iracing.club 隔离措施**：
 
-- 使用独立 Docker 容器
+- 使用独立 PM2 进程组
 - 独立 Nginx server block
 - 独立数据库文件
 - 独立进程端口
@@ -629,7 +629,7 @@ const webFetchAgent = {
 
 | 方面     | 措施                                             |
 | -------- | ------------------------------------------------ |
-| 服务监控 | Docker 容器健康检查，异常自动重启                |
+| 服务监控 | PM2 进程监控 + max_restarts 策略，异常自动重启 |
 | 日志     | 结构化日志（请求日志、错误日志、Agent 执行日志） |
 | 数据备份 | SQLite 数据库每日自动备份                        |
 | 降级策略 | LLM 服务不可用时，返回预设常见问题回答           |
@@ -673,7 +673,7 @@ const webFetchAgent = {
 |                | 知识库条目管理（CRUD）                               | P0     |
 |                | 使用统计面板                                         | P1     |
 |                | 限流配置                                             | P0     |
-| **部署**       | Docker 容器化部署                                    | P0     |
+| **部署**       | PM2 部署配置                                       | P0     |
 |                | Nginx + HTTPS 配置                                   | P0     |
 |                | 域名 ai.iracing.club 解析                            | P0     |
 
@@ -698,7 +698,7 @@ const webFetchAgent = {
 
 | 风险                              | 影响                                                               | 缓解措施                                                                       |
 | --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| **Qoder Agent SDK 依赖 qodercli** | SDK 需要本地安装 `qodercli` 可执行文件，部署服务器需确保环境已安装 | 部署脚本中增加 qodercli 安装检查，Docker 镜像中预装                            |
+| **Qoder Agent SDK 依赖 qodercli** | SDK 需要本地安装 `qodercli` 可执行文件，部署服务器需确保环境已安装 | 部署脚本中增加 qodercli 安装检查，服务器环境中预装                            |
 | **BYOK 可用性**                   | 自有模型接入依赖 provider 目录匹配，可能因 provider 变更导致不可用 | 准备多个备选 LLM provider，定期验证连通性                                      |
 | **DeepSeek API 并发限制**         | DeepSeek API 存在账号级并发限制，高并发时可能触发限流              | 实现请求队列和退避重试机制，监控并发数                                         |
 | **子 Agent 嵌套限制**             | 子 Agent 仅支持一层深度，复杂任务无法多层分解                      | 合理设计子 Agent 职责粒度，避免需要多层嵌套的场景                              |
@@ -893,9 +893,10 @@ iracing-ai-assistant/
 │   ├── db.sqlite               # SQLite 数据库（用户/会话/消息）
 ├── md-wiki/                    # Markdown Wiki 知识库文件（按 3.2.2 目录结构）
 ├── public/                     # 静态资源
-├── docker/                     # Docker 相关配置
-│   ├── Dockerfile
-│   └── nginx.conf
+├── ecosystem.config.cjs        # PM2 进程配置
+├── config/
+│   └── nginx/                  # Nginx 配置
+│       └── ai.iracing.club.conf
 ├── .env.local                  # 环境变量
 ├── next.config.ts              # Next.js 配置
 ├── tailwind.config.ts          # Tailwind CSS 配置
