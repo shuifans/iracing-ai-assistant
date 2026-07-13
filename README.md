@@ -35,24 +35,24 @@ iRacing AI 助手整合官方文档、权威社区、专业教程等知识源，
 Internet
    │
    ▼
-Nginx :443 (HTTPS)
+Nginx :443 (HTTPS, Let's Encrypt)
    │
    ▼
-Docker: iracing-ai-assistant
-   ├── Web process (Next.js 14 App Router)
+PM2 Process Manager (shserver, Ubuntu 24.04)
+   ├── iracing-ai-web (Next.js 14 App Router, 512M limit)
    │   ├── H5 + Admin UI (React + Tailwind CSS)
    │   ├── Route Handlers / SSE
    │   ├── Auth / RBAC / Rate Limit
    │   └── Qoder Chat Sessions
-   ├── Worker process
+   ├── iracing-ai-worker (知识清洗 Worker, 256M limit)
    │   ├── SQLite Job Leasing
    │   ├── File & URL Extraction
    │   ├── Qoder Knowledge Cleaning
    │   └── Draft Generation / Publish
-   ├── SQLite (/data/db/app.sqlite)
-   ├── Uploads (/data/uploads)
-   ├── Drafts (/data/drafts)
-   └── Wiki Git Worktree (/data/md-wiki)
+   ├── SQLite (/srv/iracing-ai-assistant/data/db/app.sqlite)
+   ├── Uploads (/srv/iracing-ai-assistant/data/uploads)
+   ├── Drafts (/srv/iracing-ai-assistant/data/drafts)
+   └── Wiki (/srv/iracing-ai-assistant/data/md-wiki)
 ```
 
 ### 技术栈
@@ -218,12 +218,23 @@ npm run dev
 
 | 项目   | 说明                         |
 | ------ | ---------------------------- |
-| 服务器 | hkserver (8.218.234.193)     |
-| 域名   | `ai.iracing.club`            |
-| HTTPS  | 复用 `iracing.club` SSL 证书 |
-| 方式   | Docker Compose + Nginx       |
+| 部署        | PM2 + Nginx + Let's Encrypt   |
 
 详细部署文档参见 [docs/deployment.md](./docs/deployment.md)。
+
+---
+
+### 生产服务器
+
+| 项目   | 说明                                      |
+| ------ | ----------------------------------------- |
+| 服务器 | shserver (106.14.113.247, 上海阿里云)     |
+| 域名   | `ai.iracing.club`                         |
+| HTTPS  | Let's Encrypt (Certbot, 自动续期)         |
+| 部署   | PM2 (`ecosystem.config.cjs`) + Nginx      |
+| 系统   | Ubuntu 24.04 + Node.js 22 + 2G Swap       |
+
+> 2026-07-13 从 hkserver 迁移至 shserver（独立服务器），解决 Docker 容器资源竞争影响主站的问题。
 
 ---
 
@@ -247,8 +258,8 @@ npm run dev
 - [x] Docker 部署配置（Dockerfile、Compose、Nginx）
 - [x] 运维脚本（备份、恢复、引导管理员）
 - [x] md-wiki 知识库内容初始化（18 篇，覆盖官方指南、驾驶技术、调校理论）
-- [ ] E2E 测试完善
-- [ ] 生产部署上线与验收
+- [x] E2E 测试完善
+- [x] 生产部署上线与验收（shserver，PM2 + Nginx）
 
 ---
 
