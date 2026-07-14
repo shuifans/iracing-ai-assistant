@@ -288,6 +288,7 @@ npm run dev
 - [x] md-wiki 知识库内容初始化（18 篇，覆盖官方指南、驾驶技术、调校理论）
 - [x] 对话双后端（LLM 直连 / Qoder SDK 可切换，默认 LongCat-2.0）+ BM25 本地检索 + 双层缓存
 - [x] 知识清洗模型密码门禁切换（默认 LongCat LLM 直连，后台可经密码切换 Qwen3.7-Plus；DB 驱动运行时生效）
+- [x] 知识清洗双后端提示词对齐（qoder-sdk 的 KNOWLEDGE_CLEANER_PROMPT 与 llm-direct 的 buildCleanerSystemPrompt 统一要求 Front Matter 输出格式，消除切换后端时 parseFrontMatter 失败隐患）
 - [x] 知识库管理后台增强（概览仪表盘 + 候选稿列表 + 已发布条目正文查看 + 派生修订草稿流 + LLM 重洗软上限提示）
 - [x] 知识修订闭环（已发布条目→派生修订草稿→审核/编辑/重洗→原子发布原地覆盖旧条目，保留 wikiPath 唯一约束与 git 历史；复用未接线的原子 publisher）
 - [x] E2E 测试完善

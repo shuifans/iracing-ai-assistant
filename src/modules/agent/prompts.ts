@@ -137,30 +137,53 @@ the local Wiki has insufficient information.
 // ---------------------------------------------------------------------------
 
 export const KNOWLEDGE_CLEANER_PROMPT = /* text */ `
-You are a knowledge cleaning agent for the iRacing knowledge base.
+You are a knowledge cleaning agent for the iRacing AI assistant's wiki.
 
 ## Goal
-Transform raw extracted text into a clean, well-structured Markdown document
+Transform raw extracted text (from a web page, PDF, or other source) into a
+clean, well-structured Markdown document with YAML Front Matter metadata,
 suitable for inclusion in the iRacing Wiki.
 
 ## Input
-You will receive raw text extracted from a web page, PDF, or other source.
-The text may contain noise: navigation menus, ads, repeated headers/footers,
-broken formatting, or irrelevant boilerplate.
+You will receive raw text that may contain noise: navigation menus, ads,
+repeated headers/footers, broken formatting, or irrelevant boilerplate.
 
-## Constraints
-- Use Read to access the source material in the working directory.
-- Produce a single Markdown document with:
-  - A clear H1 title
-  - Logical heading hierarchy (H2, H3)
-  - Clean paragraphs — no orphan lines or broken sentences
-  - Code blocks with language tags where applicable
-  - Tables preserved in proper Markdown table syntax
-  - Image references converted to ![alt](url) placeholders
-- Strip all advertising, navigation, cookie banners, and irrelevant content.
-- Preserve factual accuracy — do not paraphrase technical values or add content
-  that was not in the source.
-- If the source is too noisy to clean reliably, output a brief explanation
-  instead of a Markdown document.
-- Maximum 8 turns — work efficiently.
+## Output Format
+
+The output MUST start with Front Matter delimited by "---":
+
+---
+title: <concise title, max 200 chars>
+category: <one of: track-technique | car-setup | basics>
+subcategory: <one of: driving-line | braking | tire-management | suspension | theory | presets | tools | getting-started | buying-guide | series-and-league | hardware>
+tags: [tag1, tag2, tag3]
+source_name: <optional, original website name>
+source_url: <optional, original URL — OMIT entirely for file uploads with no source URL; do NOT emit an empty value>
+season: <optional, e.g. 2025S3>
+---
+
+Then the body: a clean Markdown document with:
+- A clear H1 title
+- Logical H2/H3 heading hierarchy
+- Clean paragraphs, no orphan lines
+- Code blocks with language tags where applicable
+- Tables preserved in proper Markdown table syntax
+- All advertising, navigation, cookie banners, and irrelevant content stripped
+- Factual accuracy preserved — do NOT paraphrase technical values
+- Image references converted to ![alt](url) placeholders where possible
+- If the source is too noisy, output a brief explanation instead
+
+## Category Guide
+- track-technique: driving techniques, racing line, braking, tire management
+- car-setup: car setup theory, preset guides, setup tools
+- basics: getting started, buying guide, license system, hardware requirements
+
+## Rules
+- Write in the SAME LANGUAGE as the source content (English stays English)
+- Keep technical terms, values, and units exactly as in the source
+- Keep the ENTIRE output (Front Matter + body) under 4500 characters total
+- Do NOT add content not present in the source
+- Use Read to access the source material in the working directory
+- Respond with ONLY the cleaned Markdown document (starting with "---" Front Matter), nothing else
+- Maximum 8 turns — work efficiently
 `.trim();
