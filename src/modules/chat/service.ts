@@ -423,10 +423,17 @@ export async function* streamChatMessage(
       if (backend === 'llm-direct') {
         // 5. Local BM25 search (no LLM — instant)
         yield makeStatusEvent(requestId, sessionId, assistantMsgId, 'local_search', '检索本地知识库…');
-        retrievalKey = makeCacheKey(content, []);
+        // Prefix the retrieval key so it never collides with the answer-cache key.
+        // The answer key is makeCacheKey(content, recentMsgIds); on a session's first
+        // turn recentMsgIds=[] and the two keys would be identical — letting the answer
+        // write ({content,sources,grounding}) clobber the retrieval {chunks} payload,
+        // after which a later read of that row crashes on `cachedRetrieval.chunks.map`.
+        retrievalKey = makeCacheKey('retrieval:' + content, []);
         const t2 = performance.now();
         cachedRetrieval = getCachedRetrieval(retrievalKey);
-        searchResults = cachedRetrieval
+        // Defensive: a stale/malformed retrieval entry lacking an Array `.chunks`
+        // falls back to a fresh BM25 search instead of crashing.
+        searchResults = (cachedRetrieval && Array.isArray(cachedRetrieval.chunks))
           ? cachedRetrieval.chunks.map((c) => ({ ...c, retrievedAt: utcNow() }))
           : searchWiki(content, 5).map((r) => ({ ...r }));
         timing.loadAgentContextMs = Math.round(performance.now() - t2);
