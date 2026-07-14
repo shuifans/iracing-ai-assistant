@@ -9,7 +9,9 @@ import type { TestDb } from '../../../helpers/test-db';
 import { makeUser, makeKnowledgeSource, makeKnowledgeJob, makeKnowledgeDraft, makeKnowledgeItem } from '../../../helpers/fixtures';
 import { users } from '@/db/schema/users';
 import { knowledgeSources, knowledgeJobs, knowledgeDrafts, knowledgeItems } from '@/db/schema/knowledge';
+import { knowledgeEvaluations } from '@/db/schema/evaluation';
 import { utcNow } from '@/lib/datetime';
+import { generateId } from '@/lib/uuid';
 
 // ── Skip if native module unavailable ────────────────────────────────────────
 let canLoadNative = true;
@@ -69,6 +71,8 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
   let restoreItem: typeof import('@/modules/knowledge/repository').restoreItem;
   let updateSyncStatus: typeof import('@/modules/knowledge/repository').updateSyncStatus;
   let updateItem: typeof import('@/modules/knowledge/repository').updateItem;
+  let getKnowledgeStats: typeof import('@/modules/knowledge/repository').getKnowledgeStats;
+  let listDrafts: typeof import('@/modules/knowledge/repository').listDrafts;
 
   beforeAll(async () => {
     const { createTestDb } = await import('../../../helpers/test-db');
@@ -95,6 +99,8 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
     restoreItem = repo.restoreItem;
     updateSyncStatus = repo.updateSyncStatus;
     updateItem = repo.updateItem;
+    getKnowledgeStats = repo.getKnowledgeStats;
+    listDrafts = repo.listDrafts;
 
     // Seed a user for FK constraints
     const user = makeUser();
@@ -386,6 +392,79 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
       expect(getItem(item.id)!.status).toBe('published');
     });
 
+    it('revision overwrite: updateItem repoints existing item at the revised draft (no wikiPath dup)', () => {
+      // v1 published item backed by draft D1, at wikiPath W.
+      const wikiPath = 'track-technique/braking/revision-test.md';
+      const item = createItem({
+        sourceId,
+        draftId,
+        title: 'Revision Test',
+        category: 'track-technique',
+        subcategory: 'braking',
+        tagsJson: '[]',
+        sourceName: 'src.txt',
+        sourceUrl: null,
+        season: '2026-S1',
+        wikiPath,
+        status: 'published',
+        gitCommitSha: null,
+        wikiSyncStatus: 'committed',
+        publishedBy: userId,
+        publishedAt: utcNow(),
+      });
+
+      // Revised draft D2: new job (drafts have uniqueIndex on job_id), version =
+      // parent.version + 1, parent_draft_id → D1 — exactly what reviseItem creates.
+      const job2 = makeKnowledgeJob(sourceId);
+      db.insert(knowledgeJobs).values(job2).run();
+      const d2 = makeKnowledgeDraft(job2.id, { parentDraftId: draftId, version: 2 });
+      db.insert(knowledgeDrafts).values(d2).run();
+
+      // Publisher overwrite branch: updateItem on the SAME row, pointing it at D2
+      // and resetting status. This is the path that lets a revision republish
+      // without violating uniqueIndex(wikiPath).
+      updateItem(item.id, {
+        title: 'Revision Test (v2)',
+        draftId: d2.id,
+        status: 'published',
+        publishedAt: utcNow(),
+      });
+
+      const updated = getItem(item.id);
+      expect(updated).not.toBeNull();
+      expect(updated!.draftId).toBe(d2.id); // repointed at the revised draft
+      expect(updated!.status).toBe('published');
+      expect(updated!.title).toBe('Revision Test (v2)');
+      expect(updated!.wikiPath).toBe(wikiPath); // unchanged — same note
+
+      // Same row by path — no duplicate was created.
+      const byPath = getItemByWikiPath(wikiPath);
+      expect(byPath!.id).toBe(item.id);
+      expect(byPath!.draftId).toBe(d2.id);
+
+      // A second createItem with the same wikiPath must throw (unique constraint) —
+      // confirms republishing a revision MUST go through updateItem, not createItem.
+      expect(() =>
+        createItem({
+          sourceId,
+          draftId: d2.id,
+          title: 'Duplicate',
+          category: 'track-technique',
+          subcategory: 'braking',
+          tagsJson: '[]',
+          sourceName: 'src.txt',
+          sourceUrl: null,
+          season: '2026-S1',
+          wikiPath,
+          status: 'published',
+          gitCommitSha: null,
+          wikiSyncStatus: 'committed',
+          publishedBy: userId,
+          publishedAt: utcNow(),
+        }),
+      ).toThrow();
+    });
+
     it('updateSyncStatus updates wiki sync status and commit sha', () => {
       const item = createItem({
         sourceId,
@@ -409,6 +488,139 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
       const updated = getItem(item.id);
       expect(updated!.wikiSyncStatus).toBe('synced');
       expect(updated!.gitCommitSha).toBe('abc123commit');
+    });
+  });
+
+  // ─── Stats (概览 dashboard) ───────────────────────────────────────────────
+
+  describe('Stats', () => {
+    it('getKnowledgeStats aggregates items/drafts/sources/jobs + tier distribution', () => {
+      const src = createSource({
+        inputType: 'file',
+        originalName: 'stats.txt',
+        mimeType: 'text/plain',
+        relativePath: 'uploads/stats.txt',
+        sha256: 'stats-sha',
+        sizeBytes: 10,
+        status: 'stored',
+        submittedBy: userId,
+      });
+
+      // J1 (clean, pending_review) → D1 (v1, pending_review)
+      const j1 = makeKnowledgeJob(src.id, { status: 'pending_review' });
+      db.insert(knowledgeJobs).values(j1).run();
+      const d1 = makeKnowledgeDraft(j1.id, { version: 1, status: 'pending_review' });
+      db.insert(knowledgeDrafts).values(d1).run();
+
+      // J2 (re_clean, pending_review, parent=D1) → D2 (v2, approved)
+      const j2 = makeKnowledgeJob(src.id, {
+        status: 'pending_review',
+        jobKind: 're_clean',
+        parentDraftId: d1.id,
+      });
+      db.insert(knowledgeJobs).values(j2).run();
+      const d2 = makeKnowledgeDraft(j2.id, {
+        version: 2,
+        status: 'approved',
+        parentDraftId: d1.id,
+      });
+      db.insert(knowledgeDrafts).values(d2).run();
+
+      // Published item (→ D2, basics) + archived item (→ D1, car-setup)
+      const i1 = makeKnowledgeItem(src.id, d2.id, userId, {
+        status: 'published',
+        wikiPath: 'basics/getting-started/stats-pub.md',
+        category: 'basics',
+        subcategory: 'getting-started',
+        season: '2026-S1',
+        tagsJson: '[]',
+        wikiSyncStatus: 'committed',
+      });
+      db.insert(knowledgeItems).values(i1).run();
+      const i2 = makeKnowledgeItem(src.id, d1.id, userId, {
+        status: 'archived',
+        wikiPath: 'car-setup/theory/stats-arch.md',
+        category: 'car-setup',
+        subcategory: 'theory',
+        season: '2026-S1',
+        tagsJson: '[]',
+        wikiSyncStatus: 'committed',
+      });
+      db.insert(knowledgeItems).values(i2).run();
+
+      // Evaluations: D1→B, D2→A. tierDist only counts published items (I1 → D2 → A).
+      db.insert(knowledgeEvaluations)
+        .values({
+          id: generateId(),
+          draftId: d1.id,
+          tier: 'B',
+          overallScore: 70,
+          status: 'complete',
+          deepEval: false,
+          createdAt: utcNow(),
+          updatedAt: utcNow(),
+        })
+        .run();
+      db.insert(knowledgeEvaluations)
+        .values({
+          id: generateId(),
+          draftId: d2.id,
+          tier: 'A',
+          overallScore: 90,
+          status: 'complete',
+          deepEval: false,
+          createdAt: utcNow(),
+          updatedAt: utcNow(),
+        })
+        .run();
+
+      const stats = getKnowledgeStats();
+
+      expect(stats.items.total).toBe(2);
+      expect(stats.items.byStatus.find((s) => s.key === 'published')?.count).toBe(1);
+      expect(stats.items.byStatus.find((s) => s.key === 'archived')?.count).toBe(1);
+      expect(stats.items.byCategory.find((c) => c.key === 'basics')?.count).toBe(1);
+
+      expect(stats.drafts.total).toBe(2);
+      expect(stats.drafts.reviewQueue).toBe(1); // D1 pending_review only
+      expect(stats.drafts.byStatus.find((d) => d.key === 'pending_review')?.count).toBe(1);
+
+      expect(stats.sources.total).toBe(1);
+      expect(stats.jobs.byStatus.find((j) => j.key === 'pending_review')?.count).toBe(2);
+      expect(stats.reClean.jobsTotal).toBe(1); // J2 job_kind re_clean
+      expect(stats.reClean.byVersion.find((v) => v.version === 1)?.count).toBe(1);
+      expect(stats.reClean.byVersion.find((v) => v.version === 2)?.count).toBe(1);
+
+      // tierDist: published item I1 → draft D2 → evaluation tier A (archived I2 excluded)
+      expect(stats.tierDistribution.find((t) => t.key === 'A')?.count).toBe(1);
+      expect(stats.tierDistribution.find((t) => t.key === 'B')).toBeUndefined();
+
+      // listDrafts (候选稿 tab data source): leftJoin eval + source, cursor on id.
+      const allDrafts = listDrafts({ limit: 10 });
+      expect(allDrafts.items).toHaveLength(2);
+      // D2 is newer (generated after D1) → ordered by id DESC → D2 first.
+      expect(allDrafts.items[0]!.draft.id).toBe(d2.id);
+      expect(allDrafts.items[0]!.tier).toBe('A');
+      expect(allDrafts.items[0]!.overallScore).toBe(90);
+      expect(allDrafts.items[0]!.sourceOriginalName).toBe('stats.txt');
+      // tier filter: only drafts whose evaluation tier matches.
+      const tierA = listDrafts({ limit: 10, tier: 'A' });
+      expect(tierA.items).toHaveLength(1);
+      expect(tierA.items[0]!.draft.id).toBe(d2.id);
+      const tierB = listDrafts({ limit: 10, tier: 'B' });
+      expect(tierB.items).toHaveLength(1);
+      expect(tierB.items[0]!.draft.id).toBe(d1.id);
+      // status filter
+      const pending = listDrafts({ limit: 10, status: 'pending_review' });
+      expect(pending.items).toHaveLength(1);
+      expect(pending.items[0]!.draft.id).toBe(d1.id);
+      // cursor pagination: first page size 1 → nextCursor present, second page has the other.
+      const page1 = listDrafts({ limit: 1 });
+      expect(page1.items).toHaveLength(1);
+      expect(page1.nextCursor).toBeTruthy();
+      const page2 = listDrafts({ limit: 1, cursor: page1.nextCursor! });
+      expect(page2.items).toHaveLength(1);
+      expect(page2.nextCursor).toBeNull();
     });
   });
 });

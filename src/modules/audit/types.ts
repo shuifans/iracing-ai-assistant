@@ -26,6 +26,8 @@ export const AUDIT_ACTIONS = [
   'knowledge.rejected',
   'knowledge.archived',
   'knowledge.restored',
+  'knowledge.published',
+  'knowledge.revise',
   'knowledge.git_retry',
   'knowledge.eval.run',
   'knowledge.eval.deep',

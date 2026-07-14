@@ -87,6 +87,54 @@ function enqueueJobWith(
 }
 
 /**
+ * Create a review-only job that skips the cleaning pipeline and lands directly
+ * in `pending_review`.
+ *
+ * Used by the revision flow (reviseItem): the revised draft is a verbatim copy
+ * of an already-published item, so no extraction/cleaning is needed — the admin
+ * reviews it directly. The job is inserted with a null lease: claimJob() only
+ * claims `queued` jobs, and recoverExpiredLeases() only touches rows whose
+ * `leaseExpiresAt` is non-null (NULL < now is false in SQL), so this job is
+ * never picked up by the worker. approve() later CAS-transitions
+ * pending_review → publishing as normal.
+ */
+export function createReviewJob(
+  sourceId: string,
+  opts: {
+    parentDraftId?: string | null;
+    kind?: 'clean' | 're_clean';
+  },
+): KnowledgeJob {
+  const db = getDb();
+  const now = utcNow();
+  const id = generateId();
+  const job: KnowledgeJob = {
+    id,
+    sourceId,
+    status: 'pending_review',
+    attempt: 0,
+    maxAttempts: 3,
+    availableAt: now,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    heartbeatAt: null,
+    progress: 100,
+    errorCode: null,
+    errorMessage: null,
+    startedAt: now,
+    finishedAt: now,
+    instructionsJson: null,
+    parentDraftId: opts.parentDraftId ?? null,
+    jobKind: opts.kind ?? 're_clean',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  db.insert(knowledgeJobs).values(job).run();
+  return job;
+}
+
+/**
  * Get a job by ID.
  */
 export function getJob(id: string): KnowledgeJob | null {

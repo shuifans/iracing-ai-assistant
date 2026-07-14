@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, startTransition } from 'react';
 import { authFetch } from '@/lib/auth-client';
 
 interface FeedbackView {
@@ -35,7 +35,11 @@ export function FeedbackForm({
   }, [draftId]);
 
   useEffect(() => {
-    fetchFeedback();
+    // Wrapped in startTransition to avoid cascading renders (matches the
+    // knowledge page hook's fetch-on-tab pattern).
+    startTransition(() => {
+      fetchFeedback();
+    });
   }, [fetchFeedback]);
 
   const submit = async () => {

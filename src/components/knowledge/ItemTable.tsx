@@ -21,9 +21,11 @@ interface ItemTableProps {
   loading?: boolean;
   onArchive?: (id: string) => void;
   onRestore?: (id: string) => void;
+  onViewContent?: (id: string) => void;
+  onRevise?: (id: string) => void;
 }
 
-export function ItemTable({ data, loading, onArchive, onRestore }: ItemTableProps) {
+export function ItemTable({ data, loading, onArchive, onRestore, onViewContent, onRevise }: ItemTableProps) {
   const columns = [
     {
       key: 'title',
@@ -68,6 +70,24 @@ export function ItemTable({ data, loading, onArchive, onRestore }: ItemTableProp
       header: '操作',
       render: (item: KnowledgeItem) => (
         <div className="flex gap-2">
+          {onViewContent && (
+            <button
+              type="button"
+              onClick={() => onViewContent(item.id)}
+              className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            >
+              查看正文
+            </button>
+          )}
+          {item.status === 'published' && onRevise && (
+            <button
+              type="button"
+              onClick={() => onRevise(item.id)}
+              className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            >
+              派生修订
+            </button>
+          )}
           {item.status === 'published' && onArchive && (
             <button
               type="button"

@@ -22,6 +22,7 @@ import { rebuildIndex, writeIndex } from './wiki-index';
 import { parseFrontMatter, generateWikiPath } from './front-matter';
 import * as knowledgeRepo from './repository';
 import * as jobsRepo from '@/modules/jobs/repository';
+import { getPublishGuardSettings, getEvaluationByDraftId } from '@/modules/knowledge-evaluation/repository';
 import { AppError } from '@/lib/errors';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
@@ -84,10 +85,27 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
   const wikiRoot = env.WIKI_ROOT;
   const { draftContent, draftId, jobId, reviewedBy } = input;
 
-  // TODO(eval): when publishDraft is wired as the real publish path, mirror the
-  // evaluation publish guard from service.approveDraft here (read
-  // getPublishGuardSettings() + getEvaluationByDraftId(draftId) and reject when
-  // overallScore < threshold). See @/modules/knowledge-evaluation/repository.
+  // Evaluation publish guard — when enabled in system_settings, require a
+  // passing evaluation before publishing. Mirrors service.approveDraft so the
+  // guard applies on both the initial publish and revision (overwrite) path.
+  // Runs before the CAS so a failing guard leaves the job in pending_review.
+  const guard = getPublishGuardSettings();
+  if (guard.enabled) {
+    const evaluation = getEvaluationByDraftId(draftId);
+    const passed =
+      !!evaluation &&
+      (evaluation.status === 'heuristic_done' || evaluation.status === 'complete') &&
+      evaluation.overallScore >= guard.minScore;
+    if (!passed) {
+      throw new AppError(
+        'INVALID_STATE',
+        `评估未通过发布门禁（需 ≥${guard.minScore} 分且评估完成，当前 ${
+          evaluation ? `${evaluation.overallScore} 分 / ${evaluation.status}` : '未评估'
+        }）`,
+      );
+    }
+  }
+
   // Step 1: CAS job pending_review -> publishing (short transaction)
   const updated = jobsRepo.updateJobStatus(jobId, 'pending_review', 'publishing');
   if (!updated) {
@@ -133,7 +151,9 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
     let itemId: string;
 
     if (existing) {
-      // Overwrite scenario — update existing item
+      // Overwrite scenario (revision) — update the existing item in place so the
+      // uniqueIndex(wikiPath) is not violated. Point it at the revised draft and
+      // reset status to 'published' in case the prior version was archived.
       itemId = existing.id;
       knowledgeRepo.updateItem(itemId, {
         title: parsed.frontMatter.title,
@@ -145,6 +165,8 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
         season: parsed.frontMatter.season ?? '',
         publishedBy: reviewedBy,
         publishedAt: utcNow(),
+        draftId,
+        status: 'published' as const,
       });
     } else {
       // New item
@@ -168,13 +190,27 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
       });
     }
 
+    // Mark the draft approved + supersede any sibling pending drafts for the same
+    // source (defensive — worker/revise already supersede at creation time, so
+    // this is usually a no-op). Mirrors service.approveDraft ordering so the
+    // draft reflects the review outcome after the atomic publish.
+    const publishJob = jobsRepo.getJob(jobId);
+    if (publishJob) {
+      knowledgeRepo.supersedeOldDrafts(publishJob.sourceId, draftId);
+    }
+    knowledgeRepo.updateDraft(draftId, {
+      status: 'approved',
+      reviewedBy,
+      reviewedAt: utcNow(),
+    });
+
     // Complete job: publishing -> published
     jobsRepo.updateJobStatus(jobId, 'publishing', 'published');
 
     // Write audit log
     writeAuditLog({
       actorId: reviewedBy,
-      action: 'knowledge.publish',
+      action: 'knowledge.published',
       resource: 'knowledge_item',
       resourceId: itemId,
       changesJson: JSON.stringify({ draftId, wikiPath }),

@@ -6,7 +6,7 @@
  * @module knowledge/repository
  */
 
-import { eq, and, desc, lt, inArray, ne, type SQL } from 'drizzle-orm';
+import { eq, and, desc, lt, inArray, ne, sql, type SQL } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import {
   knowledgeSources,
@@ -22,7 +22,8 @@ import {
 } from '@/db/schema/knowledge';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
-import type { CursorPageParams, CursorPageResult } from './types';
+import { knowledgeEvaluations } from '@/db/schema/evaluation';
+import type { CursorPageParams, CursorPageResult, DraftListRow, KnowledgeStats, CountBucket } from './types';
 
 // ---------------------------------------------------------------------------
 // Sources
@@ -226,6 +227,61 @@ export function supersedeOldDrafts(sourceId: string, currentDraftId: string): vo
     .run();
 }
 
+/**
+ * List knowledge drafts with cursor-based pagination, enriched with the
+ * best-effort evaluation (tier / overallScore) and source display name.
+ *
+ * Left-joins knowledge_evaluations (1:1 via draftId) and the job→source chain
+ * so the admin 候选稿 tab can show tier + source without N+1 queries. Filters
+ * by draft status, evaluation tier, and sourceId (via job.source_id).
+ */
+export function listDrafts(
+  params: CursorPageParams & { status?: string; sourceId?: string; tier?: string },
+): CursorPageResult<DraftListRow> {
+  const db = getDb();
+  const limit = params.limit ?? 20;
+
+  const conditions: SQL[] = [];
+  if (params.status) {
+    conditions.push(eq(knowledgeDrafts.status, params.status as typeof knowledgeDrafts.status._.data));
+  }
+  if (params.tier) {
+    conditions.push(eq(knowledgeEvaluations.tier, params.tier as typeof knowledgeEvaluations.tier._.data));
+  }
+  if (params.sourceId) {
+    conditions.push(eq(knowledgeJobs.sourceId, params.sourceId));
+  }
+  if (params.cursor) {
+    conditions.push(lt(knowledgeDrafts.id, params.cursor));
+  }
+
+  const rows = db
+    .select({
+      draft: knowledgeDrafts,
+      tier: knowledgeEvaluations.tier,
+      overallScore: knowledgeEvaluations.overallScore,
+      evalStatus: knowledgeEvaluations.status,
+      sourceOriginalName: knowledgeSources.originalName,
+      sourceUrl: knowledgeSources.sourceUrl,
+    })
+    .from(knowledgeDrafts)
+    .leftJoin(knowledgeEvaluations, eq(knowledgeEvaluations.draftId, knowledgeDrafts.id))
+    .leftJoin(knowledgeJobs, eq(knowledgeJobs.id, knowledgeDrafts.jobId))
+    .leftJoin(knowledgeSources, eq(knowledgeSources.id, knowledgeJobs.sourceId))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(knowledgeDrafts.id))
+    .limit(limit + 1)
+    .all();
+
+  const hasMore = rows.length > limit;
+  const items = (hasMore ? rows.slice(0, limit) : rows) as DraftListRow[];
+
+  return {
+    items,
+    nextCursor: hasMore ? items[items.length - 1]!.draft.id : null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Items
 // ---------------------------------------------------------------------------
@@ -352,6 +408,10 @@ export function listItemsBySyncStatus(syncStatus: string): KnowledgeItem[] {
 
 /**
  * Update a knowledge item's metadata (for overwrite / re-publish scenarios).
+ *
+ * draftId + status are included so the publisher's overwrite branch can point
+ * an existing item at the revised draft and reset an archived item back to
+ * 'published' when a revision is approved.
  */
 export function updateItem(
   id: string,
@@ -369,6 +429,8 @@ export function updateItem(
       | 'gitCommitSha'
       | 'publishedBy'
       | 'publishedAt'
+      | 'draftId'
+      | 'status'
     >
   >,
 ): void {
@@ -398,4 +460,94 @@ export function updateSyncStatus(
     changes.gitCommitSha = commitSha;
   }
   db.update(knowledgeItems).set(changes).where(eq(knowledgeItems.id, id)).run();
+}
+
+/**
+ * Aggregate knowledge-base statistics for the admin 概览 dashboard.
+ *
+ * Single-pass counts over items / drafts / sources / jobs + a join of
+ * published items → draft → evaluation for the tier distribution. All queries
+ * are synchronous (better-sqlite3) and run against small admin datasets.
+ */
+export function getKnowledgeStats(): KnowledgeStats {
+  const db = getDb();
+
+  const itemsByStatus = db
+    .select({ status: knowledgeItems.status, count: sql<number>`count(*)` })
+    .from(knowledgeItems)
+    .groupBy(knowledgeItems.status)
+    .all()
+    .map((r) => ({ key: r.status, count: r.count }));
+
+  const itemsByCategory = db
+    .select({ category: knowledgeItems.category, count: sql<number>`count(*)` })
+    .from(knowledgeItems)
+    .groupBy(knowledgeItems.category)
+    .all()
+    .map((r) => ({ key: r.category, count: r.count }));
+
+  const itemsTotal = db
+    .select({ c: sql<number>`count(*)` })
+    .from(knowledgeItems)
+    .all()[0]?.c ?? 0;
+
+  const draftsByStatus = db
+    .select({ status: knowledgeDrafts.status, count: sql<number>`count(*)` })
+    .from(knowledgeDrafts)
+    .groupBy(knowledgeDrafts.status)
+    .all()
+    .map((r) => ({ key: r.status, count: r.count }));
+
+  const draftsTotal = db
+    .select({ c: sql<number>`count(*)` })
+    .from(knowledgeDrafts)
+    .all()[0]?.c ?? 0;
+
+  const reviewQueue =
+    draftsByStatus.find((d) => d.key === 'pending_review')?.count ?? 0;
+
+  const sourcesTotal = db
+    .select({ c: sql<number>`count(*)` })
+    .from(knowledgeSources)
+    .all()[0]?.c ?? 0;
+
+  const jobsByStatus = db
+    .select({ status: knowledgeJobs.status, count: sql<number>`count(*)` })
+    .from(knowledgeJobs)
+    .groupBy(knowledgeJobs.status)
+    .all()
+    .map((r) => ({ key: r.status, count: r.count }));
+
+  const reCleanJobsTotal = db
+    .select({ c: sql<number>`count(*)` })
+    .from(knowledgeJobs)
+    .where(eq(knowledgeJobs.jobKind, 're_clean'))
+    .all()[0]?.c ?? 0;
+
+  const draftsByVersion = db
+    .select({ version: knowledgeDrafts.version, count: sql<number>`count(*)` })
+    .from(knowledgeDrafts)
+    .groupBy(knowledgeDrafts.version)
+    .all();
+
+  // Tier distribution across published items: item → draft → evaluation.tier.
+  // Items without an evaluation collapse to the 'pending' bucket.
+  const tierDist = db
+    .select({ tier: knowledgeEvaluations.tier, count: sql<number>`count(*)` })
+    .from(knowledgeItems)
+    .leftJoin(knowledgeDrafts, eq(knowledgeDrafts.id, knowledgeItems.draftId))
+    .leftJoin(knowledgeEvaluations, eq(knowledgeEvaluations.draftId, knowledgeDrafts.id))
+    .where(eq(knowledgeItems.status, 'published'))
+    .groupBy(knowledgeEvaluations.tier)
+    .all()
+    .map((r) => ({ key: r.tier ?? 'pending', count: r.count }));
+
+  return {
+    items: { byStatus: itemsByStatus, byCategory: itemsByCategory, total: itemsTotal },
+    drafts: { byStatus: draftsByStatus, reviewQueue, total: draftsTotal },
+    sources: { total: sourcesTotal },
+    jobs: { byStatus: jobsByStatus },
+    reClean: { jobsTotal: reCleanJobsTotal, byVersion: draftsByVersion },
+    tierDistribution: tierDist,
+  };
 }

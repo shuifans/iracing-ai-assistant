@@ -73,6 +73,16 @@ vi.mock('crypto', () => ({
   })),
 }));
 
+// service now imports the atomic publisher, which imports @/db/client →
+// better-sqlite3 (native). Mocking the client keeps the native module from
+// loading in the unit environment (no real DB, no fs-default interop crash).
+vi.mock('@/db/client', () => ({
+  getDb: vi.fn(),
+  getRawDb: vi.fn(() => null),
+  closeDb: vi.fn(),
+  resetDbForTesting: vi.fn(),
+}));
+
 // Import after mocks
 import * as knowledgeRepo from '@/modules/knowledge/repository';
 import * as jobsRepo from '@/modules/jobs/repository';

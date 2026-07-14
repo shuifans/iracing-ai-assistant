@@ -6,7 +6,7 @@ import {
   requireActiveUser,
 } from '@/modules/auth/middleware';
 import { successResponse } from '@/lib/response';
-import { getItem } from '@/modules/knowledge/service';
+import { getItemWithContent } from '@/modules/knowledge/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,8 @@ interface RouteContext {
 }
 
 /**
- * GET /api/knowledge/items/:id — get knowledge item details.
+ * GET /api/knowledge/items/:id — get knowledge item details with its published
+ * content (front matter + body) so the backend can render the actual body.
  */
 export const GET = withErrorHandler(
   async (request: NextRequest, context?: RouteContext): Promise<NextResponse> => {
@@ -25,8 +26,8 @@ export const GET = withErrorHandler(
     requireActiveUser(user);
 
     const id = context!.params.id;
-    const item = await getItem(id);
+    const result = await getItemWithContent(id);
 
-    return NextResponse.json(successResponse({ item }));
+    return NextResponse.json(successResponse(result));
   },
 );

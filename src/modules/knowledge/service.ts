@@ -13,6 +13,7 @@
  */
 
 import * as knowledgeRepo from './repository';
+import * as publisher from './publisher';
 import * as jobsRepo from '@/modules/jobs/repository';
 import * as jobsService from '@/modules/jobs/service';
 import { fetchUrl } from './extractors/url';
@@ -22,12 +23,17 @@ import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
 import { env } from '@/config/env';
 import { getPublishGuardSettings, getEvaluationByDraftId } from '@/modules/knowledge-evaluation/repository';
+import * as evalService from '@/modules/knowledge-evaluation/service';
 import { submitUrlSchema, ALLOWED_KNOWLEDGE_MIMES } from './schemas';
 import type {
   CursorPageParams,
   CursorPageResult,
   DraftReview,
   PublishResult,
+  FrontMatterData,
+  DraftListRow,
+  DraftListItem,
+  KnowledgeStats,
 } from './types';
 import type { KnowledgeSource, KnowledgeDraft, KnowledgeItem } from '@/db/schema/knowledge';
 import * as fs from 'fs';
@@ -251,6 +257,53 @@ export async function listItems(
 }
 
 /**
+ * List cleaned drafts for the admin 候选稿 tab — pending_review by default,
+ * enriched with evaluation tier/score, parsed category, and re-clean count.
+ */
+export async function listDrafts(
+  params: CursorPageParams & { status?: string; sourceId?: string; tier?: string },
+): Promise<CursorPageResult<DraftListItem>> {
+  const result = knowledgeRepo.listDrafts(params);
+
+  const items: DraftListItem[] = result.items.map((row: DraftListRow) => {
+    let category: string | null = null;
+    let subcategory: string | null = null;
+    try {
+      const fm = JSON.parse(row.draft.frontMatterJson) as {
+        category?: string;
+        subcategory?: string;
+      };
+      category = fm.category ?? null;
+      subcategory = fm.subcategory ?? null;
+    } catch {
+      // malformed front matter JSON — leave category null
+    }
+    return {
+      id: row.draft.id,
+      title: row.draft.title,
+      category,
+      subcategory,
+      sourceName: row.sourceOriginalName ?? row.sourceUrl ?? null,
+      tier: row.tier,
+      overallScore: row.overallScore,
+      status: row.draft.status,
+      version: row.draft.version,
+      reCleanCount: Math.max(0, row.draft.version - 1),
+      createdAt: row.draft.createdAt,
+    };
+  });
+
+  return { items, nextCursor: result.nextCursor };
+}
+
+/**
+ * Aggregate knowledge-base statistics for the admin 概览 dashboard.
+ */
+export async function getKnowledgeStats(): Promise<KnowledgeStats> {
+  return knowledgeRepo.getKnowledgeStats();
+}
+
+/**
  * Get a single knowledge item by ID.
  */
 export async function getItem(id: string): Promise<KnowledgeItem> {
@@ -259,6 +312,56 @@ export async function getItem(id: string): Promise<KnowledgeItem> {
     throw new AppError('NOT_FOUND', `Knowledge item ${id} not found`);
   }
   return item;
+}
+
+/**
+ * Get a knowledge item together with its published content (front matter +
+ * body) for the backend detail view.
+ *
+ * Content is read from the canonical wiki file (${WIKI_ROOT}/${wikiPath}); for
+ * legacy items published via the simplified approveDraft (which never wrote a
+ * wiki file), falls back to the parent draft file on disk. Lets the backend
+ * show the actual cleaned body of a published item — not just its metadata.
+ */
+export async function getItemWithContent(id: string): Promise<{
+  item: KnowledgeItem;
+  renderedMarkdown: string;
+  body: string;
+  frontMatter: FrontMatterData | null;
+}> {
+  const item = await getItem(id);
+
+  const wikiFilePath = path.join(env.WIKI_ROOT as string, item.wikiPath);
+  let content = '';
+  if (fs.existsSync(wikiFilePath)) {
+    content = fs.readFileSync(wikiFilePath, 'utf-8');
+  } else {
+    const parentDraft = knowledgeRepo.getDraft(item.draftId);
+    if (parentDraft) {
+      const draftFilePath = path.join(
+        env.DATA_ROOT as string,
+        'drafts',
+        parentDraft.draftRelativePath,
+      );
+      if (fs.existsSync(draftFilePath)) {
+        content = fs.readFileSync(draftFilePath, 'utf-8');
+      }
+    }
+  }
+
+  let body = content;
+  let frontMatter: FrontMatterData | null = null;
+  if (content) {
+    try {
+      const parsed = parseFrontMatter(content);
+      body = parsed.body;
+      frontMatter = parsed.frontMatter;
+    } catch {
+      // Malformed / front-matter-less content — show raw content as the body.
+    }
+  }
+
+  return { item, renderedMarkdown: content, body, frontMatter };
 }
 
 // ---------------------------------------------------------------------------
@@ -454,6 +557,153 @@ export async function approveDraft(
     gitCommitSha: null,
     wikiSyncStatus: 'committed',
   };
+}
+
+/**
+ * Publish a reviewed draft via the atomic eight-step publisher.
+ *
+ * This is the real publish path (replaces the simplified approveDraft): writes
+ * the wiki file, rebuilds index.md, git commits, and — crucially for the
+ * revision flow — upserts the knowledge_item by wikiPath so a re-published
+ * revision overwrites the existing item in place instead of violating the
+ * uniqueIndex(wikiPath). The publish guard + draft 'approved' bookkeeping are
+ * handled inside publisher.publishDraft.
+ */
+export async function publishDraftReview(
+  draftId: string,
+  reviewedBy: string,
+  // Idempotency key is accepted for API parity with approve/re-clean; the
+  // publisher is itself CAS-guarded against duplicate concurrent publishes.
+  _idempotencyKey: string,
+): Promise<PublishResult> {
+  const draft = knowledgeRepo.getDraft(draftId);
+  if (!draft) {
+    throw new AppError('NOT_FOUND', `Draft ${draftId} not found`);
+  }
+
+  if (draft.status !== 'pending_review') {
+    throw new AppError(
+      'INVALID_STATE',
+      `Draft must be in pending_review status to be approved, got '${draft.status}'`,
+    );
+  }
+
+  // Read the draft file (front matter + body) from disk and hand it to the
+  // atomic publisher — same path math as getDraftWithDiff / editDraft.
+  const draftFilePath = path.join(env.DATA_ROOT as string, 'drafts', draft.draftRelativePath);
+  let draftContent = '';
+  if (fs.existsSync(draftFilePath)) {
+    draftContent = fs.readFileSync(draftFilePath, 'utf-8');
+  }
+
+  return publisher.publishDraft({
+    draftId,
+    jobId: draft.jobId,
+    draftContent,
+    reviewedBy,
+  });
+}
+
+/**
+ * Derive a revision draft from a published knowledge item.
+ *
+ * Copies the item's published content into a brand-new draft (status
+ * pending_review, version = parent.version + 1, parentDraftId → item.draftId)
+ * and creates a review-only job that bypasses the cleaning pipeline. The admin
+ * then reviews / manually edits / re-cleans the draft, and approving it runs
+ * the publisher's overwrite branch — updating the same item in place (preserving
+ * the wikiPath unique constraint and git history) instead of creating a new row.
+ */
+export async function reviseItem(
+  itemId: string,
+  reviewedBy: string,
+): Promise<{ draftId: string; jobId: string; version: number }> {
+  const item = knowledgeRepo.getItem(itemId);
+  if (!item) {
+    throw new AppError('NOT_FOUND', `Knowledge item ${itemId} not found`);
+  }
+  if (item.status !== 'published') {
+    throw new AppError(
+      'INVALID_STATE',
+      `只有已发布条目可派生修订草稿（当前状态 '${item.status}）；请先恢复该条目`,
+    );
+  }
+
+  const parentDraft = knowledgeRepo.getDraft(item.draftId);
+  if (!parentDraft) {
+    throw new AppError('NOT_FOUND', `条目 ${itemId} 的父草稿 ${item.draftId} 不存在`);
+  }
+
+  // Read published content: prefer the canonical wiki file, fall back to the
+  // parent draft file for items published via the legacy simplified approveDraft
+  // (which never wrote a wiki file).
+  const wikiFilePath = path.join(env.WIKI_ROOT as string, item.wikiPath);
+  const parentDraftFilePath = path.join(
+    env.DATA_ROOT as string,
+    'drafts',
+    parentDraft.draftRelativePath,
+  );
+  let content = '';
+  if (fs.existsSync(wikiFilePath)) {
+    content = fs.readFileSync(wikiFilePath, 'utf-8');
+  } else if (fs.existsSync(parentDraftFilePath)) {
+    content = fs.readFileSync(parentDraftFilePath, 'utf-8');
+  }
+  if (!content) {
+    throw new AppError(
+      'INVALID_STATE',
+      `无法读取条目正文（wiki 文件与草稿文件均缺失）：${item.wikiPath}`,
+    );
+  }
+
+  // Validate front matter before creating the revised draft.
+  const parsed = parseFrontMatter(content);
+  validateFrontMatter(parsed.frontMatter);
+
+  // Write the revised draft to disk (verbatim copy — the admin edits in review).
+  const newDraftId = generateId();
+  const draftRelativePath = `${newDraftId}.md`;
+  const newDraftFilePath = path.join(env.DATA_ROOT as string, 'drafts', draftRelativePath);
+  fs.mkdirSync(path.dirname(newDraftFilePath), { recursive: true });
+  fs.writeFileSync(newDraftFilePath, content, 'utf-8');
+  const contentHash = sha256(content);
+
+  // Review-only job: bypasses the cleaning pipeline, lands directly in
+  // pending_review with a null lease so the worker never claims it.
+  const job = jobsRepo.createReviewJob(item.sourceId, {
+    parentDraftId: item.draftId,
+    kind: 're_clean',
+  });
+
+  const version = parentDraft.version + 1;
+
+  const draft = knowledgeRepo.createDraft({
+    jobId: job.id,
+    suggestedPath: item.wikiPath,
+    title: parsed.frontMatter.title,
+    frontMatterJson: JSON.stringify(parsed.frontMatter),
+    draftRelativePath,
+    contentSha256: contentHash,
+    status: 'pending_review',
+    reviewNotes: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    parentDraftId: item.draftId,
+    version,
+  });
+
+  // Supersede sibling pending drafts for the same source (mirrors worker
+  // behavior so only this revised draft is reviewable).
+  knowledgeRepo.supersedeOldDrafts(item.sourceId, draft.id);
+
+  // Best-effort auto-evaluation (non-fatal — mirrors worker Step 13).
+  try {
+    await evalService.evaluateDraft(draft.id, { deep: false });
+  } catch {
+    /* evaluation failure must not block the revision */
+  }
+
+  return { draftId: draft.id, jobId: job.id, version };
 }
 
 /**

@@ -2,15 +2,16 @@
 
 import { useState, useEffect, useCallback, startTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Tabs, Pagination, FilterBar, ConfirmDialog, Toast } from '@/components/common';
+import { Tabs, Pagination, FilterBar, ConfirmDialog, Toast, StatCard } from '@/components/common';
 import { DataTable } from '@/components/common';
 import { authFetch } from '@/lib/auth-client';
 import { SourceUploadForm } from '@/components/knowledge/SourceUploadForm';
 import { CleaningBackendSwitch } from '@/components/knowledge/CleaningBackendSwitch';
 import { JobStatusBadge, SourceStatusBadge } from '@/components/knowledge/JobStatusBadge';
 import { ItemTable } from '@/components/knowledge/ItemTable';
+import { ItemContentModal } from '@/components/knowledge/ItemContentModal';
 import type { JobStatus } from '@/config/constants';
-import { JOB_STATUSES, KNOWLEDGE_CATEGORIES, EVALUATION_TIERS, EVALUATION_STATUSES } from '@/config/constants';
+import { JOB_STATUSES, KNOWLEDGE_CATEGORIES, EVALUATION_TIERS, EVALUATION_STATUSES, DRAFT_STATUSES } from '@/config/constants';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,12 +65,41 @@ interface Evaluation {
   [key: string]: unknown;
 }
 
+interface Draft {
+  id: string;
+  title: string;
+  category: string | null;
+  subcategory: string | null;
+  sourceName: string | null;
+  tier: string | null;
+  overallScore: number | null;
+  status: string;
+  version: number;
+  reCleanCount: number;
+  createdAt: string;
+  [key: string]: unknown;
+}
+
+interface StatsBucket {
+  key: string;
+  count: number;
+}
+
+interface KnowledgeStats {
+  items: { byStatus: StatsBucket[]; byCategory: StatsBucket[]; total: number };
+  drafts: { byStatus: StatsBucket[]; reviewQueue: number; total: number };
+  sources: { total: number };
+  jobs: { byStatus: StatsBucket[] };
+  reClean: { jobsTotal: number; byVersion: { version: number; count: number }[] };
+  tierDistribution: StatsBucket[];
+}
+
 // ---------------------------------------------------------------------------
 // Custom hook for tab-based data fetching
 // ---------------------------------------------------------------------------
 
 function useKnowledgePageData() {
-  const [activeTab, setActiveTab] = useState('sources');
+  const [activeTab, setActiveTab] = useState('overview');
 
   // ── Sources ─────────────────────────────────────────────────────────────
   const [sources, setSources] = useState<Source[]>([]);
@@ -184,23 +214,75 @@ function useKnowledgePageData() {
     }
   }, []);
 
+  // ── Drafts (候选稿 — cleaned drafts pending review) ───────────────────────
+  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const [draftsCursor, setDraftsCursor] = useState<string | null>(null);
+  const [draftsCursorStack, setDraftsCursorStack] = useState<(string | null)[]>([]);
+  const [draftFilters, setDraftFilters] = useState({ status: '', tier: '' });
+
+  const fetchDrafts = useCallback(async (cursor?: string, filters?: Record<string, string>) => {
+    setDraftsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '20' });
+      if (cursor) params.set('cursor', cursor);
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.tier) params.set('tier', filters.tier);
+      const res = await authFetch(`/api/knowledge/drafts?${params.toString()}`);
+      if (!res.ok) throw new Error('加载候选稿失败');
+      const json = (await res.json()) as {
+        data: { drafts: Draft[] };
+        meta?: { nextCursor: string | null };
+      };
+      setDrafts(json.data.drafts);
+      setDraftsCursor(json.meta?.nextCursor ?? null);
+    } catch {
+      // handled by toast in component
+    } finally {
+      setDraftsLoading(false);
+    }
+  }, []);
+
+  // ── Stats (概览 dashboard) ────────────────────────────────────────────────
+  const [stats, setStats] = useState<KnowledgeStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+
+  const fetchStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const res = await authFetch(`/api/knowledge/stats`);
+      if (!res.ok) throw new Error('加载统计失败');
+      const json = (await res.json()) as { data: { stats: KnowledgeStats } };
+      setStats(json.data.stats);
+    } catch {
+      // handled by toast in component
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
   // ── Tab change ──────────────────────────────────────────────────────────
   useEffect(() => {
     startTransition(() => {
-      if (activeTab === 'sources') fetchSources();
+      if (activeTab === 'overview') fetchStats();
+      else if (activeTab === 'sources') fetchSources();
       else if (activeTab === 'jobs') fetchJobs(undefined, jobStatusFilter || undefined);
       else if (activeTab === 'items') fetchItems(undefined, itemFilters);
+      else if (activeTab === 'drafts') fetchDrafts(undefined, draftFilters);
       else if (activeTab === 'evaluations' || activeTab === 'feedback')
         fetchEvaluations(undefined, evalTierFilter || undefined, evalStatusFilter || undefined);
     });
   }, [
     activeTab,
+    fetchStats,
     fetchSources,
     fetchJobs,
     fetchItems,
+    fetchDrafts,
     fetchEvaluations,
     jobStatusFilter,
     itemFilters,
+    draftFilters,
     evalTierFilter,
     evalStatusFilter,
   ]);
@@ -212,10 +294,13 @@ function useKnowledgePageData() {
     jobStatusFilter, setJobStatusFilter,
     items, itemsLoading, itemsCursor, itemsCursorStack, setItemsCursor, setItemsCursorStack,
     itemFilters, setItemFilters,
+    drafts, draftsLoading, draftsCursor, draftsCursorStack, setDraftsCursor, setDraftsCursorStack,
+    draftFilters, setDraftFilters,
+    stats, statsLoading,
     evaluations, evaluationsLoading, evaluationsCursor, evaluationsCursorStack,
     setEvaluationsCursor, setEvaluationsCursorStack,
     evalTierFilter, setEvalTierFilter, evalStatusFilter, setEvalStatusFilter,
-    fetchSources, fetchJobs, fetchItems, fetchEvaluations,
+    fetchSources, fetchJobs, fetchItems, fetchDrafts, fetchStats, fetchEvaluations,
   };
 }
 
@@ -234,10 +319,13 @@ export default function KnowledgePage() {
     jobStatusFilter, setJobStatusFilter,
     items, itemsLoading, itemsCursor, itemsCursorStack, setItemsCursor, setItemsCursorStack,
     itemFilters, setItemFilters,
+    drafts, draftsLoading, draftsCursor, draftsCursorStack, setDraftsCursor, setDraftsCursorStack,
+    draftFilters, setDraftFilters,
+    stats, statsLoading,
     evaluations, evaluationsLoading, evaluationsCursor, evaluationsCursorStack,
     setEvaluationsCursor, setEvaluationsCursorStack,
     evalTierFilter, setEvalTierFilter, evalStatusFilter, setEvalStatusFilter,
-    fetchSources, fetchJobs, fetchItems, fetchEvaluations,
+    fetchSources, fetchJobs, fetchItems, fetchDrafts, fetchStats, fetchEvaluations,
   } = useKnowledgePageData();
 
   // ── Job actions ─────────────────────────────────────────────────────────
@@ -246,6 +334,9 @@ export default function KnowledgePage() {
     message: string;
     onConfirm: () => void;
   } | null>(null);
+
+  // Item whose published body is shown in the content modal (null = closed).
+  const [contentItemId, setContentItemId] = useState<string | null>(null);
 
   const retryJob = async (id: string) => {
     try {
@@ -289,6 +380,28 @@ export default function KnowledgePage() {
       fetchItems(undefined, itemFilters);
     } catch {
       setToast({ message: '恢复失败', type: 'error' });
+    }
+  };
+
+  // Derive a revision draft from a published item, then jump into the review
+  // page where the admin can edit / re-clean / approve it (approval overwrites
+  // the existing item in place via the publisher's overwrite branch).
+  const reviseItem = async (id: string) => {
+    try {
+      const res = await authFetch(`/api/knowledge/items/${id}/revise`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': crypto.randomUUID(), 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        throw new Error(j?.error?.message ?? j?.message ?? '派生修订草稿失败');
+      }
+      const json = await res.json();
+      setContentItemId(null);
+      router.push(`/knowledge/review/${json.data.draftId}`);
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : '派生修订失败', type: 'error' });
     }
   };
 
@@ -474,6 +587,101 @@ export default function KnowledgePage() {
     },
   ];
 
+  const draftFilterConfig = [
+    {
+      name: 'status',
+      label: '状态',
+      type: 'select' as const,
+      options: DRAFT_STATUSES.map((s) => ({ value: s, label: s })),
+    },
+    {
+      name: 'tier',
+      label: '等级',
+      type: 'select' as const,
+      options: EVALUATION_TIERS.map((t) => ({ value: t, label: t })),
+    },
+  ];
+
+  const draftColumns = [
+    {
+      key: 'title',
+      header: '标题',
+      render: (d: Draft) => <span className="font-medium text-gray-900">{d.title}</span>,
+    },
+    {
+      key: 'category',
+      header: '分类',
+      render: (d: Draft) => (
+        <span className="text-gray-600">
+          {d.category ? `${d.category}/${d.subcategory ?? ''}` : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'sourceName',
+      header: '来源',
+      render: (d: Draft) => (
+        <span className="max-w-[200px] truncate text-xs text-gray-500" title={d.sourceName ?? ''}>
+          {d.sourceName ?? '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'tier',
+      header: '等级',
+      render: (d: Draft) => (
+        <span
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+            TIER_BADGE[d.tier ?? ''] ?? TIER_BADGE.pending
+          }`}
+        >
+          {d.tier ?? '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'overallScore',
+      header: '总分',
+      render: (d: Draft) => <span className="text-xs text-gray-600">{d.overallScore ?? '—'}</span>,
+    },
+    {
+      key: 'reCleanCount',
+      header: '重洗',
+      render: (d: Draft) => (
+        <span
+          className={`text-xs ${d.reCleanCount > 0 ? 'font-medium text-amber-600' : 'text-gray-400'}`}
+        >
+          {d.reCleanCount > 0 ? `${d.reCleanCount} 次` : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: '状态',
+      render: (d: Draft) => <span className="text-xs text-gray-600">{d.status}</span>,
+    },
+    {
+      key: 'createdAt',
+      header: '创建时间',
+      render: (d: Draft) => (
+        <span className="text-xs text-gray-500">{new Date(d.createdAt).toLocaleString()}</span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '操作',
+      render: (d: Draft) => (
+        <button
+          type="button"
+          onClick={() => router.push(`/knowledge/review/${d.id}`)}
+          className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+        >
+          审核
+        </button>
+      ),
+    },
+  ];
+
   const TIER_BADGE: Record<string, string> = {
     A: 'bg-green-100 text-green-800',
     B: 'bg-blue-100 text-blue-800',
@@ -630,6 +838,12 @@ export default function KnowledgePage() {
         />
       )}
 
+      <ItemContentModal
+        itemId={contentItemId}
+        onClose={() => setContentItemId(null)}
+        onRevise={reviseItem}
+      />
+
       {/* Page header */}
       <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
         <div>
@@ -646,8 +860,10 @@ export default function KnowledgePage() {
       <div className="border-b border-gray-200 bg-white px-6">
         <Tabs
           tabs={[
+            { id: 'overview', label: '概览' },
             { id: 'sources', label: '来源管理' },
             { id: 'jobs', label: '任务列表' },
+            { id: 'drafts', label: '候选稿' },
             { id: 'items', label: '知识条目' },
             { id: 'evaluations', label: '评估' },
             { id: 'feedback', label: '反馈' },
@@ -659,6 +875,51 @@ export default function KnowledgePage() {
 
       {/* Tab content */}
       <div className="flex-1 overflow-auto p-6">
+        {/* ── Overview tab ─────────────────────────────────────────────────── */}
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            {statsLoading && <p className="text-sm text-gray-500">加载中…</p>}
+            {!statsLoading && stats && (
+              <>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                  <StatCard title="待审核草稿" value={stats.drafts.reviewQueue} subtitle="清洗完成待 review" />
+                  <StatCard title="已发布条目" value={stats.items.total} subtitle="知识库总量" />
+                  <StatCard
+                    title="已归档"
+                    value={stats.items.byStatus.find((s) => s.key === 'archived')?.count ?? 0}
+                  />
+                  <StatCard title="LLM 重洗累计" value={stats.reClean.jobsTotal} subtitle="按 job 计" />
+                  <StatCard title="来源总数" value={stats.sources.total} />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <DistributionPanel
+                    title="已发布条目 · 分类分布"
+                    buckets={stats.items.byCategory}
+                    color="bg-blue-500"
+                  />
+                  <DistributionPanel
+                    title="已发布条目 · 等级分布"
+                    buckets={stats.tierDistribution}
+                    color="bg-green-500"
+                  />
+                  <DistributionPanel
+                    title="候选稿 · 状态分布"
+                    buckets={stats.drafts.byStatus}
+                    color="bg-amber-500"
+                  />
+                  <DistributionPanel
+                    title="LLM 重洗 · 版本分布"
+                    buckets={stats.reClean.byVersion.map((v) => ({ key: `v${v.version}`, count: v.count }))}
+                    color="bg-purple-500"
+                  />
+                </div>
+              </>
+            )}
+            {!statsLoading && !stats && <p className="text-sm text-gray-500">暂无统计数据</p>}
+          </div>
+        )}
+
         {/* ── Sources tab ─────────────────────────────────────────────── */}
         {activeTab === 'sources' && (
           <div className="space-y-6">
@@ -736,6 +997,48 @@ export default function KnowledgePage() {
           </div>
         )}
 
+        {/* ── Drafts tab ─────────────────────────────────────────────────── */}
+        {activeTab === 'drafts' && (
+          <div className="space-y-6">
+            <FilterBar
+              filters={draftFilterConfig}
+              values={draftFilters}
+              onChange={(name, value) => {
+                const newFilters = { ...draftFilters, [name]: value };
+                setDraftFilters(newFilters);
+              }}
+              onSearch={() => {
+                setDraftsCursorStack([]);
+                fetchDrafts(undefined, draftFilters);
+              }}
+            />
+
+            <DataTable<Draft>
+              columns={draftColumns}
+              data={drafts}
+              loading={draftsLoading}
+              emptyMessage="暂无候选稿"
+            />
+
+            <Pagination
+              nextCursor={draftsCursor}
+              hasPrev={draftsCursorStack.length > 0}
+              onPrev={() => {
+                const stack = [...draftsCursorStack];
+                stack.pop();
+                const prev = stack[stack.length - 1] ?? undefined;
+                setDraftsCursorStack(stack);
+                fetchDrafts(prev, draftFilters);
+              }}
+              onNext={(cursor) => {
+                setDraftsCursorStack([...draftsCursorStack, draftsCursor]);
+                setDraftsCursor(cursor);
+                fetchDrafts(cursor, draftFilters);
+              }}
+            />
+          </div>
+        )}
+
         {/* ── Items tab ───────────────────────────────────────────────── */}
         {activeTab === 'items' && (
           <div className="space-y-6">
@@ -755,6 +1058,8 @@ export default function KnowledgePage() {
             <ItemTable
               data={items}
               loading={itemsLoading}
+              onViewContent={(id) => setContentItemId(id)}
+              onRevise={reviseItem}
               onArchive={(id) =>
                 setConfirmAction({
                   title: '归档条目',
@@ -802,6 +1107,50 @@ export default function KnowledgePage() {
         {/* ── Feedback tab ────────────────────────────────────────────────── */}
         {activeTab === 'feedback' && renderEvaluationsTable('暂无待反馈草稿')}
       </div>
+    </div>
+  );
+}
+
+// Lightweight horizontal-bar distribution panel for the 概览 dashboard. Each
+// row is a bucket (key + count); bar width is relative to the max bucket so
+// small values stay visible. No chart dependency — pure Tailwind bars.
+function DistributionPanel({
+  title,
+  buckets,
+  color,
+}: {
+  title: string;
+  buckets: { key: string; count: number }[];
+  color: string;
+}) {
+  const total = buckets.reduce((sum, b) => sum + b.count, 0);
+  const max = Math.max(1, ...buckets.map((b) => b.count));
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <p className="text-sm font-medium text-gray-700">{title}</p>
+      {buckets.length === 0 ? (
+        <p className="mt-3 text-xs text-gray-400">暂无数据</p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {buckets.map((b) => (
+            <div key={b.key} className="flex items-center gap-3">
+              <span className="w-24 shrink-0 truncate text-xs text-gray-600" title={b.key}>
+                {b.key}
+              </span>
+              <div className="h-4 flex-1 overflow-hidden rounded bg-gray-100">
+                <div
+                  className={`h-full rounded ${color}`}
+                  style={{ width: `${(b.count / max) * 100}%` }}
+                />
+              </div>
+              <span className="w-8 shrink-0 text-right text-xs font-medium text-gray-700">
+                {b.count}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="mt-3 text-xs text-gray-400">合计 {total}</p>
     </div>
   );
 }

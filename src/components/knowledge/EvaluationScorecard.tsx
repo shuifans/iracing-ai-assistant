@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, startTransition } from 'react';
 import { authFetch } from '@/lib/auth-client';
 import { DimensionBars } from './DimensionBars';
 
@@ -58,7 +58,11 @@ export function EvaluationScorecard({
   }, [draftId]);
 
   useEffect(() => {
-    fetchEval();
+    // Wrapped in startTransition to avoid cascading renders (matches the
+    // knowledge page hook's fetch-on-tab pattern).
+    startTransition(() => {
+      fetchEval();
+    });
   }, [fetchEval]);
 
   const runEval = async () => {

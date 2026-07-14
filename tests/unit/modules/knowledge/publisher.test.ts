@@ -51,11 +51,23 @@ vi.mock('@/modules/knowledge/repository', () => ({
   createItem: vi.fn(() => ({ id: 'mock-item-id' })),
   updateItem: vi.fn(),
   updateSyncStatus: vi.fn(),
+  // Step 7 of publishDraft marks the draft approved + supersedes sibling drafts.
+  supersedeOldDrafts: vi.fn(),
+  updateDraft: vi.fn(),
 }));
 
 vi.mock('@/modules/jobs/repository', () => ({
   updateJobStatus: vi.fn(() => true),
   getJob: vi.fn(() => ({ sourceId: 'src-001' })),
+}));
+
+// The publish guard lives inside publishDraft now (sunk from service.approveDraft).
+// Default it off so the unit tests exercise the publish mechanics without a DB
+// (getPublishGuardSettings otherwise hits db.select on system_settings, which the
+// @/db/client mock below does not provide).
+vi.mock('@/modules/knowledge-evaluation/repository', () => ({
+  getPublishGuardSettings: vi.fn(() => ({ enabled: false, minScore: 60 })),
+  getEvaluationByDraftId: vi.fn(() => null),
 }));
 
 vi.mock('@/config/env', () => ({
