@@ -6,6 +6,7 @@ import { Tabs, Pagination, FilterBar, ConfirmDialog, Toast } from '@/components/
 import { DataTable } from '@/components/common';
 import { authFetch } from '@/lib/auth-client';
 import { SourceUploadForm } from '@/components/knowledge/SourceUploadForm';
+import { CleaningBackendSwitch } from '@/components/knowledge/CleaningBackendSwitch';
 import { JobStatusBadge, SourceStatusBadge } from '@/components/knowledge/JobStatusBadge';
 import { ItemTable } from '@/components/knowledge/ItemTable';
 import type { JobStatus } from '@/config/constants';
@@ -630,9 +631,15 @@ export default function KnowledgePage() {
       )}
 
       {/* Page header */}
-      <div className="border-b border-gray-200 bg-white px-6 py-4">
-        <h1 className="text-xl font-semibold text-gray-900">知识管理</h1>
-        <p className="mt-1 text-sm text-gray-500">管理知识来源、处理任务和知识条目</p>
+      <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">知识管理</h1>
+          <p className="mt-1 text-sm text-gray-500">管理知识来源、处理任务和知识条目</p>
+        </div>
+        <CleaningBackendSwitch
+          onSuccess={(m) => setToast({ message: m, type: 'success' })}
+          onError={(m) => setToast({ message: m, type: 'error' })}
+        />
       </div>
 
       {/* Tabs */}

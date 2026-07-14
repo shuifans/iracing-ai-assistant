@@ -17,7 +17,7 @@ iRacing AI 助手整合官方文档、权威社区、专业教程等知识源，
 - **追问引导** — 问题过于宽泛时主动追问，获取赛道/车辆/天气等具体条件
 - **幻觉控制** — 知识库中找不到答案时坦诚告知，引导至社区专家
 - **图片理解** — 支持上传调校截图，Agent 具备视觉理解能力
-- **知识管理** — 支持上传文件/URL → 异步清洗 → **知识评估（启发式+检索探针评分卡）** → 人工审核+反馈 → 带反馈重洗 → 自动发布到 Wiki
+- **知识管理** — 支持上传文件/URL → 异步清洗（默认 LongCat，可经后台密码门禁切换 Qwen3.7-Plus）→ **知识评估（启发式+检索探针评分卡）** → 人工审核+反馈 → 带反馈重洗 → 自动发布到 Wiki
 - **管理后台** — 用户审批、会话质检、使用统计、限流配置和审计日志
 
 ### 目标用户
@@ -47,7 +47,7 @@ PM2 Process Manager (shserver, Ubuntu 24.04)
    ├── iracing-ai-worker (知识清洗 Worker, 256M limit)
    │   ├── SQLite Job Leasing
    │   ├── File & URL Extraction
-   │   ├── Qoder Knowledge Cleaning (支持带反馈重洗)
+   │   ├── Knowledge Cleaning (默认 LongCat LLM 直连；可经后台密码门禁切换 Qoder SDK)
    │   ├── Knowledge Evaluation (启发式+检索探针，清洗后自动评分)
    │   └── Draft Generation / Publish
    ├── SQLite (/srv/iracing-ai-assistant/data/db/app.sqlite)
@@ -91,9 +91,15 @@ PM2 Process Manager (shserver, Ubuntu 24.04)
           └── web-research Agent  → WebSearch/WebFetch 在线权威站点补充
 
 knowledge-cleaner → 原始文本 → 候选 Markdown（离线 Worker，可带管理员反馈重洗）
+   清洗后端默认走 LLM 直连(LongCat-2.0)；可在知识管理后台经"清洗模型"按钮
+   密码门禁切换为 Qoder SDK(Qwen3.7-Plus)。切换写入 system_settings(knowledge.cleaning_backend)，
+   Worker 按任务读取，对下一个清洗任务生效（无需重启 PM2）。严格二选一不降级：
+   选中后端失败即失败该任务，不跨后端回退。
 ```
 
-> 默认走 `llm-direct`（LongCat-2.0，均值 ~15s、≤30s）；`qoder-sdk` 为备选（较慢）。换 LLM 厂商只需改 `.env` 的 `LLM_API_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 三项（OpenAI 兼容接口）+ restart。
+> **对话答案**默认走 `llm-direct`（LongCat-2.0，均值 ~15s、≤30s）；`qoder-sdk` 为备选（较慢）。换 LLM 厂商只需改 `.env` 的 `LLM_API_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 三项（OpenAI 兼容接口）+ restart。
+>
+> **知识清洗**默认 LongCat（llm-direct），经管理后台密码门禁运行时切换 Qoder SDK。切换密码存 `MODEL_SWITCH_PASSWORD_HASH`（bcrypt 哈希，cost 12），明文不入仓库；其它管理员无密码故只能用默认 LongCat。
 
 ---
 
@@ -145,7 +151,7 @@ src/
 │   ├── (public)/           # 登录、注册
 │   ├── (app)/              # 聊天、知识库管理
 │   ├── (admin)/            # 管理后台
-│   └── api/                # 48 个 Route Handlers
+│   └── api/                # 55 个 Route Handlers
 ├── modules/                # 业务模块（模块化单体）
 │   ├── auth/               # 认证与权限
 │   ├── users/              # 用户管理
@@ -280,6 +286,7 @@ npm run dev
 - [x] 运维脚本（备份、恢复、引导管理员）
 - [x] md-wiki 知识库内容初始化（18 篇，覆盖官方指南、驾驶技术、调校理论）
 - [x] 对话双后端（LLM 直连 / Qoder SDK 可切换，默认 LongCat-2.0）+ BM25 本地检索 + 双层缓存
+- [x] 知识清洗模型密码门禁切换（默认 LongCat LLM 直连，后台可经密码切换 Qwen3.7-Plus；DB 驱动运行时生效）
 - [x] E2E 测试完善
 - [x] 生产部署上线与验收（shserver，PM2 + Nginx）
 

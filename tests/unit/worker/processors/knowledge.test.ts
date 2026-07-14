@@ -52,7 +52,16 @@ vi.mock('@/config/env', () => ({
     WIKI_ROOT: '/data/md-wiki',
     QODER_CLEAN_TIMEOUT_MS: 900000,
     URL_FETCH_MAX_BYTES: 5242880,
+    LLM_CLEAN_TIMEOUT_MS: 120000,
   },
+}));
+
+vi.mock('@/modules/system-settings/repository', () => ({
+  getCleaningBackend: vi.fn(),
+}));
+
+vi.mock('@/modules/knowledge/llm-cleaner', () => ({
+  cleanWithLlmDirect: vi.fn(),
 }));
 
 vi.mock('fs', () => ({
@@ -85,6 +94,8 @@ import {
   generateWikiPath,
 } from '@/modules/knowledge/front-matter';
 import { createCleaningQuery } from '@/modules/agent/client';
+import { cleanWithLlmDirect } from '@/modules/knowledge/llm-cleaner';
+import { getCleaningBackend } from '@/modules/system-settings/repository';
 import { evaluateDraft } from '@/modules/knowledge-evaluation/service';
 import * as fs from 'fs';
 
@@ -104,6 +115,8 @@ const mockParseFrontMatter = vi.mocked(parseFrontMatter);
 const mockValidateFrontMatter = vi.mocked(validateFrontMatter);
 const mockGenerateWikiPath = vi.mocked(generateWikiPath);
 const mockCreateCleaningQuery = vi.mocked(createCleaningQuery);
+const mockCleanWithLlmDirect = vi.mocked(cleanWithLlmDirect);
+const mockGetCleaningBackend = vi.mocked(getCleaningBackend);
 const mockEvaluateDraft = vi.mocked(evaluateDraft);
 const mockMkdirSync = vi.mocked(fs.mkdirSync);
 const mockWriteFileSync = vi.mocked(fs.writeFileSync);
@@ -235,6 +248,9 @@ describe('processKnowledgeJob', () => {
     mockGenerateWikiPath.mockReturnValue('track-technique/driving-line/test-article.md');
     // Default: no cached extraction → extract/fetch runs. Cache-hit tests override.
     mockExistsSync.mockReturnValue(false);
+    // Default backend = qoder-sdk so existing createCleaningQuery tests pass.
+    // llm-direct tests override this below.
+    mockGetCleaningBackend.mockReturnValue('qoder-sdk');
   });
 
   // ─── Happy path: file extraction → cleaning → draft → pending_review ─────
@@ -538,5 +554,70 @@ describe('processKnowledgeJob', () => {
     expect(mockFetchUrl).not.toHaveBeenCalled();
     // Cleaner still ran (with cached text)
     expect(mockCreateCleaningQuery).toHaveBeenCalled();
+  });
+
+  // ─── llm-direct backend: cleanWithLlmDirect path (no Qoder fallback) ─────
+
+  describe('llm-direct backend', () => {
+    beforeEach(() => {
+      mockGetCleaningBackend.mockReturnValue('llm-direct');
+    });
+
+    it('uses cleanWithLlmDirect (not the SDK) and completes the pipeline', async () => {
+      mockGetSource.mockReturnValue(makeSource() as any);
+      mockExtract.mockResolvedValue({
+        text: 'extracted text content',
+        charCount: 22,
+        truncated: false,
+        warnings: [],
+      });
+      mockCleanWithLlmDirect.mockResolvedValue(VALID_MARKDOWN);
+      mockParseFrontMatter.mockReturnValue({
+        frontMatter: VALID_FRONT_MATTER as any,
+        body: '# Test Article\n\nThis is the body content.',
+      });
+      mockValidateFrontMatter.mockReturnValue(VALID_FRONT_MATTER as any);
+      mockGetJob.mockReturnValue({ sourceId: 'source-1' } as any);
+
+      const job = makeLeasedJob();
+      await processKnowledgeJob(job);
+
+      // LLM-direct was used
+      expect(mockCleanWithLlmDirect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          maxOutputChars: 4500,
+          maxTokens: 2500,
+          rawText: 'extracted text content',
+        }),
+      );
+      // Qoder SDK was NOT used (strict binary — no fallback on the chosen backend)
+      expect(mockCreateCleaningQuery).not.toHaveBeenCalled();
+      // Pipeline still completed: draft created, CAS to pending_review
+      expect(mockCreateDraft).toHaveBeenCalled();
+      expect(mockUpdateJobStatus).toHaveBeenCalledWith('job-1', 'cleaning', 'pending_review');
+    });
+
+    it('fails with AGENT_UNAVAILABLE when cleanWithLlmDirect throws (no Qoder fallback)', async () => {
+      mockGetSource.mockReturnValue(makeSource() as any);
+      mockExtract.mockResolvedValue({
+        text: 'some text',
+        charCount: 9,
+        truncated: false,
+        warnings: [],
+      });
+      mockCleanWithLlmDirect.mockRejectedValue(new Error('LongCat rate limited'));
+
+      const job = makeLeasedJob();
+      await processKnowledgeJob(job);
+
+      // Job failed with AGENT_UNAVAILABLE
+      expect(mockFailJob).toHaveBeenCalledWith(
+        'job-1',
+        'AGENT_UNAVAILABLE',
+        expect.stringContaining('LongCat rate limited'),
+      );
+      // Qoder SDK was NOT used as a fallback (strict binary)
+      expect(mockCreateCleaningQuery).not.toHaveBeenCalled();
+    });
   });
 });

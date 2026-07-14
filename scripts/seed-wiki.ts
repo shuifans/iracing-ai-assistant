@@ -20,6 +20,13 @@ import * as path from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { query, accessTokenFromEnv } from '@qoder-ai/qoder-agent-sdk';
+import {
+  cleanWithLlmDirect,
+  buildCleanerSystemPrompt,
+  makeCleanerUserPrompt,
+  getOpenAiCompatibleProviders,
+  StopCleaningError,
+} from '@/modules/knowledge/llm-cleaner';
 
 // ── 手动加载 .env ──────────────────────────────────────────────────────────
 const envPath = resolve(__dirname, '..', '.env');
@@ -39,61 +46,9 @@ const WIKI_ROOT = resolve(__dirname, '..', process.env.WIKI_ROOT ?? './data/md-w
 const TEMP_DIR = join(WIKI_ROOT, '..', '.seed-temp');
 const DRY_RUN = process.argv.includes('--dry-run');
 const FORCE = process.argv.includes('--force');
-const STOP_ON_LLM_RATE_LIMIT = process.env.STOP_ON_LLM_RATE_LIMIT !== 'false';
 
-interface OpenAiCompatibleProvider {
-  name: string;
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-}
-
-class StopCleaningError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'StopCleaningError';
-  }
-}
-
-function getOpenAiCompatibleProviders(): OpenAiCompatibleProvider[] {
-  const providerNames = (process.env.LLM_API_PROVIDERS ?? 'longcat')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  return providerNames
-    .map((name) => {
-      const key = name.toUpperCase().replace(/[^A-Z0-9]/g, '_');
-      const baseUrl = process.env[`${key}_API_BASE_URL`] ?? process.env[`${key}_BASE_URL`] ?? '';
-      const apiKey = process.env[`${key}_API_KEY`] ?? '';
-      const model = process.env[`${key}_MODEL`] ?? '';
-      if (!baseUrl || !apiKey || !model) return null;
-      return { name, baseUrl, apiKey, model };
-    })
-    .filter((p): p is OpenAiCompatibleProvider => p !== null);
-}
-
-function maskSecret(value: string): string {
-  if (value.length <= 8) return '****';
-  return `${value.slice(0, 4)}...${value.slice(-4)}`;
-}
-
-function isRateLimitOrQuotaError(status: number, bodyText: string): boolean {
-  const lower = bodyText.toLowerCase();
-  return (
-    status === 429 ||
-    status === 402 ||
-    lower.includes('rate_limit') ||
-    lower.includes('rate limit') ||
-    lower.includes('too many requests') ||
-    lower.includes('quota') ||
-    lower.includes('insufficient') ||
-    lower.includes('余额') ||
-    lower.includes('额度') ||
-    lower.includes('限流') ||
-    lower.includes('超限')
-  );
-}
+// LLM provider resolution, error classes, and cleaner prompts now live in
+// @/modules/knowledge/llm-cleaner (shared with the offline Worker).
 
 /**
  * 种子 URL 列表 —— 全部来自白名单域名，按主题分组
@@ -206,50 +161,8 @@ const SEED_URLS: Array<{ url: string; hint: string; category: string }> = [
 ];
 
 // ── Front Matter 模板 ──────────────────────────────────────────────────────
+// (CLEANER_SYSTEM_PROMPT moved to @/modules/knowledge/llm-cleaner → buildCleanerSystemPrompt)
 
-const CLEANER_SYSTEM_PROMPT = `
-You are a knowledge cleaning agent for the iRacing AI assistant's wiki.
-
-## Goal
-Convert raw web page text into a clean, well-structured Markdown document
-with YAML Front Matter metadata.
-
-## Output Format
-
-The output MUST start with Front Matter delimited by "---":
-
----
-title: <concise title, max 200 chars>
-category: <one of: track-technique | car-setup | basics>
-subcategory: <one of: driving-line | braking | tire-management | suspension | theory | presets | tools | getting-started | buying-guide | series-and-league | hardware>
-tags: [tag1, tag2, tag3]
-source_name: <original website name>
-source_url: <original URL>
-season: <optional, e.g. 2025S3>
----
-
-Then the body: a clean Markdown document with:
-- A clear H1 title
-- Logical H2/H3 heading hierarchy
-- Clean paragraphs, no orphan lines
-- Tables preserved in proper Markdown table syntax
-- All advertising, navigation, cookie banners, and irrelevant content stripped
-- Factual accuracy preserved — do NOT paraphrase technical values
-- Image references converted to ![alt](url) placeholders where possible
-- If the source is too noisy, output a brief explanation instead
-
-## Category Guide
-- track-technique: driving techniques, racing line, braking, tire management
-- car-setup: car setup theory, preset guides, setup tools
-- basics: getting started, buying guide, license system, hardware requirements
-
-## Rules
-- Write in the SAME LANGUAGE as the source content (English stays English)
-- Keep technical terms, values, and units exactly as in the source
-- Maximum 3000 words in the body
-- Do NOT add content not present in the source
-- Respond with ONLY the cleaned Markdown document, nothing else
-`.trim();
 
 function sourceAlreadyExists(sourceUrl: string): string | null {
   if (FORCE || !fs.existsSync(WIKI_ROOT)) return null;
@@ -342,85 +255,17 @@ async function fetchPage(url: string): Promise<{ text: string; truncated: boolea
   }
 }
 
-// ── OpenAI 兼容 LLM API 清洗（LongCat 优先，可扩展多个 Provider）────────────
-
-function makeCleanerUserPrompt(rawText: string, sourceUrl: string, hint: string): string {
-  return `Clean the following raw web page text into a structured Markdown document with Front Matter.
-
-Source URL: ${sourceUrl}
-Context hint: ${hint}
-
---- RAW TEXT START ---
-${rawText.slice(0, 40_000)}
---- RAW TEXT END ---
-
-Output ONLY the cleaned Markdown document (starting with "---" Front Matter). Nothing else.`;
-}
-
-async function cleanWithOpenAiCompatibleProvider(
-  provider: OpenAiCompatibleProvider,
-  rawText: string,
-  sourceUrl: string,
-  hint: string,
-): Promise<string> {
-  const endpoint = `${provider.baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${provider.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: provider.model,
-      messages: [
-        { role: 'system', content: CLEANER_SYSTEM_PROMPT },
-        { role: 'user', content: makeCleanerUserPrompt(rawText, sourceUrl, hint) },
-      ],
-      temperature: 0.2,
-      max_tokens: 6000,
-    }),
-  });
-
-  const bodyText = await response.text();
-
-  if (!response.ok) {
-    if (STOP_ON_LLM_RATE_LIMIT && isRateLimitOrQuotaError(response.status, bodyText)) {
-      throw new StopCleaningError(
-        `${provider.name} 返回限流/额度错误，已按配置停止本轮清洗。HTTP ${response.status}: ${bodyText.slice(0, 300)}`,
-      );
-    }
-    throw new Error(`${provider.name} API failed: HTTP ${response.status}: ${bodyText.slice(0, 500)}`);
-  }
-
-  let json: any;
-  try {
-    json = JSON.parse(bodyText);
-  } catch {
-    throw new Error(`${provider.name} API returned non-JSON response: ${bodyText.slice(0, 200)}`);
-  }
-
-  const content = json?.choices?.[0]?.message?.content;
-  if (!content || typeof content !== 'string') {
-    throw new Error(`${provider.name} API response missing choices[0].message.content`);
-  }
-
-  return content.trim();
-}
+// ── OpenAI 兼容 LLM API 清洗（LongCat 优先，失败兜底 Qoder SDK）────────────
+// Provider 循环、prompt 组装、限流判定已收敛到 @/modules/knowledge/llm-cleaner。
+// 这里只保留"LLM 失败 → Qoder 兜底"的包装（seed 脚本特有；Worker 不兜底）。
 
 async function cleanWithConfiguredLLMs(rawText: string, sourceUrl: string, hint: string): Promise<string> {
-  const providers = getOpenAiCompatibleProviders();
-
-  for (const provider of providers) {
-    try {
-      console.log(
-        `        LLM API: ${provider.name} / ${provider.model} (${provider.baseUrl}, key ${maskSecret(provider.apiKey)})`,
-      );
-      return await cleanWithOpenAiCompatibleProvider(provider, rawText, sourceUrl, hint);
-    } catch (err) {
-      if (err instanceof StopCleaningError) throw err;
-      const message = err instanceof Error ? err.message : String(err);
-      console.log(`        LLM API失败，尝试下一个Provider/兜底: ${message}`);
-    }
+  try {
+    return await cleanWithLlmDirect({ rawText, sourceUrl, hint, maxTokens: 6000 });
+  } catch (err) {
+    if (err instanceof StopCleaningError) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(`        LLM API 失败，兜底到 Qoder SDK: ${message}`);
   }
 
   console.log(`        使用 Qoder SDK + ${MODEL} 兜底清洗`);
@@ -437,7 +282,7 @@ async function cleanWithQwen(rawText: string, sourceUrl: string, hint: string): 
         ].find(existsSync)
       : undefined;
 
-  const prompt = makeCleanerUserPrompt(rawText, sourceUrl, hint);
+  const prompt = makeCleanerUserPrompt({ rawText, sourceUrl, hint });
 
   const q = query({
     prompt,
@@ -446,7 +291,7 @@ async function cleanWithQwen(rawText: string, sourceUrl: string, hint: string): 
       model: MODEL,
       maxTurns: 3,
       ...(cliPath ? { pathToQoderCLIExecutable: cliPath } : {}),
-      systemPrompt: CLEANER_SYSTEM_PROMPT,
+      systemPrompt: buildCleanerSystemPrompt(),
       disallowedTools: ['Write', 'Edit', 'Bash', 'Agent', 'WebFetch', 'WebSearch'],
     },
   });

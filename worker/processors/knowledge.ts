@@ -38,6 +38,8 @@ import {
   generateWikiPath,
 } from '@/modules/knowledge/front-matter';
 import { createCleaningQuery } from '@/modules/agent/client';
+import { cleanWithLlmDirect } from '@/modules/knowledge/llm-cleaner';
+import { getCleaningBackend } from '@/modules/system-settings/repository';
 import { evaluateDraft } from '@/modules/knowledge-evaluation/service';
 import { AppError } from '@/lib/errors';
 import { generateId } from '@/lib/uuid';
@@ -119,23 +121,45 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
     throw new AppError('INVALID_STATE', 'CAS extracting→cleaning failed');
   }
 
-  // Step 5–6: Run cleaning query via SDK
+  // Step 5–6: Run cleaning — backend chosen per-job from system_settings
+  // (DB-backed, so a UI switch takes effect for the next job without restart).
+  // Strict-binary: a failure on the selected backend fails the job — NO
+  // cross-backend fallback (llm-direct never falls back to Qoder, and vice-
+  // versa). STOP_ON_LLM_RATE_LIMIT still halts the run on quota errors.
   const draftId = generateId();
-  const agentConfig: AgentConfig = {
-    wikiRoot: env.WIKI_ROOT as string,
-    pat: env.QODER_PERSONAL_ACCESS_TOKEN as string,
-    model: env.QODER_MODEL as string | undefined,
-    chatTimeoutMs: env.QODER_CHAT_TIMEOUT_MS as number,
-    cleanTimeoutMs: env.QODER_CLEAN_TIMEOUT_MS as number,
-  };
-
-  const cleanedMarkdown = await consumeCleaningQuery(
-    agentConfig,
-    extractedText,
-    draftId,
-    signal,
-    job.instructionsJson ?? undefined,
-  );
+  const backend = getCleaningBackend();
+  let cleanedMarkdown: string;
+  if (backend === 'llm-direct') {
+    try {
+      cleanedMarkdown = await cleanWithLlmDirect({
+        rawText: extractedText,
+        sourceUrl: source.sourceUrl ?? undefined,
+        feedback: job.instructionsJson ?? undefined,
+        signal,
+        maxOutputChars: 4500,
+        maxTokens: 2500,
+        timeoutMs: env.LLM_CLEAN_TIMEOUT_MS,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new AppError('AGENT_UNAVAILABLE', `LLM 直连清洗失败: ${message}`);
+    }
+  } else {
+    const agentConfig: AgentConfig = {
+      wikiRoot: env.WIKI_ROOT as string,
+      pat: env.QODER_PERSONAL_ACCESS_TOKEN as string,
+      model: env.QODER_MODEL as string | undefined,
+      chatTimeoutMs: env.QODER_CHAT_TIMEOUT_MS as number,
+      cleanTimeoutMs: env.QODER_CLEAN_TIMEOUT_MS as number,
+    };
+    cleanedMarkdown = await consumeCleaningQuery(
+      agentConfig,
+      extractedText,
+      draftId,
+      signal,
+      job.instructionsJson ?? undefined,
+    );
+  }
 
   // Step 7: Parse Front Matter + Zod validation
   const parsed = parseFrontMatter(cleanedMarkdown);

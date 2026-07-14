@@ -19,6 +19,10 @@ const envSchema = z.object({
   QODER_CLEAN_TIMEOUT_MS: z.coerce.number().int().positive().default(900000),
   // 对话答案后端开关（llm-direct=BM25+OpenAI 兼容直调[默认] | qoder-sdk=Qoder SDK 全量循环）
   CHAT_ANSWER_BACKEND: z.enum(['llm-direct', 'qoder-sdk']).default('llm-direct'),
+  // 知识清洗后端单次 LLM 请求超时（毫秒，worker llm-direct 路径用）
+  LLM_CLEAN_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
+  // 知识清洗模型切换密码的 bcrypt 哈希（cost 12）。留空则禁用后台切换（仅默认 LongCat 清洗）。
+  MODEL_SWITCH_PASSWORD_HASH: z.string().optional(),
   // 对话 LLM 直调端点（OpenAI 兼容）。留空则回退到 LONGCAT_* 别名（与知识清洗共用配置）。
   LLM_API_BASE_URL: z.string().optional(),
   LLM_API_KEY: z.string().optional(),
