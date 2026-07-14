@@ -7,12 +7,14 @@ export async function register() {
       runMigrations(dbPath);
       console.log('[instrumentation] Database migrations completed');
     } catch (err) {
-      // 开发环境不阻塞启动
-      if (process.env.NODE_ENV === 'production') {
-        console.error('[instrumentation] Migration failed:', err);
-        throw err;
-      }
-      console.warn('[instrumentation] Migration skipped (dev mode):', err);
+      // Migrations are applied explicitly during deploy (deploy.sh runs
+      // `npx tsx src/db/migrate.ts` from source). This startup hook is a best-effort
+      // safety net; in the standalone build the bundled migrate.ts resolves the
+      // migrations dir to `.next/.../chunks/migrations` (the .sql files are read
+      // dynamically, so Next.js doesn't auto-trace them there), so a scan can throw
+      // here. Never crash the server on a migration scan failure — log and continue;
+      // the deploy step has already applied migrations.
+      console.error('[instrumentation] Migration skipped (applied via deploy step):', err);
     }
   }
 }
