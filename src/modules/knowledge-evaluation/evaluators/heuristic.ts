@@ -16,17 +16,60 @@ import { isAppError } from '@/lib/errors';
 import { DIMENSION_WEIGHT } from '../dimensions';
 import type { DimensionScore, DraftContext, EvalDimensionKey } from '../types';
 
-const MAX_CONTENT_CHARS = 5000;
+const MAX_CONTENT_CHARS = 12_000;
 const MIN_BODY_CHARS = 200;
 const FRESH_STALE_DAYS = 730;
 
 /** Minimal English stopword set for shingle / term extraction. */
 const STOPWORDS = new Set([
-  'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'any', 'can', 'had',
-  'her', 'was', 'one', 'our', 'out', 'has', 'have', 'this', 'that', 'with',
-  'from', 'they', 'will', 'would', 'there', 'their', 'what', 'about', 'which',
-  'when', 'your', 'into', 'than', 'them', 'then', 'also', 'more', 'such',
-  'were', 'been', 'being', 'some', 'these', 'those', 'each', 'very', 'over',
+  'the',
+  'and',
+  'for',
+  'are',
+  'but',
+  'not',
+  'you',
+  'all',
+  'any',
+  'can',
+  'had',
+  'her',
+  'was',
+  'one',
+  'our',
+  'out',
+  'has',
+  'have',
+  'this',
+  'that',
+  'with',
+  'from',
+  'they',
+  'will',
+  'would',
+  'there',
+  'their',
+  'what',
+  'about',
+  'which',
+  'when',
+  'your',
+  'into',
+  'than',
+  'them',
+  'then',
+  'also',
+  'more',
+  'such',
+  'were',
+  'been',
+  'being',
+  'some',
+  'these',
+  'those',
+  'each',
+  'very',
+  'over',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -97,7 +140,7 @@ function frontMatterValidity(ctx: DraftContext): DimensionScore {
   }
 }
 
-/** 2. Content length — 200–5000 body chars = 100; <200 = 20; >5000 = 40. */
+/** 2. Content length — 200–12000 body chars = 100; <200 = 20; >12000 = 40. */
 function contentLength(ctx: DraftContext): DimensionScore {
   let bodyLen = 0;
   let parsed = true;
@@ -112,12 +155,10 @@ function contentLength(ctx: DraftContext): DimensionScore {
   else if (bodyLen < MIN_BODY_CHARS) s = 20;
   else if (bodyLen <= MAX_CONTENT_CHARS) s = 100;
   else s = 40;
-  return score(
-    'content_length',
-    s,
-    `body ${bodyLen} chars${parsed ? '' : ' (unparsed)'}`,
-    { bodyLength: bodyLen, parsed },
-  );
+  return score('content_length', s, `body ${bodyLen} chars${parsed ? '' : ' (unparsed)'}`, {
+    bodyLength: bodyLen,
+    parsed,
+  });
 }
 
 /** 3. Tag / category sanity — category & subcategory must be in the taxonomy. */
@@ -170,7 +211,11 @@ function dedupOverlap(ctx: DraftContext): DimensionScore {
   const candidates = ranked
     .filter((c) => c.overlap > 0)
     .slice(0, 3)
-    .map((c) => ({ wikiPath: c.wikiPath, title: c.title, overlap: Math.round(c.overlap * 1000) / 1000 }));
+    .map((c) => ({
+      wikiPath: c.wikiPath,
+      title: c.title,
+      overlap: Math.round(c.overlap * 1000) / 1000,
+    }));
   const dupLikely = maxOverlap >= 0.6;
   return score(
     'dedup_overlap',
@@ -187,6 +232,11 @@ function freshness(ctx: DraftContext): DimensionScore {
   let basis = ctx.source.createdAt;
   try {
     const fm = parseFrontMatter(ctx.draftContent).frontMatter;
+    if (fm.expires_at && Date.parse(fm.expires_at) < Date.now()) {
+      return score('freshness', 20, `expired on ${fm.expires_at}`, {
+        expiresAt: fm.expires_at,
+      });
+    }
     if (fm.updated_at) basis = fm.updated_at;
   } catch {
     // fall back to source.createdAt

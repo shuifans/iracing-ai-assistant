@@ -22,6 +22,7 @@ vi.mock('@/modules/jobs/repository', () => ({
   getJob: vi.fn(() => ({ sourceId: 'source-001' })),
 }));
 vi.mock('@/modules/knowledge/repository', () => ({
+  getSource: vi.fn(() => ({ id: 'source-001', sha256: 'a'.repeat(64) })),
   commitPublishedDraft: vi.fn(() => ({ itemId: 'item-001' })),
   getItemByWikiPath: vi.fn(() => null),
   createItem: vi.fn(() => ({ id: 'item-001' })),
@@ -64,10 +65,15 @@ describe('publisher Git command integration', () => {
     const title = `--$(touch ${sentinel}) \`printf backtick\` "quoted"`;
     const draftContent = [
       '---',
+      'id: source-001',
       `title: ${title}`,
-      'category: basics',
-      'subcategory: getting-started',
+      'description: Security handling test',
+      'category: getting-started',
+      'subcategory: first-race',
       'tags: [security]',
+      'aliases: []',
+      'source_id: source-001',
+      `source_sha256: ${'a'.repeat(64)}`,
       '---',
       '',
       'Body',
@@ -95,10 +101,15 @@ describe('publisher Git command integration', () => {
     const title = 'Rolled Back Entry';
     const draftContent = [
       '---',
+      'id: source-001',
       `title: ${title}`,
-      'category: basics',
-      'subcategory: getting-started',
+      'description: Rollback handling test',
+      'category: getting-started',
+      'subcategory: first-race',
       'tags: [rollback]',
+      'aliases: []',
+      'source_id: source-001',
+      `source_sha256: ${'a'.repeat(64)}`,
       '---',
       '',
       'Body',
@@ -118,9 +129,9 @@ describe('publisher Git command integration', () => {
       encoding: 'utf8',
     });
     expect(index).not.toContain('rolled-back-entry.md');
-    expect(existsSync(join(testEnv.WIKI_ROOT, 'basics/getting-started/rolled-back-entry.md'))).toBe(
-      false,
-    );
+    expect(
+      existsSync(join(testEnv.WIKI_ROOT, 'getting-started/first-race/rolled-back-entry.md')),
+    ).toBe(false);
     expect(readFileSync(join(testEnv.WIKI_ROOT, 'index.md'), 'utf8')).not.toContain(title);
   });
 });

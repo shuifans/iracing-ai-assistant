@@ -24,10 +24,15 @@ function makeFrontMatter(
   const tagStr = tags.map((t) => t).join(', ');
   const lines = [
     '---',
+    `id: ${title.toLowerCase().replace(/\s+/g, '-')}`,
     `title: ${title}`,
+    'description: Test description',
     `category: ${category}`,
     `subcategory: ${subcategory}`,
     `tags: [${tagStr}]`,
+    'aliases: []',
+    `source_id: ${title.toLowerCase().replace(/\s+/g, '-')}`,
+    `source_sha256: ${'a'.repeat(64)}`,
   ];
   if (season) lines.push(`season: ${season}`);
   lines.push('---', '', `# ${title}`, '');
@@ -88,18 +93,18 @@ describe('rebuildIndex', () => {
 
   it('单文件 → 正确分类和链接', () => {
     mockFs({
-      '/wiki/track-technique/braking/late-braking-guide.md': makeFrontMatter(
+      '/wiki/driving-technique/braking/late-braking-guide.md': makeFrontMatter(
         'Late Braking Guide',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['trail-braking', 'threshold'],
       ),
     });
     const result = rebuildIndex('/wiki');
-    expect(result).toContain('## track-technique');
+    expect(result).toContain('## driving-technique');
     expect(result).toContain('### braking');
     expect(result).toContain(
-      '- [Late Braking Guide](track-technique/braking/late-braking-guide.md) — Tags: trail-braking, threshold',
+      '- [Late Braking Guide](driving-technique/braking/late-braking-guide.md) — Test description | tags: trail-braking, threshold',
     );
   });
 
@@ -111,21 +116,21 @@ describe('rebuildIndex', () => {
         'suspension',
         ['spring'],
       ),
-      '/wiki/track-technique/cornering/apex-selection.md': makeFrontMatter(
+      '/wiki/driving-technique/cornering/apex-selection.md': makeFrontMatter(
         'Apex Selection',
-        'track-technique',
+        'driving-technique',
         'cornering',
         ['apex'],
       ),
-      '/wiki/track-technique/braking/threshold-braking.md': makeFrontMatter(
+      '/wiki/driving-technique/braking/threshold-braking.md': makeFrontMatter(
         'Threshold Braking',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['braking'],
       ),
-      '/wiki/track-technique/braking/late-braking-guide.md': makeFrontMatter(
+      '/wiki/driving-technique/braking/late-braking-guide.md': makeFrontMatter(
         'Late Braking Guide',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['trail-braking', 'threshold'],
       ),
@@ -133,14 +138,14 @@ describe('rebuildIndex', () => {
     const result = rebuildIndex('/wiki');
     const lines = result.split('\n');
 
-    // track-technique should come before car-setup (enum order)
-    const trackIdx = lines.findIndex((l) => l === '## track-technique');
+    // driving-technique should come before car-setup (enum order)
+    const trackIdx = lines.findIndex((l) => l === '## driving-technique');
     const carIdx = lines.findIndex((l) => l === '## car-setup');
     expect(trackIdx).toBeGreaterThan(-1);
     expect(carIdx).toBeGreaterThan(-1);
     expect(trackIdx).toBeLessThan(carIdx);
 
-    // Within track-technique: braking before cornering (alphabetical)
+    // Within driving-technique: braking before cornering (alphabetical)
     const brakingIdx = lines.findIndex((l) => l === '### braking');
     const corneringIdx = lines.findIndex((l) => l === '### cornering');
     expect(brakingIdx).toBeGreaterThan(-1);
@@ -157,21 +162,18 @@ describe('rebuildIndex', () => {
 
   it('排序一致性 → 相同输入多次调用产生相同输出', () => {
     const files = {
-      '/wiki/track-technique/braking/threshold-braking.md': makeFrontMatter(
+      '/wiki/driving-technique/braking/threshold-braking.md': makeFrontMatter(
         'Threshold Braking',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['braking'],
       ),
-      '/wiki/car-setup/theory/basics.md': makeFrontMatter(
-        'Basics',
-        'car-setup',
-        'theory',
-        ['setup'],
-      ),
-      '/wiki/track-technique/braking/late-braking-guide.md': makeFrontMatter(
+      '/wiki/car-setup/theory/basics.md': makeFrontMatter('Basics', 'car-setup', 'theory', [
+        'setup',
+      ]),
+      '/wiki/driving-technique/braking/late-braking-guide.md': makeFrontMatter(
         'Late Braking Guide',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['trail-braking'],
       ),
@@ -188,9 +190,9 @@ describe('rebuildIndex', () => {
   it('跳过 index.md → 不把自身编入索引', () => {
     mockFs({
       '/wiki/index.md': '# Knowledge Index\n\nOld index content',
-      '/wiki/track-technique/braking/guide.md': makeFrontMatter(
+      '/wiki/driving-technique/braking/guide.md': makeFrontMatter(
         'Guide',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['braking'],
       ),
@@ -203,9 +205,9 @@ describe('rebuildIndex', () => {
   it('跳过无 Front Matter 文件 → 忽略 README.md 等', () => {
     mockFs({
       '/wiki/README.md': '# README\n\nThis is a readme.',
-      '/wiki/track-technique/braking/guide.md': makeFrontMatter(
+      '/wiki/driving-technique/braking/guide.md': makeFrontMatter(
         'Guide',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['braking'],
       ),
@@ -215,29 +217,29 @@ describe('rebuildIndex', () => {
     expect(result).toContain('Guide');
   });
 
-  it('无 tags 的条目 → 不显示 Tags 行', () => {
+  it('条目输出 description 和 tags', () => {
     // Edge case: entry with minimal tags still works
     mockFs({
-      '/wiki/basics/getting-started/quick-start.md': makeFrontMatter(
+      '/wiki/getting-started/first-race/quick-start.md': makeFrontMatter(
         'Quick Start',
-        'basics',
         'getting-started',
+        'first-race',
         ['quickstart'],
       ),
     });
     const result = rebuildIndex('/wiki');
-    expect(result).toContain('## basics');
-    expect(result).toContain('### getting-started');
+    expect(result).toContain('## getting-started');
+    expect(result).toContain('### first-race');
     expect(result).toContain(
-      '- [Quick Start](basics/getting-started/quick-start.md) — Tags: quickstart',
+      '- [Quick Start](getting-started/first-race/quick-start.md) — Test description | tags: quickstart',
     );
   });
 
-  it('season 字段 → 不出现在索引行中', () => {
+  it('season 字段用于索引路由', () => {
     mockFs({
-      '/wiki/track-technique/braking/guide.md': makeFrontMatter(
+      '/wiki/driving-technique/braking/guide.md': makeFrontMatter(
         'Guide',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['braking'],
         '2024S3',
@@ -245,7 +247,7 @@ describe('rebuildIndex', () => {
     });
     const result = rebuildIndex('/wiki');
     expect(result).toContain('Guide');
-    expect(result).not.toContain('2024S3');
+    expect(result).toContain('season: 2024S3');
   });
 });
 
@@ -260,9 +262,9 @@ describe('collectIndexEntries', () => {
 
   it('返回解析后的条目（title/category/subcategory/wikiPath/tags）', () => {
     mockFs({
-      '/wiki/track-technique/braking/late-braking-guide.md': makeFrontMatter(
+      '/wiki/driving-technique/braking/late-braking-guide.md': makeFrontMatter(
         'Late Braking Guide',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['trail-braking', 'threshold'],
       ),
@@ -271,9 +273,9 @@ describe('collectIndexEntries', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       title: 'Late Braking Guide',
-      category: 'track-technique',
+      category: 'driving-technique',
       subcategory: 'braking',
-      wikiPath: 'track-technique/braking/late-braking-guide.md',
+      wikiPath: 'driving-technique/braking/late-braking-guide.md',
       tags: ['trail-braking', 'threshold'],
     });
   });
@@ -282,9 +284,9 @@ describe('collectIndexEntries', () => {
     mockFs({
       '/wiki/index.md': '# Knowledge Index\n\nOld content',
       '/wiki/README.md': '# README\n\nno front matter here',
-      '/wiki/track-technique/braking/guide.md': makeFrontMatter(
+      '/wiki/driving-technique/braking/guide.md': makeFrontMatter(
         'Guide',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['braking'],
       ),
@@ -296,9 +298,9 @@ describe('collectIndexEntries', () => {
 
   it('season 字段 → 出现在条目里', () => {
     mockFs({
-      '/wiki/track-technique/braking/guide.md': makeFrontMatter(
+      '/wiki/driving-technique/braking/guide.md': makeFrontMatter(
         'Guide',
-        'track-technique',
+        'driving-technique',
         'braking',
         ['braking'],
         '2024S3',

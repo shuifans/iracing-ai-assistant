@@ -4,6 +4,7 @@ import {
   JOB_STATUSES,
   DRAFT_STATUSES,
   KNOWLEDGE_ITEM_STATUSES,
+  KNOWLEDGE_CATEGORIES,
   WIKI_SYNC_STATUSES,
 } from '../../config/constants';
 import { users } from './users';
@@ -125,7 +126,10 @@ export const knowledgeItems = sqliteTable(
       .references(() => knowledgeDrafts.id),
     title: text('title').notNull(),
     category: text('category', {
-      enum: ['track-technique', 'car-setup', 'basics'] as const,
+      enum: Object.keys(KNOWLEDGE_CATEGORIES) as [
+        keyof typeof KNOWLEDGE_CATEGORIES,
+        ...(keyof typeof KNOWLEDGE_CATEGORIES)[],
+      ],
     }).notNull(),
     subcategory: text('subcategory').notNull(),
     tagsJson: text('tags_json').notNull(),

@@ -116,34 +116,37 @@ describe('WIKI_SYNC_STATUSES', () => {
 });
 
 describe('KNOWLEDGE_CATEGORIES', () => {
-  it('has exactly 3 categories', () => {
+  it('has exactly the 6 iRacing knowledge categories', () => {
     const keys = Object.keys(KNOWLEDGE_CATEGORIES);
-    expect(keys).toHaveLength(3);
-    expect(keys).toContain('track-technique');
-    expect(keys).toContain('car-setup');
-    expect(keys).toContain('basics');
-  });
-
-  it('track-technique has correct subcategories', () => {
-    expect(KNOWLEDGE_CATEGORIES['track-technique']).toEqual([
-      'driving-line',
-      'braking',
-      'tire-management',
-      'suspension',
-    ]);
-  });
-
-  it('car-setup has correct subcategories', () => {
-    expect(KNOWLEDGE_CATEGORIES['car-setup']).toEqual(['theory', 'presets', 'tools']);
-  });
-
-  it('basics has correct subcategories', () => {
-    expect(KNOWLEDGE_CATEGORIES['basics']).toEqual([
+    expect(keys).toEqual([
+      'official-racing',
       'getting-started',
-      'buying-guide',
-      'series-and-league',
-      'hardware',
+      'driving-technique',
+      'car-setup',
+      'cars-and-tracks',
+      'hardware-and-software',
     ]);
+  });
+
+  it('covers official schedules, rules, beginner, driving, setup and equipment topics', () => {
+    expect(KNOWLEDGE_CATEGORIES['official-racing']).toContain('schedule-and-season');
+    expect(KNOWLEDGE_CATEGORIES['official-racing']).toContain('sporting-code');
+    expect(KNOWLEDGE_CATEGORIES['getting-started']).toContain('first-race');
+    expect(KNOWLEDGE_CATEGORIES['driving-technique']).toEqual([
+      'driving-fundamentals',
+      'racing-line',
+      'braking',
+      'cornering',
+      'racecraft',
+      'starts-and-restarts',
+      'overtaking-and-defense',
+      'tire-management',
+      'wet-weather',
+      'telemetry-analysis',
+    ]);
+    expect(KNOWLEDGE_CATEGORIES['car-setup']).toContain('aerodynamics');
+    expect(KNOWLEDGE_CATEGORIES['cars-and-tracks']).toContain('track-guide');
+    expect(KNOWLEDGE_CATEGORIES['hardware-and-software']).toContain('force-feedback');
   });
 });
 

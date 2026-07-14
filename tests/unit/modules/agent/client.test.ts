@@ -37,7 +37,7 @@ vi.mock('@qoder-ai/qoder-agent-sdk', async () => {
 });
 
 // After mock setup, import the module under test
-const { createChatQuery, createCleaningQuery } = await import('@/modules/agent/client');
+const { createChatQuery } = await import('@/modules/agent/client');
 const { query: rawQuery } = await import('@qoder-ai/qoder-agent-sdk');
 const mockQuery = rawQuery as unknown as Mock;
 
@@ -317,29 +317,35 @@ describe('createChatQuery', () => {
       { toolName: 'Read', toolInput: { file_path: '../md-wiki-sibling/private.md' } },
       { toolName: 'Glob', toolInput: { pattern: '../md-wiki-sibling/**/*.md' } },
       { toolName: 'Grep', toolInput: { pattern: 'secret', path: '../md-wiki-sibling' } },
-    ])('denies $toolName access to a Wiki prefix sibling or traversal path', async ({ toolName, toolInput }) => {
-      const result = await getHook()({
-        tool_name: toolName,
-        tool_input: toolInput,
-        cwd: baseConfig.wikiRoot,
-      });
+    ])(
+      'denies $toolName access to a Wiki prefix sibling or traversal path',
+      async ({ toolName, toolInput }) => {
+        const result = await getHook()({
+          tool_name: toolName,
+          tool_input: toolInput,
+          cwd: baseConfig.wikiRoot,
+        });
 
-      expect(result.hookSpecificOutput.permissionDecision).toBe('deny');
-    });
+        expect(result.hookSpecificOutput.permissionDecision).toBe('deny');
+      },
+    );
 
     it.each([
       { toolName: 'Read', toolInput: { file_path: '..notes/private.md' } },
       { toolName: 'Glob', toolInput: { pattern: '..notes/**/*.md' } },
       { toolName: 'Grep', toolInput: { pattern: 'braking', path: '..notes' } },
-    ])('allows $toolName access to a root-contained path whose name starts with dots', async ({ toolName, toolInput }) => {
-      const result = await getHook()({
-        tool_name: toolName,
-        tool_input: toolInput,
-        cwd: baseConfig.wikiRoot,
-      });
+    ])(
+      'allows $toolName access to a root-contained path whose name starts with dots',
+      async ({ toolName, toolInput }) => {
+        const result = await getHook()({
+          tool_name: toolName,
+          tool_input: toolInput,
+          cwd: baseConfig.wikiRoot,
+        });
 
-      expect(result.hookSpecificOutput.permissionDecision).toBe('allow');
-    });
+        expect(result.hookSpecificOutput.permissionDecision).toBe('allow');
+      },
+    );
 
     it('denies a malformed non-string Grep path', async () => {
       const result = await getHook()({
@@ -389,10 +395,12 @@ describe('createChatQuery', () => {
 
     it('extracts a valid envelope from the Agent tool_response object', async () => {
       const envelope = { evidence: [validEvidence] };
-      const result = await getHook()(postToolInput({
-        result: JSON.stringify(envelope),
-        agent: 'wiki-search',
-      }));
+      const result = await getHook()(
+        postToolInput({
+          result: JSON.stringify(envelope),
+          agent: 'wiki-search',
+        }),
+      );
 
       expect(JSON.parse(result.hookSpecificOutput.updatedToolOutput)).toEqual(envelope);
     });
@@ -400,79 +408,16 @@ describe('createChatQuery', () => {
     it.each([
       { evidence: [{ ...validEvidence, retrievedAt: undefined }] },
       { evidence: [{ ...validEvidence, excerpt: 'x'.repeat(601) }] },
-      { evidence: Array.from({ length: 11 }, (_, index) => ({ ...validEvidence, evidenceId: `wiki-${index}` })) },
+      {
+        evidence: Array.from({ length: 11 }, (_, index) => ({
+          ...validEvidence,
+          evidenceId: `wiki-${index}`,
+        })),
+      },
     ])('rejects malformed or oversized evidence', async (envelope) => {
       const result = await getHook()(postToolInput({ result: JSON.stringify(envelope) }));
 
       expect(result).toEqual({});
     });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// createCleaningQuery
-// ---------------------------------------------------------------------------
-
-describe('createCleaningQuery', () => {
-  const sourceText = '# Raw page content\nSome text here with ads and nav bars.';
-  const draftId = 'draft-001';
-
-  it('returns an AsyncGenerator', () => {
-    const gen = createCleaningQuery(baseConfig, sourceText, draftId);
-    expect(gen).toBeDefined();
-    expect(typeof gen[Symbol.asyncIterator]).toBe('function');
-  });
-
-  it('registers only the knowledge-cleaner agent', () => {
-    createCleaningQuery(baseConfig, sourceText, draftId);
-    const callArgs = lastCallArgs();
-    const agents = callArgs.options.agents;
-    expect(Object.keys(agents)).toEqual(['knowledge-cleaner']);
-  });
-
-  it('knowledge-cleaner has Agent in disallowedTools', () => {
-    createCleaningQuery(baseConfig, sourceText, draftId);
-    const callArgs = lastCallArgs();
-    const cleaner = callArgs.options.agents['knowledge-cleaner'];
-    expect(cleaner.disallowedTools).toContain('Agent');
-  });
-
-  it('includes draftId in the prompt', () => {
-    createCleaningQuery(baseConfig, sourceText, draftId);
-    const callArgs = lastCallArgs();
-    expect(callArgs.prompt).toContain(draftId);
-  });
-
-  it('does not expose WebSearch or WebFetch to knowledge-cleaner', () => {
-    createCleaningQuery(baseConfig, sourceText, draftId);
-    const callArgs = lastCallArgs();
-    const cleaner = callArgs.options.agents['knowledge-cleaner'];
-    expect(cleaner.disallowedTools).toContain('WebSearch');
-    expect(cleaner.disallowedTools).toContain('WebFetch');
-  });
-
-  it('omits the reviewer-feedback block when no feedback is given', () => {
-    createCleaningQuery(baseConfig, sourceText, draftId);
-    const callArgs = lastCallArgs();
-    expect(callArgs.prompt).not.toContain('Reviewer Feedback');
-    expect(callArgs.prompt).toContain(sourceText);
-  });
-
-  it('appends reviewer feedback to the prompt when provided', () => {
-    const feedback =
-      '{"improvementInstructions":{"add":"telemetry examples"},"comments":"too verbose"}';
-    createCleaningQuery(baseConfig, sourceText, draftId, feedback);
-    const callArgs = lastCallArgs();
-    expect(callArgs.prompt).toContain('Reviewer Feedback');
-    expect(callArgs.prompt).toContain(feedback);
-    // Original content still present
-    expect(callArgs.prompt).toContain(sourceText);
-    expect(callArgs.prompt).toContain(draftId);
-  });
-
-  it('ignores a blank/whitespace feedback string', () => {
-    createCleaningQuery(baseConfig, sourceText, draftId, '   ');
-    const callArgs = lastCallArgs();
-    expect(callArgs.prompt).not.toContain('Reviewer Feedback');
   });
 });

@@ -1,9 +1,8 @@
 /**
  * Qoder Agent SDK client factory.
  *
- * Creates configured `query()` sessions for:
- * - Main chat (with wiki-search + web-research sub-agents)
- * - Knowledge cleaning (with knowledge-cleaner sub-agent)
+ * Creates configured `query()` sessions for main chat, including the
+ * wiki-search and web-research sub-agents.
  *
  * SPEC 10.1–10.3 — PAT auth, agent definitions, tool restrictions, hooks.
  *
@@ -28,7 +27,6 @@ import {
   WIKI_SEARCH_PROMPT,
   WEB_RESEARCH_PROMPT,
   WEB_RESEARCH_MAX_TURNS,
-  KNOWLEDGE_CLEANER_PROMPT,
 } from './prompts';
 
 // ---------------------------------------------------------------------------
@@ -72,7 +70,15 @@ export const DISALLOWED_TOOLS: string[] = [
 function resolveCliPath(): string | undefined {
   if (process.platform !== 'win32') return undefined;
   const candidates = [
-    path.join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@qoder-ai', 'qodercli', 'bundle', 'qodercli.js'),
+    path.join(
+      process.env.APPDATA ?? '',
+      'npm',
+      'node_modules',
+      '@qoder-ai',
+      'qodercli',
+      'bundle',
+      'qodercli.js',
+    ),
   ];
   return candidates.find(existsSync);
 }
@@ -123,11 +129,7 @@ function isWebSearchQueryValid(query: unknown): query is string {
 
 function isPathContained(root: string, target: string): boolean {
   const relative = path.relative(root, target);
-  return (
-    relative !== '..' &&
-    !relative.startsWith(`..${path.sep}`) &&
-    !path.isAbsolute(relative)
-  );
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
 /**
@@ -152,8 +154,7 @@ const preToolUseHook = async (input: any): Promise<any> => {
     if (
       (toolName !== 'Grep' && (typeof filePath !== 'string' || filePath.length === 0)) ||
       (filePath !== undefined && typeof filePath !== 'string') ||
-      (typeof filePath === 'string' &&
-        !isPathContained(wikiRoot, path.resolve(wikiRoot, filePath)))
+      (typeof filePath === 'string' && !isPathContained(wikiRoot, path.resolve(wikiRoot, filePath)))
     ) {
       return {
         hookSpecificOutput: {
@@ -172,7 +173,8 @@ const preToolUseHook = async (input: any): Promise<any> => {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
-          permissionDecisionReason: 'Search query must be a non-empty string of at most 500 characters',
+          permissionDecisionReason:
+            'Search query must be a non-empty string of at most 500 characters',
         },
       };
     }
@@ -341,54 +343,4 @@ export function createChatQuery(
   }
 
   return query({ prompt: promptWithImages(), options: queryOptions });
-}
-
-/**
- * Create a knowledge-cleaning query session (Work Package D).
- *
- * Only the knowledge-cleaner sub-agent is registered. No web tools are exposed.
- * The working directory is set to the data directory (not the wiki).
- */
-export function createCleaningQuery(
-  config: AgentConfig,
-  sourceText: string,
-  draftId: string,
-  feedback?: string,
-): AsyncGenerator<SDKMessage> {
-  const agents: Record<string, AgentDefinition> = {
-    'knowledge-cleaner': {
-      description: 'Clean raw extracted text into structured Markdown for the Wiki',
-      prompt: KNOWLEDGE_CLEANER_PROMPT,
-      tools: ['Read', 'Write'],
-      disallowedTools: [...DISALLOWED_TOOLS, 'Agent', 'WebSearch', 'WebFetch'],
-      maxTurns: 8,
-      effort: 'high',
-    },
-  };
-
-  const cliPath = resolveCliPath();
-
-  const queryOptions: Options = {
-    auth: accessTokenFromEnv(),
-    cwd: path.resolve(config.wikiRoot, '..'), // data directory, not wiki
-    model: config.model,
-    maxTurns: 8,
-    ...(cliPath ? { pathToQoderCLIExecutable: cliPath } : {}),
-    resolveModel: createModelPolicy(config.model),
-    disallowedTools: DISALLOWED_TOOLS,
-    agents,
-    includePartialMessages: false,
-    onAuthExpired: () => {
-      console.warn('[Agent] AGENT_AUTH_EXPIRED — Qoder PAT auth expired (sanitized)');
-    },
-  };
-
-  let prompt = `Clean the following raw text (draft ID: ${draftId}) into a well-structured Markdown document:\n\n${sourceText}`;
-  // Re-clean path: when reviewer feedback is present (from the evaluation
-  // feedback loop), append it so the knowledge-cleaner incorporates the
-  // requested adjustments into the new draft.
-  if (feedback && feedback.trim()) {
-    prompt += `\n\n## Reviewer Feedback (incorporate these requirements into the cleaned output)\n${feedback.trim()}`;
-  }
-  return query({ prompt, options: queryOptions });
 }

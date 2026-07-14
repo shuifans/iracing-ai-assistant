@@ -16,7 +16,7 @@ function makeCtx(
     draft: {
       id: 'd1',
       jobId: 'j1',
-      suggestedPath: 'track-technique/braking/guide.md',
+      suggestedPath: 'driving-technique/braking/guide.md',
       title: 'Guide',
       version: 1,
       parentDraftId: null,
@@ -33,10 +33,15 @@ function makeCtx(
 
 function validFM(body: string): string {
   return `---
+id: s1
 title: Trail Braking Guide
-category: track-technique
+description: Trail braking technique and application.
+category: driving-technique
 subcategory: braking
 tags: [braking, trail, technique]
+aliases: [trail brake]
+source_id: s1
+source_sha256: ${'a'.repeat(64)}
 ---
 
 ${body}`;
@@ -68,7 +73,7 @@ describe('heuristic evaluators', () => {
   // ─── content_length ──────────────────────────────────────────────────────
 
   describe('content_length', () => {
-    it('100 for 200-5000 body chars', () => {
+    it('100 for 200-12000 body chars', () => {
       const dims = runHeuristicChecks(makeCtx(validFM('x'.repeat(300))));
       expect(findDim(dims, 'content_length').score).toBe(100);
     });
@@ -78,8 +83,8 @@ describe('heuristic evaluators', () => {
       expect(findDim(dims, 'content_length').score).toBe(20);
     });
 
-    it('40 for body > 5000 chars', () => {
-      const dims = runHeuristicChecks(makeCtx(validFM('x'.repeat(6000))));
+    it('40 for body > 12000 chars', () => {
+      const dims = runHeuristicChecks(makeCtx(validFM('x'.repeat(12001))));
       expect(findDim(dims, 'content_length').score).toBe(40);
     });
   });
@@ -108,7 +113,7 @@ body`;
     it('penalizes invalid subcategory for known category', () => {
       const content = `---
 title: X
-category: track-technique
+category: driving-technique
 subcategory: bogus
 tags: [a]
 ---
@@ -126,10 +131,12 @@ body`;
       const entries: IndexEntry[] = [
         {
           title: 'Hardware Buying Advice',
-          category: 'basics',
+          description: 'Wheel and pedal buying advice',
+          category: 'getting-started',
           subcategory: 'hardware',
           wikiPath: 'basics/hardware/hardware.md',
           tags: ['wheel', 'pedals'],
+          aliases: [],
         },
       ];
       const dims = runHeuristicChecks(makeCtx(validFM('body content'), { indexEntries: entries }));
@@ -140,10 +147,12 @@ body`;
       const entries: IndexEntry[] = [
         {
           title: 'Trail Braking Guide',
-          category: 'track-technique',
+          description: 'How to use trail braking',
+          category: 'driving-technique',
           subcategory: 'braking',
-          wikiPath: 'track-technique/braking/trail-braking-guide.md',
+          wikiPath: 'driving-technique/braking/trail-braking-guide.md',
           tags: ['braking', 'trail', 'technique'],
+          aliases: [],
         },
       ];
       const dims = runHeuristicChecks(makeCtx(validFM('body content'), { indexEntries: entries }));
@@ -172,18 +181,31 @@ body`;
 
     it('uses frontMatter.updated_at when present', () => {
       const content = `---
+id: s1
 title: X
-category: track-technique
+description: Old guide
+category: driving-technique
 subcategory: braking
 tags: [a]
-updated_at: 2020-01-01T00:00:00.000Z
+aliases: []
+source_id: s1
+source_sha256: ${'a'.repeat(64)}
+updated_at: 2020-01-01
 ---
 
 body`;
-      const dims = runHeuristicChecks(
-        makeCtx(content, { createdAt: '2026-07-01T00:00:00.000Z' }),
-      );
+      const dims = runHeuristicChecks(makeCtx(content, { createdAt: '2026-07-01T00:00:00.000Z' }));
       expect(findDim(dims, 'freshness').score).toBe(40);
+    });
+
+    it('penalizes an explicitly expired note', () => {
+      const content = validFM('body').replace(
+        'source_sha256:',
+        'expires_at: 2020-01-01\nsource_sha256:',
+      );
+      const dims = runHeuristicChecks(makeCtx(content));
+      expect(findDim(dims, 'freshness').score).toBe(20);
+      expect(findDim(dims, 'freshness').rationale).toContain('expired');
     });
   });
 

@@ -4,6 +4,7 @@ vi.mock('fs', () => ({
   mkdirSync: vi.fn(),
   openSync: vi.fn(() => 10),
   writeSync: vi.fn(() => 0),
+  writeFileSync: vi.fn(),
   fsyncSync: vi.fn(),
   closeSync: vi.fn(),
   readFileSync: vi.fn(() => '---\ntitle: Test\n---\n\nBody'),
@@ -33,19 +34,26 @@ vi.mock('@/modules/knowledge/wiki-index', () => ({
 }));
 
 vi.mock('@/modules/knowledge/front-matter', () => ({
+  assertTrustedSourceMetadata: vi.fn(),
   parseFrontMatter: vi.fn(() => ({
     frontMatter: {
+      id: 'source-001',
       title: 'Test',
-      category: 'basics',
-      subcategory: 'getting-started',
+      description: 'Test description',
+      category: 'getting-started',
+      subcategory: 'first-race',
       tags: ['test'],
+      aliases: [],
+      source_id: 'source-001',
+      source_sha256: 'a'.repeat(64),
     },
     body: 'Body',
   })),
-  generateWikiPath: vi.fn(() => 'basics/getting-started/test.md'),
+  generateWikiPath: vi.fn(() => 'getting-started/first-race/test.md'),
 }));
 
 vi.mock('@/modules/knowledge/repository', () => ({
+  getSource: vi.fn(() => ({ id: 'source-001', sha256: 'a'.repeat(64) })),
   commitPublishedDraft: vi.fn(() => ({ itemId: 'item-001' })),
   completePushAttempt: vi.fn(() => true),
   getItemByWikiPath: vi.fn(() => null),
@@ -155,14 +163,19 @@ function setupHappyMocks(): void {
   mockExistsSync.mockReturnValue(false);
   mockParseFrontMatter.mockReturnValue({
     frontMatter: {
+      id: 'source-001',
       title: 'Test',
-      category: 'basics',
-      subcategory: 'getting-started',
+      description: 'Test description',
+      category: 'getting-started',
+      subcategory: 'first-race',
       tags: ['test'],
+      aliases: [],
+      source_id: 'source-001',
+      source_sha256: 'a'.repeat(64),
     },
     body: 'Body',
   });
-  mockGenerateWikiPath.mockReturnValue('basics/getting-started/test.md');
+  mockGenerateWikiPath.mockReturnValue('getting-started/first-race/test.md');
   mockExecFileSync.mockImplementation((_file: string, args?: readonly string[]) =>
     args?.[0] === 'rev-parse' ? Buffer.from('abc123sha\n') : Buffer.from(''),
   );
@@ -185,10 +198,15 @@ describe('publishDraft', () => {
       '--$(touch /tmp/publisher-sentinel) `touch /tmp/backtick` "quoted"\nnext';
     mockParseFrontMatter.mockReturnValue({
       frontMatter: {
+        id: 'source-001',
         title: maliciousTitle,
-        category: 'basics',
-        subcategory: 'getting-started',
+        description: 'Test description',
+        category: 'getting-started',
+        subcategory: 'first-race',
         tags: [],
+        aliases: [],
+        source_id: 'source-001',
+        source_sha256: 'a'.repeat(64),
       },
       body: 'Body',
     });
@@ -199,7 +217,7 @@ describe('publishDraft', () => {
     expect(mockExecFileSync).toHaveBeenNthCalledWith(
       1,
       'git',
-      ['add', '--', 'basics/getting-started/test.md', 'index.md'],
+      ['add', '--', 'getting-started/first-race/test.md', 'index.md', 'KNOWLEDGE.md'],
       expect.objectContaining({ cwd: WIKI_ROOT }),
     );
     expect(mockExecFileSync).toHaveBeenNthCalledWith(
@@ -221,7 +239,7 @@ describe('publishDraft', () => {
 
     expect(result).toEqual({
       itemId: 'item-001',
-      wikiPath: 'basics/getting-started/test.md',
+      wikiPath: 'getting-started/first-race/test.md',
       gitCommitSha: 'abc123sha',
       wikiSyncStatus: 'push_pending',
     });
@@ -251,7 +269,9 @@ describe('publishDraft', () => {
       'publishing',
       'pending_review',
     );
-    expect(mockUnlinkSync).not.toHaveBeenCalledWith('/data/md-wiki/basics/getting-started/test.md');
+    expect(mockUnlinkSync).not.toHaveBeenCalledWith(
+      '/data/md-wiki/getting-started/first-race/test.md',
+    );
   });
 
   it('push start failure retains published state/file and returns push_failed', async () => {
@@ -268,7 +288,9 @@ describe('publishDraft', () => {
       'publishing',
       'pending_review',
     );
-    expect(mockUnlinkSync).not.toHaveBeenCalledWith('/data/md-wiki/basics/getting-started/test.md');
+    expect(mockUnlinkSync).not.toHaveBeenCalledWith(
+      '/data/md-wiki/getting-started/first-race/test.md',
+    );
   });
 
   it('without a remote leaves the committed status and does not spawn push', async () => {
@@ -295,7 +317,9 @@ describe('publishDraft', () => {
       'publishing',
       'pending_review',
     );
-    expect(mockUnlinkSync).not.toHaveBeenCalledWith('/data/md-wiki/basics/getting-started/test.md');
+    expect(mockUnlinkSync).not.toHaveBeenCalledWith(
+      '/data/md-wiki/getting-started/first-race/test.md',
+    );
   });
 
   it('rejects a generated path outside WIKI_ROOT before writing any file', async () => {
@@ -434,7 +458,7 @@ describe('retryGitPush', () => {
     expect(mockExecFileSync).toHaveBeenNthCalledWith(
       1,
       'git',
-      ['add', '--', 'basics/getting-started/recovered.md', 'index.md'],
+      ['add', '--', 'basics/getting-started/recovered.md', 'index.md', 'KNOWLEDGE.md'],
       expect.objectContaining({ cwd: WIKI_ROOT }),
     );
     expect(mockExecFileSync).toHaveBeenNthCalledWith(

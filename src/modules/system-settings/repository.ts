@@ -8,8 +8,7 @@
  *
  * Reusable building blocks for runtime-switchable settings (DB-backed, so a
  * change takes effect for the next read without a process restart — unlike
- * env-backed settings). Currently used by the knowledge cleaning-backend
- * switch (`knowledge.cleaning_backend`).
+ * env-backed settings).
  *
  * @module system-settings/repository
  */
@@ -30,11 +29,7 @@ export function getSetting(key: string, defaultValue?: string): string | undefin
   return row?.value ?? defaultValue;
 }
 
-export function upsertSetting(params: {
-  key: string;
-  value: string;
-  description?: string;
-}): void {
+export function upsertSetting(params: { key: string; value: string; description?: string }): void {
   const db = getDb();
   const now = utcNow();
   db.insert(systemSettings)
@@ -54,22 +49,4 @@ export function upsertSetting(params: {
       },
     })
     .run();
-}
-
-// ---------------------------------------------------------------------------
-// Knowledge cleaning backend
-// ---------------------------------------------------------------------------
-
-export const CLEANING_BACKEND_KEY = 'knowledge.cleaning_backend';
-export const CLEANING_BACKENDS = ['llm-direct', 'qoder-sdk'] as const;
-export type CleaningBackend = (typeof CLEANING_BACKENDS)[number];
-
-/**
- * Read the knowledge cleaning backend. Defaults to 'llm-direct' (LongCat) when
- * the row is absent or the value is unrecognized — fail-safe to the required
- * default so other admins (who cannot switch) always land on the LLM path.
- */
-export function getCleaningBackend(): CleaningBackend {
-  const v = getSetting(CLEANING_BACKEND_KEY);
-  return v === 'qoder-sdk' ? 'qoder-sdk' : 'llm-direct';
 }

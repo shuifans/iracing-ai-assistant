@@ -5,6 +5,7 @@
  */
 
 import type { KnowledgeDraft, KnowledgeSource } from '@/db/schema/knowledge';
+import type { KnowledgeCategory } from '@/config/constants';
 
 // ---------------------------------------------------------------------------
 // Extraction & Cleaning
@@ -28,13 +29,21 @@ export interface CleaningResult {
 // ---------------------------------------------------------------------------
 
 export interface FrontMatterData {
+  id: string;
   title: string;
-  category: string;
+  description: string;
+  category: KnowledgeCategory;
   subcategory: string;
   tags: string[];
+  aliases: string[];
+  source_id: string;
   source_name?: string;
   source_url?: string;
+  source_sha256: string;
+  content_type?: string;
   season?: string;
+  effective_date?: string;
+  expires_at?: string;
   updated_at?: string;
 }
 

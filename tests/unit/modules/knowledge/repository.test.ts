@@ -313,8 +313,8 @@ describe('knowledge/repository', () => {
         sourceId: 'src-001',
         draftId: 'draft-001',
         title: 'Spa Technique',
-        category: 'track-technique',
-        subcategory: 'driving-line',
+        category: 'driving-technique',
+        subcategory: 'racing-line',
         tagsJson: '[]',
         sourceName: 'setup.pdf',
         sourceUrl: null,
@@ -412,7 +412,7 @@ describe('knowledge/repository', () => {
       mockAll.mockReturnValue([]);
 
       const { listItems } = await import('@/modules/knowledge/repository');
-      listItems({ category: 'track-technique', status: 'published' });
+      listItems({ category: 'driving-technique', status: 'published' });
 
       expect(mockWhere).toHaveBeenCalled();
     });

@@ -72,7 +72,14 @@ function collectMdFiles(dir: string): string[] {
     const full = path.join(dir, entry).replace(/\\/g, '/');
     const stat = fs.statSync(full);
     if (stat.isDirectory()) results.push(...collectMdFiles(full));
-    else if (stat.isFile() && entry.endsWith('.md') && entry !== 'index.md') results.push(full);
+    else if (
+      stat.isFile() &&
+      entry.endsWith('.md') &&
+      entry !== 'index.md' &&
+      entry !== 'KNOWLEDGE.md'
+    ) {
+      results.push(full);
+    }
   }
   return results;
 }
@@ -185,13 +192,30 @@ function buildIndex(wikiRoot: string): MiniSearch {
 }
 
 let _index: MiniSearch | null = null;
+let _indexMtimeMs = -1;
+
+function loadPersistedIndex(): MiniSearch {
+  const json = fs.readFileSync(INDEX_PATH, 'utf-8');
+  const index = MiniSearch.loadJSON(json, INDEX_OPTIONS);
+  _indexMtimeMs = fs.statSync(INDEX_PATH).mtimeMs;
+  return index;
+}
 
 /** Lazily load (or build + persist) the search index singleton. */
 function getIndex(): MiniSearch {
-  if (_index) return _index;
+  if (_index) {
+    try {
+      if (fs.statSync(INDEX_PATH).mtimeMs !== _indexMtimeMs) {
+        _index = loadPersistedIndex();
+      }
+    } catch {
+      _index = null;
+      _indexMtimeMs = -1;
+    }
+    if (_index) return _index;
+  }
   try {
-    const json = fs.readFileSync(INDEX_PATH, 'utf-8');
-    _index = MiniSearch.loadJSON(json, INDEX_OPTIONS);
+    _index = loadPersistedIndex();
     return _index;
   } catch {
     // Not built yet — build in-memory from WIKI_ROOT
@@ -199,6 +223,7 @@ function getIndex(): MiniSearch {
     try {
       fs.mkdirSync(path.dirname(INDEX_PATH), { recursive: true });
       fs.writeFileSync(INDEX_PATH, JSON.stringify(_index));
+      _indexMtimeMs = fs.statSync(INDEX_PATH).mtimeMs;
     } catch {
       // persist failure is non-fatal (in-memory still works)
     }
@@ -211,6 +236,7 @@ export function rebuildAndPersist(wikiRoot = WIKI_ROOT): { files: number; chunks
   const ms = buildIndex(wikiRoot);
   fs.mkdirSync(path.dirname(INDEX_PATH), { recursive: true });
   fs.writeFileSync(INDEX_PATH, JSON.stringify(ms));
+  _indexMtimeMs = fs.statSync(INDEX_PATH).mtimeMs;
   _index = ms;
   const files = collectMdFiles(wikiRoot).length;
   return { files, chunks: (ms as any)._documentCount ?? 0 };

@@ -17,14 +17,23 @@ import * as publisher from './publisher';
 import * as jobsRepo from '@/modules/jobs/repository';
 import * as jobsService from '@/modules/jobs/service';
 import { fetchUrl } from './extractors/url';
-import { parseFrontMatter, validateFrontMatter, generateWikiPath } from './front-matter';
+import {
+  assertTrustedSourceMetadata,
+  parseFrontMatter,
+  validateFrontMatter,
+  generateWikiPath,
+} from './front-matter';
 import { AppError } from '@/lib/errors';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
 import { env } from '@/config/env';
-import { getPublishGuardSettings, getEvaluationByDraftId } from '@/modules/knowledge-evaluation/repository';
+import {
+  getPublishGuardSettings,
+  getEvaluationByDraftId,
+} from '@/modules/knowledge-evaluation/repository';
 import * as evalService from '@/modules/knowledge-evaluation/service';
 import { submitUrlSchema, ALLOWED_KNOWLEDGE_MIMES } from './schemas';
+import { getSourceSnapshotPath, writeSourceSnapshot } from './source-snapshot';
 import type {
   CursorPageParams,
   CursorPageResult,
@@ -87,9 +96,7 @@ export async function submitFileSource(params: {
 }): Promise<{ sourceId: string; jobId: string }> {
   // 1. Validate MIME
   if (
-    !ALLOWED_KNOWLEDGE_MIMES.includes(
-      params.mimeType as (typeof ALLOWED_KNOWLEDGE_MIMES)[number],
-    )
+    !ALLOWED_KNOWLEDGE_MIMES.includes(params.mimeType as (typeof ALLOWED_KNOWLEDGE_MIMES)[number])
   ) {
     throw new AppError(
       'UNSUPPORTED_MEDIA_TYPE',
@@ -184,6 +191,8 @@ export async function submitUrlSource(params: {
 
   // 5. Create source record (reuse the caller-generated sourceId — see submitFileSource)
   const sourceId = generateId();
+  const snapshotPath = getSourceSnapshotPath(env.DATA_ROOT as string, sourceId);
+  writeSourceSnapshot(snapshotPath, extraction.text);
   knowledgeRepo.createSource({
     id: sourceId,
     inputType: 'url',
@@ -397,18 +406,11 @@ export async function getDraftWithDiff(draftId: string): Promise<DraftReview> {
     renderedMarkdown = fs.readFileSync(draftFilePath, 'utf-8');
   }
 
-  // Read extracted text (if available — stored alongside source)
+  // Read the immutable normalized source snapshot.
   let extractedText: string | null = null;
-  if (source.relativePath) {
-    const extractedPath = path.join(
-      env.DATA_ROOT as string,
-      source.relativePath,
-      '..',
-      'extracted.txt',
-    );
-    if (fs.existsSync(extractedPath)) {
-      extractedText = fs.readFileSync(extractedPath, 'utf-8');
-    }
+  const extractedPath = getSourceSnapshotPath(env.DATA_ROOT as string, source.id);
+  if (fs.existsSync(extractedPath)) {
+    extractedText = fs.readFileSync(extractedPath, 'utf-8');
   }
 
   return {
@@ -439,6 +441,12 @@ export async function editDraft(
   // Parse Front Matter from the content and validate
   const parsed = parseFrontMatter(content);
   validateFrontMatter(parsed.frontMatter);
+  const job = jobsRepo.getJob(draft.jobId);
+  const source = job ? knowledgeRepo.getSource(job.sourceId) : null;
+  if (!job || !source) {
+    throw new AppError('NOT_FOUND', `Source for draft ${draftId} not found`);
+  }
+  assertTrustedSourceMetadata(parsed.frontMatter, source);
 
   // Write draft file to disk
   const draftFilePath = path.join(env.DATA_ROOT as string, 'drafts', draft.draftRelativePath);
@@ -505,10 +513,7 @@ export async function approveDraft(
   // CAS: job pending_review → publishing
   const casOk = jobsRepo.updateJobStatus(draft.jobId, 'pending_review', 'publishing');
   if (!casOk) {
-    throw new AppError(
-      'INVALID_STATE',
-      'Job is not in pending_review state — cannot approve',
-    );
+    throw new AppError('INVALID_STATE', 'Job is not in pending_review state — cannot approve');
   }
 
   // Parse front matter from draft record
@@ -720,10 +725,7 @@ export async function rejectDraft(
 ): Promise<void> {
   // 1. Reason length check
   if (!reason || reason.length < 1 || reason.length > 500) {
-    throw new AppError(
-      'VALIDATION_ERROR',
-      'Rejection reason must be between 1 and 500 characters',
-    );
+    throw new AppError('VALIDATION_ERROR', 'Rejection reason must be between 1 and 500 characters');
   }
 
   const draft = knowledgeRepo.getDraft(draftId);
@@ -741,10 +743,7 @@ export async function rejectDraft(
   // CAS: job pending_review → rejected
   const casOk = jobsRepo.updateJobStatus(draft.jobId, 'pending_review', 'rejected');
   if (!casOk) {
-    throw new AppError(
-      'INVALID_STATE',
-      'Job is not in pending_review state — cannot reject',
-    );
+    throw new AppError('INVALID_STATE', 'Job is not in pending_review state — cannot reject');
   }
 
   // Update draft record

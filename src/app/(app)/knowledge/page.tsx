@@ -6,12 +6,17 @@ import { Tabs, Pagination, FilterBar, ConfirmDialog, Toast, StatCard } from '@/c
 import { DataTable } from '@/components/common';
 import { authFetch } from '@/lib/auth-client';
 import { SourceUploadForm } from '@/components/knowledge/SourceUploadForm';
-import { CleaningBackendSwitch } from '@/components/knowledge/CleaningBackendSwitch';
 import { JobStatusBadge, SourceStatusBadge } from '@/components/knowledge/JobStatusBadge';
 import { ItemTable } from '@/components/knowledge/ItemTable';
 import { ItemContentModal } from '@/components/knowledge/ItemContentModal';
 import type { JobStatus } from '@/config/constants';
-import { JOB_STATUSES, KNOWLEDGE_CATEGORIES, EVALUATION_TIERS, EVALUATION_STATUSES, DRAFT_STATUSES } from '@/config/constants';
+import {
+  JOB_STATUSES,
+  KNOWLEDGE_CATEGORIES,
+  EVALUATION_TIERS,
+  EVALUATION_STATUSES,
+  DRAFT_STATUSES,
+} from '@/config/constants';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -288,19 +293,56 @@ function useKnowledgePageData() {
   ]);
 
   return {
-    activeTab, setActiveTab,
-    sources, sourcesLoading, sourcesCursor, sourcesCursorStack, setSourcesCursor, setSourcesCursorStack,
-    jobs, jobsLoading, jobsCursor, jobsCursorStack, setJobsCursor, setJobsCursorStack,
-    jobStatusFilter, setJobStatusFilter,
-    items, itemsLoading, itemsCursor, itemsCursorStack, setItemsCursor, setItemsCursorStack,
-    itemFilters, setItemFilters,
-    drafts, draftsLoading, draftsCursor, draftsCursorStack, setDraftsCursor, setDraftsCursorStack,
-    draftFilters, setDraftFilters,
-    stats, statsLoading,
-    evaluations, evaluationsLoading, evaluationsCursor, evaluationsCursorStack,
-    setEvaluationsCursor, setEvaluationsCursorStack,
-    evalTierFilter, setEvalTierFilter, evalStatusFilter, setEvalStatusFilter,
-    fetchSources, fetchJobs, fetchItems, fetchDrafts, fetchStats, fetchEvaluations,
+    activeTab,
+    setActiveTab,
+    sources,
+    sourcesLoading,
+    sourcesCursor,
+    sourcesCursorStack,
+    setSourcesCursor,
+    setSourcesCursorStack,
+    jobs,
+    jobsLoading,
+    jobsCursor,
+    jobsCursorStack,
+    setJobsCursor,
+    setJobsCursorStack,
+    jobStatusFilter,
+    setJobStatusFilter,
+    items,
+    itemsLoading,
+    itemsCursor,
+    itemsCursorStack,
+    setItemsCursor,
+    setItemsCursorStack,
+    itemFilters,
+    setItemFilters,
+    drafts,
+    draftsLoading,
+    draftsCursor,
+    draftsCursorStack,
+    setDraftsCursor,
+    setDraftsCursorStack,
+    draftFilters,
+    setDraftFilters,
+    stats,
+    statsLoading,
+    evaluations,
+    evaluationsLoading,
+    evaluationsCursor,
+    evaluationsCursorStack,
+    setEvaluationsCursor,
+    setEvaluationsCursorStack,
+    evalTierFilter,
+    setEvalTierFilter,
+    evalStatusFilter,
+    setEvalStatusFilter,
+    fetchSources,
+    fetchJobs,
+    fetchItems,
+    fetchDrafts,
+    fetchStats,
+    fetchEvaluations,
   };
 }
 
@@ -310,22 +352,62 @@ function useKnowledgePageData() {
 
 export default function KnowledgePage() {
   const router = useRouter();
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'info';
+  } | null>(null);
 
   const {
-    activeTab, setActiveTab,
-    sources, sourcesLoading, sourcesCursor, sourcesCursorStack, setSourcesCursor, setSourcesCursorStack,
-    jobs, jobsLoading, jobsCursor, jobsCursorStack, setJobsCursor, setJobsCursorStack,
-    jobStatusFilter, setJobStatusFilter,
-    items, itemsLoading, itemsCursor, itemsCursorStack, setItemsCursor, setItemsCursorStack,
-    itemFilters, setItemFilters,
-    drafts, draftsLoading, draftsCursor, draftsCursorStack, setDraftsCursor, setDraftsCursorStack,
-    draftFilters, setDraftFilters,
-    stats, statsLoading,
-    evaluations, evaluationsLoading, evaluationsCursor, evaluationsCursorStack,
-    setEvaluationsCursor, setEvaluationsCursorStack,
-    evalTierFilter, setEvalTierFilter, evalStatusFilter, setEvalStatusFilter,
-    fetchSources, fetchJobs, fetchItems, fetchDrafts, fetchStats, fetchEvaluations,
+    activeTab,
+    setActiveTab,
+    sources,
+    sourcesLoading,
+    sourcesCursor,
+    sourcesCursorStack,
+    setSourcesCursor,
+    setSourcesCursorStack,
+    jobs,
+    jobsLoading,
+    jobsCursor,
+    jobsCursorStack,
+    setJobsCursor,
+    setJobsCursorStack,
+    jobStatusFilter,
+    setJobStatusFilter,
+    items,
+    itemsLoading,
+    itemsCursor,
+    itemsCursorStack,
+    setItemsCursor,
+    setItemsCursorStack,
+    itemFilters,
+    setItemFilters,
+    drafts,
+    draftsLoading,
+    draftsCursor,
+    draftsCursorStack,
+    setDraftsCursor,
+    setDraftsCursorStack,
+    draftFilters,
+    setDraftFilters,
+    stats,
+    statsLoading,
+    evaluations,
+    evaluationsLoading,
+    evaluationsCursor,
+    evaluationsCursorStack,
+    setEvaluationsCursor,
+    setEvaluationsCursorStack,
+    evalTierFilter,
+    setEvalTierFilter,
+    evalStatusFilter,
+    setEvalStatusFilter,
+    fetchSources,
+    fetchJobs,
+    fetchItems,
+    fetchDrafts,
+    fetchStats,
+    fetchEvaluations,
   } = useKnowledgePageData();
 
   // ── Job actions ─────────────────────────────────────────────────────────
@@ -465,7 +547,10 @@ export default function KnowledgePage() {
       key: 'errorMessage',
       header: '错误信息',
       render: (job: Job) => (
-        <span className="max-w-[200px] truncate text-xs text-red-500" title={job.errorMessage ?? ''}>
+        <span
+          className="max-w-[200px] truncate text-xs text-red-500"
+          title={job.errorMessage ?? ''}
+        >
           {job.errorMessage ?? '—'}
         </span>
       ),
@@ -474,9 +559,7 @@ export default function KnowledgePage() {
       key: 'createdAt',
       header: '创建时间',
       render: (job: Job) => (
-        <span className="text-xs text-gray-500">
-          {new Date(job.createdAt).toLocaleString()}
-        </span>
+        <span className="text-xs text-gray-500">{new Date(job.createdAt).toLocaleString()}</span>
       ),
     },
     {
@@ -502,7 +585,7 @@ export default function KnowledgePage() {
               重试
             </button>
           )}
-          {(job.status === 'queued') && (
+          {job.status === 'queued' && (
             <button
               type="button"
               onClick={() =>
@@ -555,9 +638,7 @@ export default function KnowledgePage() {
     {
       key: 'status',
       header: '状态',
-      render: (s: Source) => (
-        <SourceStatusBadge status={s.status as Source['status']} />
-      ),
+      render: (s: Source) => <SourceStatusBadge status={s.status as Source['status']} />,
     },
     {
       key: 'createdAt',
@@ -740,7 +821,11 @@ export default function KnowledgePage() {
           <div className="h-1.5 w-12 overflow-hidden rounded-full bg-gray-200">
             <div
               className={`h-full rounded-full ${
-                e.overallScore >= 85 ? 'bg-green-500' : e.overallScore >= 60 ? 'bg-yellow-500' : 'bg-red-500'
+                e.overallScore >= 85
+                  ? 'bg-green-500'
+                  : e.overallScore >= 60
+                    ? 'bg-yellow-500'
+                    : 'bg-red-500'
               }`}
               style={{ width: `${e.overallScore}%` }}
             />
@@ -757,7 +842,9 @@ export default function KnowledgePage() {
     {
       key: 'deepEval',
       header: '深度',
-      render: (e: Evaluation) => <span className="text-xs text-gray-500">{e.deepEval ? '是' : '否'}</span>,
+      render: (e: Evaluation) => (
+        <span className="text-xs text-gray-500">{e.deepEval ? '是' : '否'}</span>
+      ),
     },
     {
       key: 'updatedAt',
@@ -823,9 +910,7 @@ export default function KnowledgePage() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Toast */}
-      {toast && (
-        <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
-      )}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
       {/* Confirm dialog */}
       {confirmAction && (
@@ -850,10 +935,6 @@ export default function KnowledgePage() {
           <h1 className="text-xl font-semibold text-gray-900">知识管理</h1>
           <p className="mt-1 text-sm text-gray-500">管理知识来源、处理任务和知识条目</p>
         </div>
-        <CleaningBackendSwitch
-          onSuccess={(m) => setToast({ message: m, type: 'success' })}
-          onError={(m) => setToast({ message: m, type: 'error' })}
-        />
       </div>
 
       {/* Tabs */}
@@ -882,13 +963,21 @@ export default function KnowledgePage() {
             {!statsLoading && stats && (
               <>
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-                  <StatCard title="待审核草稿" value={stats.drafts.reviewQueue} subtitle="清洗完成待 review" />
+                  <StatCard
+                    title="待审核草稿"
+                    value={stats.drafts.reviewQueue}
+                    subtitle="清洗完成待 review"
+                  />
                   <StatCard title="已发布条目" value={stats.items.total} subtitle="知识库总量" />
                   <StatCard
                     title="已归档"
                     value={stats.items.byStatus.find((s) => s.key === 'archived')?.count ?? 0}
                   />
-                  <StatCard title="LLM 重洗累计" value={stats.reClean.jobsTotal} subtitle="按 job 计" />
+                  <StatCard
+                    title="LLM 重洗累计"
+                    value={stats.reClean.jobsTotal}
+                    subtitle="按 job 计"
+                  />
                   <StatCard title="来源总数" value={stats.sources.total} />
                 </div>
 
@@ -910,7 +999,10 @@ export default function KnowledgePage() {
                   />
                   <DistributionPanel
                     title="LLM 重洗 · 版本分布"
-                    buckets={stats.reClean.byVersion.map((v) => ({ key: `v${v.version}`, count: v.count }))}
+                    buckets={stats.reClean.byVersion.map((v) => ({
+                      key: `v${v.version}`,
+                      count: v.count,
+                    }))}
                     color="bg-purple-500"
                   />
                 </div>

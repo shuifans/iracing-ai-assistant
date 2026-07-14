@@ -6,8 +6,8 @@
  *  2. Extract text (file → extract(), URL → fetchUrl())
  *  3. Write extracted text to /data/extracted/<source-id>.txt
  *  4. CAS job extracting → cleaning
- *  5. Call createCleaningQuery() with extracted text
- *  6. Consume SDK AsyncGenerator, collect assistant text
+ *  5. Call the OpenAI-compatible LLM cleaner with extracted text
+ *  6. Collect the cleaned Markdown response
  *  7. Parse Front Matter + Zod validation
  *  8. Word count check (>5000 → CONTENT_TOO_LARGE)
  *  9. Write draft to /data/drafts/<draft-id>.md
@@ -25,21 +25,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import type { LeasedJob } from '@/modules/jobs/types';
-import type { SDKMessage } from '@qoder-ai/qoder-agent-sdk';
-import type { AgentConfig } from '@/modules/agent/types';
 import * as knowledgeRepo from '@/modules/knowledge/repository';
 import * as jobsRepo from '@/modules/jobs/repository';
 import * as jobsService from '@/modules/jobs/service';
 import { extract } from '@/modules/knowledge/extractors/index';
-import { fetchUrl } from '@/modules/knowledge/extractors/url';
+import { getSourceSnapshotPath, writeSourceSnapshot } from '@/modules/knowledge/source-snapshot';
 import {
   parseFrontMatter,
   validateFrontMatter,
+  assertTrustedSourceMetadata,
   generateWikiPath,
 } from '@/modules/knowledge/front-matter';
-import { createCleaningQuery } from '@/modules/agent/client';
-import { cleanWithLlmDirect } from '@/modules/knowledge/llm-cleaner';
-import { getCleaningBackend } from '@/modules/system-settings/repository';
+import { CleaningInputTooLargeError, cleanWithLlmDirect } from '@/modules/knowledge/llm-cleaner';
 import { evaluateDraft } from '@/modules/knowledge-evaluation/service';
 import { AppError } from '@/lib/errors';
 import { generateId } from '@/lib/uuid';
@@ -50,8 +47,7 @@ import { env } from '@/config/env';
 // ---------------------------------------------------------------------------
 
 const HARD_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
-const IDLE_TIMEOUT_MS = 30_000; // 30 seconds without SDK event
-const MAX_CONTENT_CHARS = 5000;
+const MAX_CONTENT_CHARS = 12_000;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -82,38 +78,28 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
   // Step 1: Get source
   const source = knowledgeRepo.getSource(job.sourceId);
   if (!source) {
-    throw new AppError(
-      'EXTRACTION_FAILED',
-      `Source ${job.sourceId} not found for job ${job.id}`,
-    );
+    throw new AppError('EXTRACTION_FAILED', `Source ${job.sourceId} not found for job ${job.id}`);
   }
 
   // Step 2–3: Extract text (reuse cached extraction on re-clean to avoid
   // re-fetching URLs / re-parsing files — the source content is unchanged).
-  const extractedDir = path.join(env.DATA_ROOT as string, 'extracted');
-  fs.mkdirSync(extractedDir, { recursive: true });
-  const extractedPath = path.join(extractedDir, `${source.id}.txt`);
+  const extractedPath = getSourceSnapshotPath(env.DATA_ROOT as string, source.id);
 
   let extractedText: string;
   if (fs.existsSync(extractedPath)) {
     extractedText = fs.readFileSync(extractedPath, 'utf-8');
-  } else if (source.inputType === 'url' && source.sourceUrl) {
-    const result = await fetchUrl(source.sourceUrl, {
-      maxBytes: env.URL_FETCH_MAX_BYTES as number,
-      connectTimeoutMs: 5000,
-      downloadTimeoutMs: 15000,
-      maxRedirects: 3,
-      signal,
-    });
-    extractedText = result.text;
-    fs.writeFileSync(extractedPath, extractedText, 'utf-8');
+  } else if (source.inputType === 'url') {
+    throw new AppError(
+      'EXTRACTION_FAILED',
+      `Immutable URL snapshot is missing for source ${source.id}`,
+    );
   } else {
     // File-based source — read the stored file and extract
     const filePath = path.join(env.DATA_ROOT as string, source.relativePath!);
     const fileBuffer = fs.readFileSync(filePath);
     const result = await extract(fileBuffer, source.mimeType ?? 'text/plain');
     extractedText = result.text;
-    fs.writeFileSync(extractedPath, extractedText, 'utf-8');
+    writeSourceSnapshot(extractedPath, extractedText);
   }
 
   // Step 4: CAS extracting → cleaning
@@ -122,49 +108,42 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
     throw new AppError('INVALID_STATE', 'CAS extracting→cleaning failed');
   }
 
-  // Step 5–6: Run cleaning — backend chosen per-job from system_settings
-  // (DB-backed, so a UI switch takes effect for the next job without restart).
-  // Strict-binary: a failure on the selected backend fails the job — NO
-  // cross-backend fallback (llm-direct never falls back to Qoder, and vice-
-  // versa). STOP_ON_LLM_RATE_LIMIT still halts the run on quota errors.
+  // Step 5–6: Run cleaning through the single OpenAI-compatible LLM path.
+  // Qoder SDK is reserved for chat/agent workflows and never participates in
+  // knowledge cleaning. Provider failures fail the job; the cleaner may still
+  // try multiple configured OpenAI-compatible providers in order.
   const draftId = generateId();
-  const backend = getCleaningBackend();
   let cleanedMarkdown: string;
-  if (backend === 'llm-direct') {
-    try {
-      cleanedMarkdown = await cleanWithLlmDirect({
-        rawText: extractedText,
-        sourceUrl: source.sourceUrl ?? undefined,
-        feedback: job.instructionsJson ?? undefined,
-        signal,
-        maxOutputChars: 4500,
-        maxTokens: 2500,
-        timeoutMs: env.LLM_CLEAN_TIMEOUT_MS,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new AppError('AGENT_UNAVAILABLE', `LLM 直连清洗失败: ${message}`);
-    }
-  } else {
-    const agentConfig: AgentConfig = {
-      wikiRoot: env.WIKI_ROOT as string,
-      pat: env.QODER_PERSONAL_ACCESS_TOKEN as string,
-      model: env.QODER_MODEL as string | undefined,
-      chatTimeoutMs: env.QODER_CHAT_TIMEOUT_MS as number,
-      cleanTimeoutMs: env.QODER_CLEAN_TIMEOUT_MS as number,
-    };
-    cleanedMarkdown = await consumeCleaningQuery(
-      agentConfig,
-      extractedText,
-      draftId,
+  try {
+    cleanedMarkdown = await cleanWithLlmDirect({
+      rawText: extractedText,
+      sourceUrl: source.sourceUrl ?? undefined,
+      feedback: job.instructionsJson ?? undefined,
       signal,
-      job.instructionsJson ?? undefined,
-    );
+      maxOutputChars: MAX_CONTENT_CHARS,
+      maxTokens: 6_000,
+      timeoutMs: env.LLM_CLEAN_TIMEOUT_MS,
+      maxInputChars: env.LLM_CLEAN_MAX_INPUT_CHARS,
+      sourceMetadata: {
+        noteId: source.id,
+        sourceId: source.id,
+        sourceSha256: source.sha256,
+        sourceName: source.originalName ?? undefined,
+        sourceUrl: source.sourceUrl ?? undefined,
+      },
+    });
+  } catch (err) {
+    if (err instanceof CleaningInputTooLargeError) {
+      throw new AppError('CONTENT_TOO_LARGE', err.message);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    throw new AppError('AGENT_UNAVAILABLE', `LLM 直连清洗失败: ${message}`);
   }
 
   // Step 7: Parse Front Matter + Zod validation
   const parsed = parseFrontMatter(cleanedMarkdown);
   validateFrontMatter(parsed.frontMatter);
+  assertTrustedSourceMetadata(parsed.frontMatter, source);
 
   // Step 8: Word count check
   if (cleanedMarkdown.length > MAX_CONTENT_CHARS) {
@@ -201,6 +180,7 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
   }
 
   knowledgeRepo.createDraft({
+    id: draftId,
     jobId: job.id,
     suggestedPath: wikiPath,
     title: parsed.frontMatter.title,
@@ -231,130 +211,10 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// SDK consumption with idle timeout
-// ---------------------------------------------------------------------------
-
-async function consumeCleaningQuery(
-  config: AgentConfig,
-  sourceText: string,
-  draftId: string,
-  hardSignal: AbortSignal,
-  feedback?: string,
-): Promise<string> {
-  const generator = createCleaningQuery(config, sourceText, draftId, feedback);
-
-  let assistantText = '';
-  let lastEventTime = Date.now();
-
-  try {
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      // Idle timeout check
-      if (Date.now() - lastEventTime > IDLE_TIMEOUT_MS) {
-        throw new AppError(
-          'AGENT_UNAVAILABLE',
-          `No SDK event for ${IDLE_TIMEOUT_MS / 1000}s — aborting cleaning query`,
-        );
-      }
-
-      // Hard timeout check
-      if (hardSignal.aborted) {
-        throw new AppError(
-          'AGENT_UNAVAILABLE',
-          'Hard timeout (15min) exceeded — aborting cleaning query',
-        );
-      }
-
-      // Race the next SDK event against the idle timeout
-      const { value, done } = await Promise.race([
-        generator.next(),
-        idleTimeoutPromise(),
-        hardAbortPromise(hardSignal),
-      ]);
-
-      if (done) break;
-
-      lastEventTime = Date.now();
-
-      // Collect assistant text from SDK messages
-      if (value) {
-        const msg = value as SDKMessage;
-        if (msg.type === 'assistant' && 'message' in msg) {
-          const content = (msg as { message: { content: Array<{ type: string; text?: string }> } })
-            .message.content;
-          for (const block of content) {
-            if (block.type === 'text' && block.text) {
-              assistantText += block.text;
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {
-    // If it's already an AppError, re-throw
-    if (err instanceof AppError) throw err;
-
-    // Check if it's an auth expiry or connection error
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('auth') || message.includes('expired')) {
-      throw new AppError('AGENT_AUTH_EXPIRED', message);
-    }
-
-    throw new AppError('AGENT_UNAVAILABLE', `SDK query failed: ${message}`);
-  }
-
-  if (!assistantText.trim()) {
-    throw new AppError(
-      'AGENT_UNAVAILABLE',
-      'SDK cleaning query returned no assistant text',
-    );
-  }
-
-  return assistantText;
-}
-
-// ---------------------------------------------------------------------------
-// Timeout promises for racing
-// ---------------------------------------------------------------------------
-
-function idleTimeoutPromise(): Promise<never> {
-  return new Promise((_, reject) =>
-    setTimeout(
-      () =>
-        reject(
-          new AppError(
-            'AGENT_UNAVAILABLE',
-            `No SDK event for ${IDLE_TIMEOUT_MS / 1000}s — aborting`,
-          ),
-        ),
-      IDLE_TIMEOUT_MS,
-    ),
-  );
-}
-
-function hardAbortPromise(signal: AbortSignal): Promise<never> {
-  return new Promise((_, reject) => {
-    if (signal.aborted) {
-      reject(new AppError('AGENT_UNAVAILABLE', 'Hard timeout exceeded'));
-      return;
-    }
-    signal.addEventListener(
-      'abort',
-      () => reject(new AppError('AGENT_UNAVAILABLE', 'Hard timeout exceeded')),
-      { once: true },
-    );
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Error handler — always routes to failJob, never throws
 // ---------------------------------------------------------------------------
 
-async function handleFailure(
-  jobId: string,
-  err: unknown,
-  signal: AbortSignal,
-): Promise<void> {
+async function handleFailure(jobId: string, err: unknown, signal: AbortSignal): Promise<void> {
   let errorCode: string;
   let errorMessage: string;
 

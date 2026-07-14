@@ -75,15 +75,14 @@ function extractBodyTerms(body: string, maxN: number): string[] {
 // Probe
 // ---------------------------------------------------------------------------
 
-function titleTagsHaystack(ctx: DraftContext): { titleLower: string; tagsLower: string[] } {
+function routingHaystack(ctx: DraftContext): string[] {
   try {
     const fm = parseFrontMatter(ctx.draftContent).frontMatter;
-    return {
-      titleLower: fm.title.toLowerCase(),
-      tagsLower: Array.isArray(fm.tags) ? fm.tags.map((t) => t.toLowerCase()) : [],
-    };
+    return [fm.title, fm.description, ...fm.tags, ...fm.aliases].map((value) =>
+      value.toLowerCase(),
+    );
   } catch {
-    return { titleLower: ctx.draft.title.toLowerCase(), tagsLower: [] };
+    return [ctx.draft.title.toLowerCase()];
   }
 }
 
@@ -101,11 +100,9 @@ export function runRetrievalProbe(ctx: DraftContext): ProbeResult {
     return { score: 50, queries: [] };
   }
 
-  const { titleLower, tagsLower } = titleTagsHaystack(ctx);
+  const routingFields = routingHaystack(ctx);
   const queries = terms.map((t) => {
-    const inTitle = titleLower.includes(t);
-    const inTags = tagsLower.some((tg) => tg.includes(t) || t.includes(tg));
-    const hit = inTitle || inTags;
+    const hit = routingFields.some((field) => field.includes(t) || t.includes(field));
     return { query: t, hit, matchedPath: hit ? ctx.draft.suggestedPath : undefined };
   });
   const hits = queries.filter((q) => q.hit).length;
@@ -121,7 +118,7 @@ export function retrievabilityScore(ctx: DraftContext): DimensionScore {
     score: probe.score,
     weight: DIMENSION_WEIGHT[dimensionKey],
     rationale: probe.queries.length
-      ? `${probe.queries.filter((q) => q.hit).length}/${probe.queries.length} body terms found in title/tags`
+      ? `${probe.queries.filter((q) => q.hit).length}/${probe.queries.length} body terms found in title/description/tags/aliases`
       : 'body too short to assess retrievability',
     detail: { queries: probe.queries },
   };

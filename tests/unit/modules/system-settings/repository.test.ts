@@ -72,43 +72,20 @@ describe('system-settings/repository', () => {
   describe('upsertSetting', () => {
     it('inserts with on-conflict-update', async () => {
       const { upsertSetting } = await import('@/modules/system-settings/repository');
-      upsertSetting({ key: 'knowledge.cleaning_backend', value: 'qoder-sdk', description: 'desc' });
+      upsertSetting({ key: 'feature.example', value: 'enabled', description: 'desc' });
 
       expect(mockInsert).toHaveBeenCalled();
       expect(mockValues).toHaveBeenCalledWith(
         expect.objectContaining({
-          key: 'knowledge.cleaning_backend',
-          value: 'qoder-sdk',
+          key: 'feature.example',
+          value: 'enabled',
           description: 'desc',
         }),
       );
       expect(mockOnConflict).toHaveBeenCalledWith(
-        expect.objectContaining({ set: expect.objectContaining({ value: 'qoder-sdk' }) }),
+        expect.objectContaining({ set: expect.objectContaining({ value: 'enabled' }) }),
       );
       expect(mockRun).toHaveBeenCalled();
-    });
-  });
-
-  describe('getCleaningBackend', () => {
-    it('defaults to llm-direct when no row exists', async () => {
-      mockGet.mockReturnValue(undefined);
-      const { getCleaningBackend } = await import('@/modules/system-settings/repository');
-
-      expect(getCleaningBackend()).toBe('llm-direct');
-    });
-
-    it("returns 'qoder-sdk' when the row value is qoder-sdk", async () => {
-      mockGet.mockReturnValue({ value: 'qoder-sdk' });
-      const { getCleaningBackend } = await import('@/modules/system-settings/repository');
-
-      expect(getCleaningBackend()).toBe('qoder-sdk');
-    });
-
-    it("returns 'llm-direct' for an unrecognized value (fail-safe)", async () => {
-      mockGet.mockReturnValue({ value: 'garbage' });
-      const { getCleaningBackend } = await import('@/modules/system-settings/repository');
-
-      expect(getCleaningBackend()).toBe('llm-direct');
     });
   });
 });

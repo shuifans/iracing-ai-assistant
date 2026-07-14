@@ -11,7 +11,7 @@ function makeCtx(draftContent: string): DraftContext {
     draft: {
       id: 'd1',
       jobId: 'j1',
-      suggestedPath: 'track-technique/braking/guide.md',
+      suggestedPath: 'driving-technique/braking/guide.md',
       title: 'Guide',
       version: 1,
       parentDraftId: null,
@@ -26,10 +26,15 @@ function makeCtx(draftContent: string): DraftContext {
 describe('retrieval-probe', () => {
   it('scores well when body terms appear in title/tags', () => {
     const content = `---
+id: s1
 title: Trail Braking Guide
-category: track-technique
+description: Trail braking guide
+category: driving-technique
 subcategory: braking
 tags: [braking, trail, technique]
+aliases: []
+source_id: s1
+source_sha256: ${'a'.repeat(64)}
 ---
 
 ## Braking Technique
@@ -41,10 +46,15 @@ Trail braking helps with braking into corners.`;
 
   it('flags body terms absent from title/tags as misses', () => {
     const content = `---
+id: s1
 title: Guide
-category: track-technique
+description: Miscellaneous guide
+category: driving-technique
 subcategory: braking
 tags: [misc]
+aliases: []
+source_id: s1
+source_sha256: ${'a'.repeat(64)}
 ---
 
 ## Braking Technique
@@ -56,10 +66,15 @@ Threshold braking and trail braking methods discussed extensively.`;
 
   it('neutral 50 when body too short to assess', () => {
     const content = `---
+id: s1
 title: X
-category: track-technique
+description: Minimal note
+category: driving-technique
 subcategory: braking
 tags: [a]
+aliases: []
+source_id: s1
+source_sha256: ${'a'.repeat(64)}
 ---
 
 ok`;
@@ -70,10 +85,15 @@ ok`;
 
   it('retrievabilityScore returns a probe-tier dimension with weight 20', () => {
     const content = `---
+id: s1
 title: Trail Braking
-category: track-technique
+description: Trail braking technique
+category: driving-technique
 subcategory: braking
 tags: [braking]
+aliases: []
+source_id: s1
+source_sha256: ${'a'.repeat(64)}
 ---
 
 ## Braking
@@ -82,5 +102,29 @@ Trail braking technique.`;
     expect(d.dimensionKey).toBe('retrievability');
     expect(d.tier).toBe('probe');
     expect(d.weight).toBe(20);
+  });
+
+  it('counts description and aliases as routing fields', () => {
+    const content = `---
+id: s1
+title: Guide
+description: Threshold braking reference
+category: driving-technique
+subcategory: braking
+tags: [misc]
+aliases: [late apex]
+source_id: s1
+source_sha256: ${'a'.repeat(64)}
+---
+
+## Threshold Apex
+Details.`;
+    const probe = runRetrievalProbe(makeCtx(content));
+    expect(probe.queries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ query: 'threshold', hit: true }),
+        expect.objectContaining({ query: 'apex', hit: true }),
+      ]),
+    );
   });
 });

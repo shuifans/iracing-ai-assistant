@@ -25,7 +25,7 @@ import { utcNow } from '@/lib/datetime';
 import { knowledgeEvaluations } from '@/db/schema/evaluation';
 import { auditLogs } from '@/db/schema/admin';
 import { AppError } from '@/lib/errors';
-import type { WikiSyncStatus } from '@/config/constants';
+import type { KnowledgeCategory, WikiSyncStatus } from '@/config/constants';
 import type {
   CursorPageParams,
   CursorPageResult,
@@ -87,7 +87,9 @@ export function listSources(
 
   const conditions = [];
   if (params.status) {
-    conditions.push(eq(knowledgeSources.status, params.status as typeof knowledgeSources.status._.data));
+    conditions.push(
+      eq(knowledgeSources.status, params.status as typeof knowledgeSources.status._.data),
+    );
   }
   if (params.cursor) {
     // Use id (UUIDv7, time-ordered) as cursor to avoid same-timestamp pagination gaps
@@ -133,11 +135,11 @@ export function findDuplicateBySha256(sha256: string): KnowledgeSource | null {
  * Create a new knowledge draft.
  */
 export function createDraft(
-  data: Omit<NewKnowledgeDraft, 'id' | 'createdAt' | 'updatedAt'>,
+  data: Omit<NewKnowledgeDraft, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
 ): KnowledgeDraft {
   const db = getDb();
   const now = utcNow();
-  const id = generateId();
+  const id = data.id ?? generateId();
   const record: NewKnowledgeDraft = {
     ...data,
     id,
@@ -154,12 +156,7 @@ export function createDraft(
  */
 export function getDraft(id: string): KnowledgeDraft | null {
   const db = getDb();
-  const result = db
-    .select()
-    .from(knowledgeDrafts)
-    .where(eq(knowledgeDrafts.id, id))
-    .limit(1)
-    .all();
+  const result = db.select().from(knowledgeDrafts).where(eq(knowledgeDrafts.id, id)).limit(1).all();
   return result[0] ?? null;
 }
 
@@ -215,11 +212,7 @@ export function supersedeOldDrafts(sourceId: string, currentDraftId: string): vo
   const now = utcNow();
 
   // Find job IDs for this source
-  const jobs = db
-    .select()
-    .from(knowledgeJobs)
-    .where(eq(knowledgeJobs.sourceId, sourceId))
-    .all();
+  const jobs = db.select().from(knowledgeJobs).where(eq(knowledgeJobs.sourceId, sourceId)).all();
 
   const jobIds = jobs.map((j) => j.id);
   if (jobIds.length === 0) return;
@@ -252,10 +245,14 @@ export function listDrafts(
 
   const conditions: SQL[] = [];
   if (params.status) {
-    conditions.push(eq(knowledgeDrafts.status, params.status as typeof knowledgeDrafts.status._.data));
+    conditions.push(
+      eq(knowledgeDrafts.status, params.status as typeof knowledgeDrafts.status._.data),
+    );
   }
   if (params.tier) {
-    conditions.push(eq(knowledgeEvaluations.tier, params.tier as typeof knowledgeEvaluations.tier._.data));
+    conditions.push(
+      eq(knowledgeEvaluations.tier, params.tier as typeof knowledgeEvaluations.tier._.data),
+    );
   }
   if (params.sourceId) {
     conditions.push(eq(knowledgeJobs.sourceId, params.sourceId));
@@ -298,9 +295,7 @@ export function listDrafts(
 /**
  * Create a new knowledge item.
  */
-export function createItem(
-  data: Omit<NewKnowledgeItem, 'id' | 'updatedAt'>,
-): KnowledgeItem {
+export function createItem(data: Omit<NewKnowledgeItem, 'id' | 'updatedAt'>): KnowledgeItem {
   const db = getDb();
   const now = utcNow();
   const id = generateId();
@@ -319,12 +314,7 @@ export function createItem(
  */
 export function getItem(id: string): KnowledgeItem | null {
   const db = getDb();
-  const result = db
-    .select()
-    .from(knowledgeItems)
-    .where(eq(knowledgeItems.id, id))
-    .limit(1)
-    .all();
+  const result = db.select().from(knowledgeItems).where(eq(knowledgeItems.id, id)).limit(1).all();
   return result[0] ?? null;
 }
 
@@ -353,10 +343,14 @@ export function listItems(
 
   const conditions = [];
   if (params.category) {
-    conditions.push(eq(knowledgeItems.category, params.category as typeof knowledgeItems.category._.data));
+    conditions.push(
+      eq(knowledgeItems.category, params.category as typeof knowledgeItems.category._.data),
+    );
   }
   if (params.status) {
-    conditions.push(eq(knowledgeItems.status, params.status as typeof knowledgeItems.status._.data));
+    conditions.push(
+      eq(knowledgeItems.status, params.status as typeof knowledgeItems.status._.data),
+    );
   }
   if (params.cursor) {
     conditions.push(lt(knowledgeItems.publishedAt, params.cursor));
@@ -411,7 +405,9 @@ export function listItemsBySyncStatus(syncStatus: string): KnowledgeItem[] {
   return db
     .select()
     .from(knowledgeItems)
-    .where(eq(knowledgeItems.wikiSyncStatus, syncStatus as typeof knowledgeItems.wikiSyncStatus._.data))
+    .where(
+      eq(knowledgeItems.wikiSyncStatus, syncStatus as typeof knowledgeItems.wikiSyncStatus._.data),
+    )
     .all();
 }
 
@@ -498,7 +494,7 @@ export interface CommitPublishedDraftInput {
   reviewedBy: string;
   wikiPath: string;
   title: string;
-  category: 'track-technique' | 'car-setup' | 'basics';
+  category: KnowledgeCategory;
   subcategory: string;
   tagsJson: string;
   sourceName: string | null;
@@ -532,6 +528,12 @@ export function commitPublishedDraft(input: CommitPublishedDraftInput): { itemId
       .where(eq(knowledgeItems.wikiPath, input.wikiPath))
       .limit(1)
       .all()[0];
+    if (existing && existing.sourceId !== job.sourceId) {
+      throw new AppError(
+        'CONFLICT',
+        `Wiki path is already owned by another source: ${input.wikiPath}`,
+      );
+    }
     const itemId = existing?.id ?? generateId();
     const itemChanges = {
       draftId: input.draftId,
@@ -645,10 +647,11 @@ export function getKnowledgeStats(): KnowledgeStats {
     .all()
     .map((r) => ({ key: r.category, count: r.count }));
 
-  const itemsTotal = db
-    .select({ c: sql<number>`count(*)` })
-    .from(knowledgeItems)
-    .all()[0]?.c ?? 0;
+  const itemsTotal =
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(knowledgeItems)
+      .all()[0]?.c ?? 0;
 
   const draftsByStatus = db
     .select({ status: knowledgeDrafts.status, count: sql<number>`count(*)` })
@@ -657,18 +660,19 @@ export function getKnowledgeStats(): KnowledgeStats {
     .all()
     .map((r) => ({ key: r.status, count: r.count }));
 
-  const draftsTotal = db
-    .select({ c: sql<number>`count(*)` })
-    .from(knowledgeDrafts)
-    .all()[0]?.c ?? 0;
+  const draftsTotal =
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(knowledgeDrafts)
+      .all()[0]?.c ?? 0;
 
-  const reviewQueue =
-    draftsByStatus.find((d) => d.key === 'pending_review')?.count ?? 0;
+  const reviewQueue = draftsByStatus.find((d) => d.key === 'pending_review')?.count ?? 0;
 
-  const sourcesTotal = db
-    .select({ c: sql<number>`count(*)` })
-    .from(knowledgeSources)
-    .all()[0]?.c ?? 0;
+  const sourcesTotal =
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(knowledgeSources)
+      .all()[0]?.c ?? 0;
 
   const jobsByStatus = db
     .select({ status: knowledgeJobs.status, count: sql<number>`count(*)` })
@@ -677,11 +681,12 @@ export function getKnowledgeStats(): KnowledgeStats {
     .all()
     .map((r) => ({ key: r.status, count: r.count }));
 
-  const reCleanJobsTotal = db
-    .select({ c: sql<number>`count(*)` })
-    .from(knowledgeJobs)
-    .where(eq(knowledgeJobs.jobKind, 're_clean'))
-    .all()[0]?.c ?? 0;
+  const reCleanJobsTotal =
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(knowledgeJobs)
+      .where(eq(knowledgeJobs.jobKind, 're_clean'))
+      .all()[0]?.c ?? 0;
 
   const draftsByVersion = db
     .select({ version: knowledgeDrafts.version, count: sql<number>`count(*)` })

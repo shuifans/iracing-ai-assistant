@@ -21,8 +21,12 @@ export interface IndexEntry {
   category: string;
   subcategory: string;
   wikiPath: string;
+  description: string;
   tags: string[];
+  aliases: string[];
   season?: string;
+  effectiveDate?: string;
+  expiresAt?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,8 +76,12 @@ function tryParseEntry(filePath: string, wikiRoot: string): IndexEntry | null {
       category: frontMatter.category,
       subcategory: frontMatter.subcategory,
       wikiPath: relativePath,
+      description: frontMatter.description,
       tags: frontMatter.tags,
+      aliases: frontMatter.aliases,
       season: frontMatter.season,
+      effectiveDate: frontMatter.effective_date,
+      expiresAt: frontMatter.expires_at,
     };
   } catch (err) {
     console.warn(`[wiki-index] Skipping ${filePath}: ${(err as Error).message}`);
@@ -93,8 +101,7 @@ function sortEntries(entries: IndexEntry[]): IndexEntry[] {
     const catB = CATEGORY_ORDER.indexOf(b.category);
     // Unknown categories go to the end
     const catOrder =
-      (catA === -1 ? CATEGORY_ORDER.length : catA) -
-      (catB === -1 ? CATEGORY_ORDER.length : catB);
+      (catA === -1 ? CATEGORY_ORDER.length : catA) - (catB === -1 ? CATEGORY_ORDER.length : catB);
     if (catOrder !== 0) return catOrder;
 
     const subOrder = a.subcategory.localeCompare(b.subcategory);
@@ -127,8 +134,14 @@ function renderIndex(entries: IndexEntry[]): string {
       currentSubcategory = entry.subcategory;
     }
 
-    const tagPart = entry.tags.length > 0 ? ` — Tags: ${entry.tags.join(', ')}` : '';
-    lines.push(`- [${entry.title}](${entry.wikiPath})${tagPart}`);
+    const routing: string[] = [];
+    if (entry.aliases.length > 0) routing.push(`aliases: ${entry.aliases.slice(0, 3).join(', ')}`);
+    if (entry.tags.length > 0) routing.push(`tags: ${entry.tags.slice(0, 5).join(', ')}`);
+    if (entry.season) routing.push(`season: ${entry.season}`);
+    if (entry.effectiveDate) routing.push(`effective: ${entry.effectiveDate}`);
+    if (entry.expiresAt) routing.push(`expires: ${entry.expiresAt}`);
+    const routingPart = routing.length > 0 ? ` | ${routing.join(' | ')}` : '';
+    lines.push(`- [${entry.title}](${entry.wikiPath}) — ${entry.description}${routingPart}`);
   }
 
   lines.push('');
@@ -151,11 +164,11 @@ export function collectIndexEntries(wikiRoot: string): IndexEntry[] {
   const normalizedRoot = wikiRoot.replace(/\\/g, '/');
   const allFiles = collectMdFiles(normalizedRoot);
 
-  // Exclude index.md itself
-  const indexFileName = 'index.md';
+  // Exclude the two system documents.
+  const systemFiles = new Set(['index.md', 'KNOWLEDGE.md']);
   const filtered = allFiles.filter((f) => {
     const relative = path.relative(normalizedRoot, f).replace(/\\/g, '/');
-    return relative !== indexFileName;
+    return !systemFiles.has(relative);
   });
 
   const entries: IndexEntry[] = [];

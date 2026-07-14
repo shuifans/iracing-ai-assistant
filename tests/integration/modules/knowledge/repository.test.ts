@@ -236,16 +236,17 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
 
     it('createDraft → getDraft → updateDraft', () => {
       const draft = createDraft({
+        id: 'stable-draft-id',
         jobId,
-        suggestedPath: 'track-technique/braking/article.md',
+        suggestedPath: 'driving-technique/braking/article.md',
         title: 'Braking Guide',
-        frontMatterJson: JSON.stringify({ category: 'track-technique', subcategory: 'braking' }),
+        frontMatterJson: JSON.stringify({ category: 'driving-technique', subcategory: 'braking' }),
         draftRelativePath: 'drafts/braking.md',
         contentSha256: 'content-sha-1',
         status: 'pending_review',
       });
 
-      expect(draft.id).toBeTruthy();
+      expect(draft.id).toBe('stable-draft-id');
 
       const fetched = getDraft(draft.id);
       expect(fetched).not.toBeNull();
@@ -326,13 +327,13 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
         sourceId,
         draftId,
         title: 'Test Item',
-        category: 'track-technique',
+        category: 'driving-technique',
         subcategory: 'braking',
         tagsJson: JSON.stringify(['tag1']),
         sourceName: 'item-src.txt',
         sourceUrl: null,
         season: '2026-S1',
-        wikiPath: 'track-technique/braking/test-item.md',
+        wikiPath: 'driving-technique/braking/test-item.md',
         status: 'published',
         gitCommitSha: null,
         wikiSyncStatus: 'committed',
@@ -345,9 +346,9 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
       const fetched = getItem(item.id);
       expect(fetched).not.toBeNull();
       expect(fetched!.title).toBe('Test Item');
-      expect(fetched!.wikiPath).toBe('track-technique/braking/test-item.md');
+      expect(fetched!.wikiPath).toBe('driving-technique/braking/test-item.md');
 
-      const byPath = getItemByWikiPath('track-technique/braking/test-item.md');
+      const byPath = getItemByWikiPath('driving-technique/braking/test-item.md');
       expect(byPath).not.toBeNull();
       expect(byPath!.id).toBe(item.id);
     });
@@ -358,7 +359,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
           sourceId,
           draftId,
           title: `Item ${i}`,
-          category: i < 2 ? 'track-technique' : 'car-setup',
+          category: i < 2 ? 'driving-technique' : 'car-setup',
           subcategory: i < 2 ? 'braking' : 'theory',
           tagsJson: '[]',
           sourceName: 'src.txt',
@@ -376,7 +377,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
       const all = listItems({ limit: 10 });
       expect(all.items).toHaveLength(4);
 
-      const technique = listItems({ limit: 10, category: 'track-technique' });
+      const technique = listItems({ limit: 10, category: 'driving-technique' });
       expect(technique.items).toHaveLength(2);
 
       const page1 = listItems({ limit: 2 });
@@ -389,7 +390,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
         sourceId,
         draftId,
         title: 'Archive Test',
-        category: 'basics',
+        category: 'getting-started',
         subcategory: 'getting-started',
         tagsJson: '[]',
         sourceName: 'src.txt',
@@ -412,12 +413,12 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
 
     it('revision overwrite: updateItem repoints existing item at the revised draft (no wikiPath dup)', () => {
       // v1 published item backed by draft D1, at wikiPath W.
-      const wikiPath = 'track-technique/braking/revision-test.md';
+      const wikiPath = 'driving-technique/braking/revision-test.md';
       const item = createItem({
         sourceId,
         draftId,
         title: 'Revision Test',
-        category: 'track-technique',
+        category: 'driving-technique',
         subcategory: 'braking',
         tagsJson: '[]',
         sourceName: 'src.txt',
@@ -467,7 +468,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
           sourceId,
           draftId: d2.id,
           title: 'Duplicate',
-          category: 'track-technique',
+          category: 'driving-technique',
           subcategory: 'braking',
           tagsJson: '[]',
           sourceName: 'src.txt',
@@ -488,7 +489,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
         sourceId,
         draftId,
         title: 'Sync Test',
-        category: 'basics',
+        category: 'getting-started',
         subcategory: 'getting-started',
         tagsJson: '[]',
         sourceName: 'src.txt',
@@ -513,7 +514,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
         sourceId,
         draftId,
         title: 'Invalid Sync Test',
-        category: 'basics',
+        category: 'getting-started',
         subcategory: 'getting-started',
         tagsJson: '[]',
         sourceName: 'src.txt',
@@ -548,7 +549,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
         reviewedBy: userId,
         wikiPath: 'basics/getting-started/atomic-publish.md',
         title: 'Atomic Publish',
-        category: 'basics',
+        category: 'getting-started',
         subcategory: 'getting-started',
         tagsJson: '["atomic"]',
         sourceName: 'src.txt',
@@ -575,6 +576,59 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
       });
     });
 
+    it('rejects a wiki path already owned by another source', () => {
+      const wikiPath = 'getting-started/first-race/shared-title.md';
+      createItem({
+        sourceId,
+        draftId,
+        title: 'Shared Title',
+        category: 'getting-started',
+        subcategory: 'first-race',
+        tagsJson: '["shared"]',
+        sourceName: 'first.txt',
+        sourceUrl: null,
+        season: '',
+        wikiPath,
+        status: 'published',
+        gitCommitSha: null,
+        wikiSyncStatus: 'committed',
+        publishedBy: userId,
+        publishedAt: utcNow(),
+      });
+
+      const secondSource = createSource({
+        inputType: 'file',
+        originalName: 'second.txt',
+        mimeType: 'text/plain',
+        relativePath: 'uploads/second.txt',
+        sha256: 'second-source-sha',
+        sizeBytes: 20,
+        status: 'stored',
+        submittedBy: userId,
+      });
+      const secondJob = makeKnowledgeJob(secondSource.id, { status: 'publishing' });
+      db.insert(knowledgeJobs).values(secondJob).run();
+      const secondDraft = makeKnowledgeDraft(secondJob.id);
+      db.insert(knowledgeDrafts).values(secondDraft).run();
+
+      expect(() =>
+        commitPublishedDraft({
+          jobId: secondJob.id,
+          draftId: secondDraft.id,
+          reviewedBy: userId,
+          wikiPath,
+          title: 'Shared Title',
+          category: 'getting-started',
+          subcategory: 'first-race',
+          tagsJson: '["shared"]',
+          sourceName: 'second.txt',
+          sourceUrl: null,
+          season: '',
+          publishedAt: utcNow(),
+        }),
+      ).toThrow('already owned by another source');
+    });
+
     it('rolls back item and draft changes when publishing job CAS fails', () => {
       const draft = getDraft(draftId)!;
       const job = db.select().from(knowledgeJobs).where(eq(knowledgeJobs.id, draft.jobId)).get()!;
@@ -587,7 +641,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
           reviewedBy: userId,
           wikiPath: 'basics/getting-started/rollback-publish.md',
           title: 'Rollback Publish',
-          category: 'basics',
+          category: 'getting-started',
           subcategory: 'getting-started',
           tagsJson: '[]',
           sourceName: 'src.txt',
@@ -607,7 +661,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
         sourceId,
         draftId,
         title: 'Push CAS',
-        category: 'basics',
+        category: 'getting-started',
         subcategory: 'getting-started',
         tagsJson: '[]',
         sourceName: null,
@@ -658,7 +712,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
             reviewedBy: userId,
             wikiPath: 'basics/getting-started/audit-rollback.md',
             title: 'Audit Rollback',
-            category: 'basics',
+            category: 'getting-started',
             subcategory: 'getting-started',
             tagsJson: '[]',
             sourceName: null,
@@ -719,7 +773,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
       const i1 = makeKnowledgeItem(src.id, d2.id, userId, {
         status: 'published',
         wikiPath: 'basics/getting-started/stats-pub.md',
-        category: 'basics',
+        category: 'getting-started',
         subcategory: 'getting-started',
         season: '2026-S1',
         tagsJson: '[]',
@@ -768,7 +822,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
       expect(stats.items.total).toBe(2);
       expect(stats.items.byStatus.find((s) => s.key === 'published')?.count).toBe(1);
       expect(stats.items.byStatus.find((s) => s.key === 'archived')?.count).toBe(1);
-      expect(stats.items.byCategory.find((c) => c.key === 'basics')?.count).toBe(1);
+      expect(stats.items.byCategory.find((c) => c.key === 'getting-started')?.count).toBe(1);
 
       expect(stats.drafts.total).toBe(2);
       expect(stats.drafts.reviewQueue).toBe(1); // D1 pending_review only

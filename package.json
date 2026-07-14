@@ -17,6 +17,7 @@
     "db:studio": "drizzle-kit studio",
     "build:search-index": "tsx scripts/build-search-index.ts",
     "eval:chat": "tsx scripts/eval-chat.ts",
+    "knowledge:reset": "tsx scripts/reset-knowledge.ts",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
     "test:e2e:seed": "tsx scripts/e2e-seed.ts"
@@ -29,6 +30,7 @@
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
     "jose": "^6.2.3",
+    "js-yaml": "^4.3.0",
     "jsdom": "^29.1.1",
     "lru-cache": "^11.5.2",
     "mammoth": "^1.12.0",

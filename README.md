@@ -91,15 +91,13 @@ PM2 Process Manager (shserver, Ubuntu 24.04)
           └── web-research Agent  → WebSearch/WebFetch 在线权威站点补充
 
 knowledge-cleaner → 原始文本 → 候选 Markdown（离线 Worker，可带管理员反馈重洗）
-   清洗后端默认走 LLM 直连(LongCat-2.0)；可在知识管理后台经"清洗模型"按钮
-   密码门禁切换为 Qoder SDK(Qwen3.7-Plus)。切换写入 system_settings(knowledge.cleaning_backend)，
-   Worker 按任务读取，对下一个清洗任务生效（无需重启 PM2）。严格二选一不降级：
-   选中后端失败即失败该任务，不跨后端回退。
+   清洗仅走 OpenAI 兼容 LLM 直连；Qoder SDK 不参与知识清洗。
+   一份来源固化一份不可变快照，生成一篇候选笔记，经管理员审核后发布。
 ```
 
 > **对话答案**默认走 `llm-direct`（LongCat-2.0，均值 ~15s、≤30s）；`qoder-sdk` 为备选（较慢）。换 LLM 厂商只需改 `.env` 的 `LLM_API_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 三项（OpenAI 兼容接口）+ restart。
 >
-> **知识清洗**默认 LongCat（llm-direct），经管理后台密码门禁运行时切换 Qoder SDK。切换密码存 `MODEL_SWITCH_PASSWORD_HASH`（bcrypt 哈希，cost 12），明文不入仓库；其它管理员无密码故只能用默认 LongCat。
+> **知识清洗**仅使用 OpenAI 兼容 LLM；Qoder SDK 只用于 Agent 问答、检索与总结。
 
 ### 安全与可靠性边界
 
@@ -299,17 +297,16 @@ npm run dev
 - [x] RBAC 三角色权限（user / knowledge_admin / admin）
 - [x] 聊天系统（多轮对话、SSE 流式输出、停止/重试、图片上传）
 - [x] 聊天气泡排版优化（AI/用户消息行高统一为 1.65 倍，段落/标题/列表间距收紧，单换行行高不再跳变）
-- [x] Qoder Agent SDK 集成（wiki-search / web-research / knowledge-cleaner）
+- [x] Qoder Agent SDK 集成（仅 Agent 问答、检索与总结）
 - [x] 知识管理（文件/URL 上传 → 异步清洗 → 审核 → 发布 → Git 版本化）
 - [x] 知识评估与反馈回路（9 维评分卡：Front Matter/长度/标签/查重/时效/可检索性；管理员反馈 → 带反馈重洗 → 版本链；可选发布门禁）
 - [x] 管理后台（用户管理、会话质检、统计、限流、审计日志）
 - [x] 离线 Worker（知识清洗任务调度、租约、重试）
 - [x] PM2 部署配置（ecosystem.config.cjs、Nginx）
 - [x] 运维脚本（备份、恢复、引导管理员）
-- [x] md-wiki 知识库内容初始化（18 篇，覆盖官方指南、驾驶技术、调校理论）
+- [x] md-wiki 文件优先知识库（管理员上传、清洗、修改、审核与发布）
 - [x] 对话双后端（LLM 直连 / Qoder SDK 可切换，默认 LongCat-2.0）+ BM25 本地检索 + 双层缓存
-- [x] 知识清洗模型密码门禁切换（默认 LongCat LLM 直连，后台可经密码切换 Qwen3.7-Plus；DB 驱动运行时生效）
-- [x] 知识清洗双后端提示词对齐（qoder-sdk 的 KNOWLEDGE_CLEANER_PROMPT 与 llm-direct 的 buildCleanerSystemPrompt 统一要求 Front Matter 输出格式，消除切换后端时 parseFrontMatter 失败隐患）
+- [x] iRacing 专业知识清洗提示词、六大分类体系与严格 Front Matter 校验
 - [x] 知识库管理后台增强（概览仪表盘 + 候选稿列表 + 已发布条目正文查看 + 派生修订草稿流 + LLM 重洗软上限提示）
 - [x] 知识修订闭环（已发布条目→派生修订草稿→审核/编辑/重洗→原子发布原地覆盖旧条目，保留 wikiPath 唯一约束与 git 历史；复用未接线的原子 publisher）
 - [x] E2E 测试完善

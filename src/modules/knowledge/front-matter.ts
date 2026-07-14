@@ -10,6 +10,7 @@
 import { frontMatterSchema } from '@/modules/knowledge/schemas';
 import type { FrontMatterData } from '@/modules/knowledge/types';
 import { AppError } from '@/lib/errors';
+import { JSON_SCHEMA, load as loadYaml } from 'js-yaml';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,37 +30,12 @@ export interface ParsedDocument {
  * like `[a, b, c]`.  This is intentionally minimal — it only needs to handle
  * the Front Matter fields defined in `frontMatterSchema`.
  */
-function parseSimpleYaml(yamlText: string): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-
-  for (const rawLine of yamlText.split('\n')) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-
-    const colonIdx = line.indexOf(':');
-    if (colonIdx === -1) continue;
-
-    const key = line.slice(0, colonIdx).trim();
-    const rawValue = line.slice(colonIdx + 1).trim();
-
-    if (rawValue.startsWith('[') && rawValue.endsWith(']')) {
-      // Inline array: [tag1, tag2, tag3]
-      const inner = rawValue.slice(1, -1);
-      result[key] = inner
-        .split(',')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-    } else if (rawValue === 'true' || rawValue === 'false') {
-      result[key] = rawValue === 'true';
-    } else if (/^\d+$/.test(rawValue)) {
-      // Keep as string — Front Matter fields are strings
-      result[key] = rawValue;
-    } else {
-      result[key] = rawValue;
-    }
+function parseYaml(yamlText: string): Record<string, unknown> {
+  const parsed = loadYaml(yamlText, { schema: JSON_SCHEMA });
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Front Matter YAML must be an object');
   }
-
-  return result;
+  return parsed as Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,7 +72,10 @@ function slugify(text: string): string {
 export function parseFrontMatter(text: string): ParsedDocument {
   // Front Matter must start with `---` at the very beginning of the document.
   if (!text.startsWith('---')) {
-    throw new AppError('DRAFT_INVALID', 'Document does not start with Front Matter delimiter (---)');
+    throw new AppError(
+      'DRAFT_INVALID',
+      'Document does not start with Front Matter delimiter (---)',
+    );
   }
 
   // Find the closing `---` — it can be `\n---\n`, `\n---` at EOF, or `\n---` followed by nothing.
@@ -121,7 +100,7 @@ export function parseFrontMatter(text: string): ParsedDocument {
   // Parse YAML block into a plain object
   let raw: Record<string, unknown>;
   try {
-    raw = parseSimpleYaml(yamlBlock);
+    raw = parseYaml(yamlBlock);
   } catch {
     throw new AppError('DRAFT_INVALID', 'Failed to parse Front Matter YAML');
   }
@@ -161,12 +140,32 @@ export function validateFrontMatter(data: unknown): FrontMatterData {
   return parsed.data as FrontMatterData;
 }
 
+export function assertTrustedSourceMetadata(
+  frontMatter: FrontMatterData,
+  source: { id: string; sha256: string },
+): void {
+  if (
+    frontMatter.id !== source.id ||
+    frontMatter.source_id !== source.id ||
+    frontMatter.source_sha256.toLowerCase() !== source.sha256.toLowerCase()
+  ) {
+    throw new AppError(
+      'DRAFT_INVALID',
+      'Trusted source metadata does not match the immutable source record',
+    );
+  }
+}
+
 /**
  * Generate a wiki file path from Front Matter metadata.
  *
  * Format: `{category}/{subcategory}/{slugified-title}.md`
  */
-export function generateWikiPath(fm: FrontMatterData): string {
+export function generateWikiPath(fm: {
+  title: string;
+  category: string;
+  subcategory: string;
+}): string {
   const slug = slugify(fm.title) || 'untitled';
   return `${fm.category}/${fm.subcategory}/${slug}.md`;
 }

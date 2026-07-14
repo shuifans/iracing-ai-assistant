@@ -59,10 +59,15 @@ describe('submitUrlSchema', () => {
 
 describe('frontMatterSchema', () => {
   const validData = {
+    id: 'source-1',
     title: 'Braking Technique Guide',
-    category: 'track-technique',
+    description: 'Source-grounded guide to braking technique in iRacing.',
+    category: 'driving-technique',
     subcategory: 'braking',
     tags: ['trail-braking', 'threshold'],
+    aliases: ['iRacing braking guide'],
+    source_id: 'source-1',
+    source_sha256: 'a'.repeat(64),
   };
 
   it('合法完整数据通过校验', () => {
@@ -76,16 +81,43 @@ describe('frontMatterSchema', () => {
       source_name: 'original-doc.txt',
       source_url: 'https://example.com/source',
       season: '2026-S1',
+      content_type: 'driving-guide',
+      effective_date: '2026-01-01',
+      expires_at: '2026-12-31',
       updated_at: '2026-07-12',
     });
     expect(result.success).toBe(true);
   });
 
   it('所有合法 category 枚举值通过', () => {
-    for (const cat of ['track-technique', 'car-setup', 'basics']) {
-      const result = frontMatterSchema.safeParse({ ...validData, category: cat });
+    const pairs = [
+      ['official-racing', 'schedule-and-season'],
+      ['getting-started', 'first-race'],
+      ['driving-technique', 'braking'],
+      ['car-setup', 'suspension'],
+      ['cars-and-tracks', 'car-reference'],
+      ['hardware-and-software', 'force-feedback'],
+    ];
+    for (const [category, subcategory] of pairs) {
+      const result = frontMatterSchema.safeParse({ ...validData, category, subcategory });
       expect(result.success).toBe(true);
     }
+  });
+
+  it('拒绝不属于父分类的 subcategory', () => {
+    const result = frontMatterSchema.safeParse({
+      ...validData,
+      category: 'official-racing',
+      subcategory: 'braking',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('拒绝非法 source_sha256 和日期', () => {
+    expect(frontMatterSchema.safeParse({ ...validData, source_sha256: 'bad' }).success).toBe(false);
+    expect(frontMatterSchema.safeParse({ ...validData, effective_date: 'July 14' }).success).toBe(
+      false,
+    );
   });
 
   it('缺失 title 被拒绝', () => {

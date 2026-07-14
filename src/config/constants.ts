@@ -93,9 +93,57 @@ export type EvalDimensionKey = (typeof EVALUATION_DIMENSION_KEYS)[number];
 
 // 分类与子分类（SPEC 13.5）
 export const KNOWLEDGE_CATEGORIES = {
-  'track-technique': ['driving-line', 'braking', 'tire-management', 'suspension'],
-  'car-setup': ['theory', 'presets', 'tools'],
-  basics: ['getting-started', 'buying-guide', 'series-and-league', 'hardware'],
+  'official-racing': [
+    'schedule-and-season',
+    'series-and-events',
+    'sporting-code',
+    'race-procedures',
+    'licenses-and-ratings',
+    'protests-and-penalties',
+    'special-events',
+  ],
+  'getting-started': [
+    'account-and-membership',
+    'content-and-purchasing',
+    'installation-and-configuration',
+    'first-race',
+    'ui-and-registration',
+    'leagues-and-hosted-racing',
+    'troubleshooting',
+  ],
+  'driving-technique': [
+    'driving-fundamentals',
+    'racing-line',
+    'braking',
+    'cornering',
+    'racecraft',
+    'starts-and-restarts',
+    'overtaking-and-defense',
+    'tire-management',
+    'wet-weather',
+    'telemetry-analysis',
+  ],
+  'car-setup': [
+    'setup-fundamentals',
+    'tires-and-pressures',
+    'suspension',
+    'alignment',
+    'aerodynamics',
+    'drivetrain-and-gearing',
+    'brakes',
+    'electronics',
+    'oval-setup',
+    'presets-and-tools',
+  ],
+  'cars-and-tracks': ['car-reference', 'car-guide', 'track-reference', 'track-guide'],
+  'hardware-and-software': [
+    'wheels-and-pedals',
+    'force-feedback',
+    'vr-and-displays',
+    'pc-and-performance',
+    'telemetry-tools',
+    'third-party-apps',
+  ],
 } as const;
 export type KnowledgeCategory = keyof typeof KNOWLEDGE_CATEGORIES;
 

@@ -45,6 +45,7 @@ vi.mock('@/modules/knowledge/extractors/url', () => ({
 }));
 
 vi.mock('@/modules/knowledge/front-matter', () => ({
+  assertTrustedSourceMetadata: vi.fn(),
   parseFrontMatter: vi.fn(),
   validateFrontMatter: vi.fn(),
   generateWikiPath: vi.fn(),
@@ -69,11 +70,15 @@ vi.mock('@/config/env', () => ({
 vi.mock('fs', () => ({
   mkdirSync: vi.fn(),
   writeFileSync: vi.fn(),
+  linkSync: vi.fn(),
+  unlinkSync: vi.fn(),
   readFileSync: vi.fn(),
   existsSync: vi.fn(),
 }));
 
 vi.mock('crypto', () => ({
+  default: {},
+  randomUUID: vi.fn(() => 'snapshot-uuid'),
   createHash: vi.fn(() => ({
     update: vi.fn().mockReturnThis(),
     digest: vi.fn(() => 'mock-sha256'),
@@ -156,11 +161,11 @@ function makeMockDraft(overrides?: Partial<any>) {
   return {
     id: 'draft-001',
     jobId: 'job-001',
-    suggestedPath: 'track-technique/braking/slug.md',
+    suggestedPath: 'driving-technique/braking/slug.md',
     title: 'Test Draft',
     frontMatterJson: JSON.stringify({
       title: 'Test',
-      category: 'track-technique',
+      category: 'driving-technique',
       subcategory: 'braking',
       tags: ['test'],
     }),
@@ -227,13 +232,13 @@ function makeMockItem(overrides?: Partial<any>) {
     sourceId: 'source-001',
     draftId: 'draft-001',
     title: 'Test Item',
-    category: 'track-technique' as const,
+    category: 'driving-technique' as const,
     subcategory: 'braking',
     tagsJson: '["test"]',
     sourceName: null,
     sourceUrl: null,
     season: '',
-    wikiPath: 'track-technique/braking/test.md',
+    wikiPath: 'driving-technique/braking/test.md',
     status: 'published' as const,
     gitCommitSha: null,
     wikiSyncStatus: 'committed' as const,
@@ -323,6 +328,11 @@ describe('submitUrlSource', () => {
 
     expect(result).toEqual({ sourceId: 'mock-uuid', jobId: 'job-001' });
     expect(mockFetchUrl).toHaveBeenCalledWith('https://example.com/article', expect.any(Object));
+    expect(mockWriteFileSync).toHaveBeenCalledWith(
+      expect.stringMatching(/extracted\/mock-uuid\.txt\.\d+\.mock-uuid\.tmp$/),
+      'fetched content',
+      { encoding: 'utf-8', flag: 'wx' },
+    );
     expect(mockCreateSource).toHaveBeenCalled();
   });
 
@@ -426,22 +436,34 @@ describe('editDraft', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetDraft.mockReturnValue(makeMockDraft());
+    mockGetJob.mockReturnValue({ sourceId: 'source-001' } as any);
+    mockGetSource.mockReturnValue(makeMockSource({ id: 'source-001' }));
     mockParseFrontMatter.mockReturnValue({
       frontMatter: {
+        id: 'source-001',
         title: 'Test',
-        category: 'track-technique',
+        description: 'Test description',
+        category: 'driving-technique',
         subcategory: 'braking',
         tags: ['test'],
+        aliases: [],
+        source_id: 'source-001',
+        source_sha256: 'a'.repeat(64),
       },
       body: 'body content',
     });
     mockValidateFrontMatter.mockReturnValue({
+      id: 'source-001',
       title: 'Test',
-      category: 'track-technique',
+      description: 'Test description',
+      category: 'driving-technique',
       subcategory: 'braking',
       tags: ['test'],
+      aliases: [],
+      source_id: 'source-001',
+      source_sha256: 'a'.repeat(64),
     });
-    mockGenerateWikiPath.mockReturnValue('track-technique/braking/test.md');
+    mockGenerateWikiPath.mockReturnValue('driving-technique/braking/test.md');
   });
 
   it('should save valid content', async () => {
@@ -483,7 +505,7 @@ describe('approveDraft', () => {
     mockGetDraft.mockReturnValue(makeMockDraft());
     mockGetJob.mockReturnValue(makeMockJob());
     mockUpdateJobStatus.mockReturnValue(true);
-    mockGenerateWikiPath.mockReturnValue('track-technique/braking/test.md');
+    mockGenerateWikiPath.mockReturnValue('driving-technique/braking/test.md');
     mockCreateItem.mockReturnValue(makeMockItem());
     // Publish guard off by default; guard tests override per-test.
     mockGetPublishGuardSettings.mockReturnValue({ enabled: false, minScore: 60 });
@@ -494,7 +516,7 @@ describe('approveDraft', () => {
     const result = await approveDraft('draft-001', 'user-001', 'idempotency-key');
 
     expect(result.itemId).toBe('item-001');
-    expect(result.wikiPath).toBe('track-technique/braking/test.md');
+    expect(result.wikiPath).toBe('driving-technique/braking/test.md');
     expect(mockUpdateJobStatus).toHaveBeenCalledWith('job-001', 'pending_review', 'publishing');
     expect(mockCreateItem).toHaveBeenCalled();
     expect(mockSupersedeOldDrafts).toHaveBeenCalled();

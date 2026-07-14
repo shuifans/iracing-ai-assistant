@@ -12,7 +12,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync, spawn } from 'child_process';
 import { rebuildIndex, writeIndex } from './wiki-index';
-import { parseFrontMatter, generateWikiPath } from './front-matter';
+import { writeKnowledgeAgentContract } from './agent-contract';
+import { assertTrustedSourceMetadata, parseFrontMatter, generateWikiPath } from './front-matter';
 import * as knowledgeRepo from './repository';
 import * as jobsRepo from '@/modules/jobs/repository';
 import {
@@ -72,6 +73,12 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
   }
 
   const parsed = parseFrontMatter(draftContent);
+  const job = jobsRepo.getJob(jobId);
+  const source = job ? knowledgeRepo.getSource(job.sourceId) : null;
+  if (!job || !source) {
+    throw new AppError('NOT_FOUND', `Source for draft ${draftId} not found`);
+  }
+  assertTrustedSourceMetadata(parsed.frontMatter, source);
   const wikiPath = generateWikiPath(parsed.frontMatter);
   const targetPath = resolveWikiTarget(wikiRoot, wikiPath);
   const tmpPath = `${targetPath}.tmp`;
@@ -105,6 +112,7 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
     const indexContent = rebuildIndex(wikiRoot);
     writeIndex(wikiRoot, indexContent);
     indexUpdated = true;
+    writeKnowledgeAgentContract(wikiRoot);
 
     const publishedAt = utcNow();
     ({ itemId } = knowledgeRepo.commitPublishedDraft({
@@ -113,7 +121,7 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
       reviewedBy,
       wikiPath,
       title: parsed.frontMatter.title,
-      category: parsed.frontMatter.category as 'track-technique' | 'car-setup' | 'basics',
+      category: parsed.frontMatter.category,
       subcategory: parsed.frontMatter.subcategory,
       tagsJson: JSON.stringify(parsed.frontMatter.tags),
       sourceName: parsed.frontMatter.source_name ?? null,
@@ -139,7 +147,9 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
 
   let gitCommitSha: string | null = null;
   try {
-    execFileSync('git', ['add', '--', wikiPath, 'index.md'], { cwd: wikiRoot });
+    execFileSync('git', ['add', '--', wikiPath, 'index.md', 'KNOWLEDGE.md'], {
+      cwd: wikiRoot,
+    });
     execFileSync('git', ['commit', '-m', `knowledge: ${parsed.frontMatter.title} [${draftId}]`], {
       cwd: wikiRoot,
     });
@@ -195,7 +205,7 @@ export async function retryGitPush(itemId: string): Promise<void> {
   let commitSha = item.gitCommitSha;
   if (!commitSha) {
     try {
-      execFileSync('git', ['add', '--', item.wikiPath, 'index.md'], {
+      execFileSync('git', ['add', '--', item.wikiPath, 'index.md', 'KNOWLEDGE.md'], {
         cwd: env.WIKI_ROOT,
       });
       execFileSync('git', ['commit', '-m', `knowledge: ${item.title} [${item.draftId}]`], {

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { LeasedJob } from '@/modules/jobs/types';
-import type { SDKMessage } from '@qoder-ai/qoder-agent-sdk';
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before importing the module under test
@@ -33,13 +32,10 @@ vi.mock('@/modules/knowledge/extractors/url', () => ({
 }));
 
 vi.mock('@/modules/knowledge/front-matter', () => ({
+  assertTrustedSourceMetadata: vi.fn(),
   parseFrontMatter: vi.fn(),
   validateFrontMatter: vi.fn(),
   generateWikiPath: vi.fn(),
-}));
-
-vi.mock('@/modules/agent/client', () => ({
-  createCleaningQuery: vi.fn(),
 }));
 
 vi.mock('@/modules/knowledge-evaluation/service', () => ({
@@ -50,17 +46,14 @@ vi.mock('@/config/env', () => ({
   env: {
     DATA_ROOT: '/data',
     WIKI_ROOT: '/data/md-wiki',
-    QODER_CLEAN_TIMEOUT_MS: 900000,
     URL_FETCH_MAX_BYTES: 5242880,
     LLM_CLEAN_TIMEOUT_MS: 120000,
+    LLM_CLEAN_MAX_INPUT_CHARS: 100000,
   },
 }));
 
-vi.mock('@/modules/system-settings/repository', () => ({
-  getCleaningBackend: vi.fn(),
-}));
-
 vi.mock('@/modules/knowledge/llm-cleaner', () => ({
+  CleaningInputTooLargeError: class CleaningInputTooLargeError extends Error {},
   cleanWithLlmDirect: vi.fn(),
 }));
 
@@ -69,9 +62,13 @@ vi.mock('fs', () => ({
   writeFileSync: vi.fn(),
   readFileSync: vi.fn().mockReturnValue(Buffer.from('file content')),
   existsSync: vi.fn().mockReturnValue(false),
+  linkSync: vi.fn(),
+  unlinkSync: vi.fn(),
 }));
 
 vi.mock('crypto', () => ({
+  default: {},
+  randomUUID: vi.fn(() => 'snapshot-uuid'),
   createHash: vi.fn().mockReturnValue({
     update: vi.fn().mockReturnValue({
       digest: vi.fn().mockReturnValue('abc123hash'),
@@ -93,9 +90,7 @@ import {
   validateFrontMatter,
   generateWikiPath,
 } from '@/modules/knowledge/front-matter';
-import { createCleaningQuery } from '@/modules/agent/client';
 import { cleanWithLlmDirect } from '@/modules/knowledge/llm-cleaner';
-import { getCleaningBackend } from '@/modules/system-settings/repository';
 import { evaluateDraft } from '@/modules/knowledge-evaluation/service';
 import * as fs from 'fs';
 
@@ -114,13 +109,12 @@ const mockFetchUrl = vi.mocked(fetchUrl);
 const mockParseFrontMatter = vi.mocked(parseFrontMatter);
 const mockValidateFrontMatter = vi.mocked(validateFrontMatter);
 const mockGenerateWikiPath = vi.mocked(generateWikiPath);
-const mockCreateCleaningQuery = vi.mocked(createCleaningQuery);
 const mockCleanWithLlmDirect = vi.mocked(cleanWithLlmDirect);
-const mockGetCleaningBackend = vi.mocked(getCleaningBackend);
 const mockEvaluateDraft = vi.mocked(evaluateDraft);
 const mockMkdirSync = vi.mocked(fs.mkdirSync);
 const mockWriteFileSync = vi.mocked(fs.writeFileSync);
 const mockExistsSync = vi.mocked(fs.existsSync);
+const mockReadFileSync = vi.mocked(fs.readFileSync);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -146,7 +140,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     mimeType: 'text/plain',
     relativePath: 'uploads/knowledge/2026/07/source-1/original.txt',
     sourceUrl: null,
-    sha256: 'hash',
+    sha256: 'a'.repeat(64),
     sizeBytes: 100,
     status: 'stored',
     submittedBy: 'user-1',
@@ -160,7 +154,7 @@ function makeDraft(overrides: Record<string, unknown> = {}) {
   return {
     id: 'draft-1',
     jobId: 'job-1',
-    suggestedPath: 'track-technique/driving-line/test.md',
+    suggestedPath: 'driving-technique/racing-line/test.md',
     title: 'Test',
     frontMatterJson: '{}',
     draftRelativePath: 'draft-1.md',
@@ -175,57 +169,31 @@ function makeDraft(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/**
- * Build an async generator that yields SDK messages for the cleaning query.
- */
-function makeSdkGenerator(messages: SDKMessage[]): AsyncGenerator<SDKMessage> {
-  async function* gen() {
-    for (const msg of messages) {
-      yield msg;
-    }
-  }
-  return gen();
-}
-
-function makeCleaningResultSdkMessages(markdown: string): SDKMessage[] {
-  return [
-    {
-      type: 'assistant',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: markdown }],
-      },
-    } as unknown as SDKMessage,
-    {
-      type: 'result',
-      subtype: 'success',
-      cost_usd: 0.01,
-      is_error: false,
-      duration_ms: 1000,
-      duration_api_ms: 900,
-      num_turns: 1,
-      session_id: 'sess-1',
-      total_cost_usd: 0.01,
-      usage: { input_tokens: 100, output_tokens: 50 },
-    } as unknown as SDKMessage,
-  ];
-}
-
 const VALID_FRONT_MATTER = {
+  id: 'source-1',
   title: 'Test Article',
-  category: 'track-technique',
-  subcategory: 'driving-line',
+  description: 'Test article description',
+  category: 'driving-technique',
+  subcategory: 'racing-line',
   tags: ['spa', 'driving'],
+  aliases: [],
+  source_id: 'source-1',
+  source_sha256: 'a'.repeat(64),
   source_name: 'Test Source',
   season: '2026S3',
   updated_at: '2026-07-12',
 };
 
 const VALID_MARKDOWN = `---
+id: source-1
 title: Test Article
-category: track-technique
-subcategory: driving-line
+description: Test article description
+category: driving-technique
+subcategory: racing-line
 tags: [spa, driving]
+aliases: []
+source_id: source-1
+source_sha256: ${'a'.repeat(64)}
 source_name: Test Source
 season: 2026S3
 updated_at: 2026-07-12
@@ -246,12 +214,10 @@ describe('processKnowledgeJob', () => {
     mockUpdateJobStatus.mockReturnValue(true);
     mockCompleteJob.mockResolvedValue(true);
     mockCreateDraft.mockReturnValue(makeDraft() as any);
-    mockGenerateWikiPath.mockReturnValue('track-technique/driving-line/test-article.md');
+    mockGenerateWikiPath.mockReturnValue('driving-technique/racing-line/test-article.md');
     // Default: no cached extraction → extract/fetch runs. Cache-hit tests override.
     mockExistsSync.mockReturnValue(false);
-    // Default backend = qoder-sdk so existing createCleaningQuery tests pass.
-    // llm-direct tests override this below.
-    mockGetCleaningBackend.mockReturnValue('qoder-sdk');
+    mockCleanWithLlmDirect.mockResolvedValue(VALID_MARKDOWN);
   });
 
   // ─── Happy path: file extraction → cleaning → draft → pending_review ─────
@@ -264,9 +230,6 @@ describe('processKnowledgeJob', () => {
       truncated: false,
       warnings: [],
     });
-    mockCreateCleaningQuery.mockReturnValue(
-      makeSdkGenerator(makeCleaningResultSdkMessages(VALID_MARKDOWN)),
-    );
     mockParseFrontMatter.mockReturnValue({
       frontMatter: VALID_FRONT_MATTER as any,
       body: '# Test Article\n\nThis is the body content.',
@@ -281,8 +244,8 @@ describe('processKnowledgeJob', () => {
     expect(mockExtract).toHaveBeenCalled();
     // Verify extracted text was written
     expect(mockWriteFileSync).toHaveBeenCalled();
-    // Verify cleaning query was created
-    expect(mockCreateCleaningQuery).toHaveBeenCalled();
+    // Verify the direct LLM cleaner was called
+    expect(mockCleanWithLlmDirect).toHaveBeenCalled();
     // Verify draft was created
     expect(mockCreateDraft).toHaveBeenCalled();
     // Verify CAS transitions: extracting→cleaning, then atomic completion.
@@ -297,21 +260,14 @@ describe('processKnowledgeJob', () => {
   // ─── Happy path: URL source ─────────────────────────────────────────────
 
   it('processes a URL source end-to-end', async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue('fetched url text content');
     mockGetSource.mockReturnValue(
       makeSource({
         inputType: 'url',
         sourceUrl: 'https://example.com/article',
         relativePath: null,
       }) as any,
-    );
-    mockFetchUrl.mockResolvedValue({
-      text: 'fetched url text content',
-      charCount: 24,
-      truncated: false,
-      warnings: [],
-    });
-    mockCreateCleaningQuery.mockReturnValue(
-      makeSdkGenerator(makeCleaningResultSdkMessages(VALID_MARKDOWN)),
     );
     mockParseFrontMatter.mockReturnValue({
       frontMatter: VALID_FRONT_MATTER as any,
@@ -323,12 +279,29 @@ describe('processKnowledgeJob', () => {
     const job = makeLeasedJob();
     await processKnowledgeJob(job);
 
-    expect(mockFetchUrl).toHaveBeenCalledWith(
-      'https://example.com/article',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
+    expect(mockFetchUrl).not.toHaveBeenCalled();
+    expect(mockReadFileSync).toHaveBeenCalledWith('/data/extracted/source-1.txt', 'utf-8');
     expect(mockCreateDraft).toHaveBeenCalled();
     expect(mockCompleteJob).toHaveBeenCalledWith('job-1');
+  });
+
+  it('fails when an immutable URL snapshot is missing and never re-fetches', async () => {
+    mockGetSource.mockReturnValue(
+      makeSource({
+        inputType: 'url',
+        sourceUrl: 'https://example.com/article',
+        relativePath: null,
+      }) as any,
+    );
+
+    await processKnowledgeJob(makeLeasedJob());
+
+    expect(mockFetchUrl).not.toHaveBeenCalled();
+    expect(mockFailJob).toHaveBeenCalledWith(
+      'job-1',
+      'EXTRACTION_FAILED',
+      expect.stringContaining('snapshot is missing'),
+    );
   });
 
   // ─── Extraction failure → failJob ───────────────────────────────────────
@@ -341,9 +314,6 @@ describe('processKnowledgeJob', () => {
       truncated: false,
       warnings: [],
     });
-    mockCreateCleaningQuery.mockReturnValue(
-      makeSdkGenerator(makeCleaningResultSdkMessages(VALID_MARKDOWN)),
-    );
     mockParseFrontMatter.mockReturnValue({
       frontMatter: VALID_FRONT_MATTER as any,
       body: '# Test Article\n\nThis is the body content.',
@@ -388,9 +358,7 @@ describe('processKnowledgeJob', () => {
       truncated: false,
       warnings: [],
     });
-    mockCreateCleaningQuery.mockReturnValue(
-      makeSdkGenerator(makeCleaningResultSdkMessages('invalid markdown')),
-    );
+    mockCleanWithLlmDirect.mockResolvedValue('invalid markdown');
     const { AppError } = await import('@/lib/errors');
     mockParseFrontMatter.mockImplementation(() => {
       throw new AppError('DRAFT_INVALID', 'Bad front matter');
@@ -399,16 +367,12 @@ describe('processKnowledgeJob', () => {
     const job = makeLeasedJob();
     await processKnowledgeJob(job);
 
-    expect(mockFailJob).toHaveBeenCalledWith(
-      'job-1',
-      'DRAFT_INVALID',
-      expect.any(String),
-    );
+    expect(mockFailJob).toHaveBeenCalledWith('job-1', 'DRAFT_INVALID', expect.any(String));
   });
 
   // ─── Content too large → CONTENT_TOO_LARGE ──────────────────────────────
 
-  it('fails the job with CONTENT_TOO_LARGE when content exceeds 5000 chars', async () => {
+  it('fails the job with CONTENT_TOO_LARGE when content exceeds 12000 chars', async () => {
     mockGetSource.mockReturnValue(makeSource() as any);
     mockExtract.mockResolvedValue({
       text: 'some text',
@@ -417,29 +381,23 @@ describe('processKnowledgeJob', () => {
       warnings: [],
     });
 
-    const longMarkdown = `---\ntitle: Long\n---\n\n${'x'.repeat(5001)}`;
-    mockCreateCleaningQuery.mockReturnValue(
-      makeSdkGenerator(makeCleaningResultSdkMessages(longMarkdown)),
-    );
+    const longMarkdown = `---\ntitle: Long\n---\n\n${'x'.repeat(12_001)}`;
+    mockCleanWithLlmDirect.mockResolvedValue(longMarkdown);
     mockParseFrontMatter.mockReturnValue({
       frontMatter: VALID_FRONT_MATTER as any,
-      body: 'x'.repeat(5001),
+      body: 'x'.repeat(12_001),
     });
     mockValidateFrontMatter.mockReturnValue(VALID_FRONT_MATTER as any);
 
     const job = makeLeasedJob();
     await processKnowledgeJob(job);
 
-    expect(mockFailJob).toHaveBeenCalledWith(
-      'job-1',
-      'CONTENT_TOO_LARGE',
-      expect.any(String),
-    );
+    expect(mockFailJob).toHaveBeenCalledWith('job-1', 'CONTENT_TOO_LARGE', expect.any(String));
   });
 
   // ─── Agent unavailable → AGENT_UNAVAILABLE ──────────────────────────────
 
-  it('fails the job with AGENT_UNAVAILABLE when SDK throws', async () => {
+  it('fails the job with AGENT_UNAVAILABLE when LLM direct cleaning throws', async () => {
     mockGetSource.mockReturnValue(makeSource() as any);
     mockExtract.mockResolvedValue({
       text: 'some text',
@@ -448,18 +406,33 @@ describe('processKnowledgeJob', () => {
       warnings: [],
     });
 
-    async function* failingGen(): AsyncGenerator<SDKMessage> {
-      throw new Error('SDK connection refused');
-    }
-    mockCreateCleaningQuery.mockReturnValue(failingGen());
+    mockCleanWithLlmDirect.mockRejectedValue(new Error('LLM connection refused'));
 
     const job = makeLeasedJob();
     await processKnowledgeJob(job);
 
+    expect(mockFailJob).toHaveBeenCalledWith('job-1', 'AGENT_UNAVAILABLE', expect.any(String));
+  });
+
+  it('preserves CONTENT_TOO_LARGE for an oversized cleaning input', async () => {
+    const { CleaningInputTooLargeError } = await import('@/modules/knowledge/llm-cleaner');
+    mockGetSource.mockReturnValue(makeSource() as any);
+    mockExtract.mockResolvedValue({
+      text: 'oversized input',
+      charCount: 15,
+      truncated: false,
+      warnings: [],
+    });
+    mockCleanWithLlmDirect.mockRejectedValue(
+      new CleaningInputTooLargeError('请按系列、赛季或文档章节拆分来源后重新上传。'),
+    );
+
+    await processKnowledgeJob(makeLeasedJob());
+
     expect(mockFailJob).toHaveBeenCalledWith(
       'job-1',
-      'AGENT_UNAVAILABLE',
-      expect.any(String),
+      'CONTENT_TOO_LARGE',
+      expect.stringContaining('拆分来源'),
     );
   });
 
@@ -478,9 +451,9 @@ describe('processKnowledgeJob', () => {
     );
   });
 
-  // ─── Empty SDK result → AGENT_UNAVAILABLE ──────────────────────────────
+  // ─── Empty LLM result → invalid draft ─────────────────────────────────
 
-  it('fails the job when SDK returns no assistant text', async () => {
+  it('fails the job when LLM returns empty assistant text', async () => {
     mockGetSource.mockReturnValue(makeSource() as any);
     mockExtract.mockResolvedValue({
       text: 'some text',
@@ -489,22 +462,11 @@ describe('processKnowledgeJob', () => {
       warnings: [],
     });
 
-    // Generator that only yields a result/success but no assistant message
-    async function* emptyGen(): AsyncGenerator<SDKMessage> {
-      yield {
-        type: 'result',
-        subtype: 'success',
-        cost_usd: 0,
-        is_error: false,
-        duration_ms: 100,
-        duration_api_ms: 50,
-        num_turns: 1,
-        session_id: 'sess-1',
-        total_cost_usd: 0,
-        usage: { input_tokens: 10, output_tokens: 0 },
-      } as unknown as SDKMessage;
-    }
-    mockCreateCleaningQuery.mockReturnValue(emptyGen());
+    mockCleanWithLlmDirect.mockResolvedValue('');
+    const { AppError } = await import('@/lib/errors');
+    mockParseFrontMatter.mockImplementation(() => {
+      throw new AppError('DRAFT_INVALID', 'Empty markdown');
+    });
 
     const job = makeLeasedJob();
     await processKnowledgeJob(job);
@@ -515,21 +477,14 @@ describe('processKnowledgeJob', () => {
   // ─── Re-clean: feedback injection + versioning ──────────────────────────
 
   it('passes job.instructionsJson to the cleaner and versions the draft', async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue('fetched');
     mockGetSource.mockReturnValue(
       makeSource({
         inputType: 'url',
         sourceUrl: 'https://example.com/x',
         relativePath: null,
       }) as any,
-    );
-    mockFetchUrl.mockResolvedValue({
-      text: 'fetched',
-      charCount: 7,
-      truncated: false,
-      warnings: [],
-    });
-    mockCreateCleaningQuery.mockReturnValue(
-      makeSdkGenerator(makeCleaningResultSdkMessages(VALID_MARKDOWN)),
     );
     mockParseFrontMatter.mockReturnValue({
       frontMatter: VALID_FRONT_MATTER as any,
@@ -547,9 +502,9 @@ describe('processKnowledgeJob', () => {
     });
     await processKnowledgeJob(job);
 
-    // Feedback forwarded to the cleaner as the 4th arg
-    const cleanerCall = mockCreateCleaningQuery.mock.calls[0]!;
-    expect(cleanerCall[3]).toBe('{"comments":["too verbose"]}');
+    expect(mockCleanWithLlmDirect).toHaveBeenCalledWith(
+      expect.objectContaining({ feedback: '{"comments":["too verbose"]}' }),
+    );
     // Parent draft looked up for versioning
     expect(mockGetDraft).toHaveBeenCalledWith('parent-draft-1');
     // New draft created with parentDraftId + version 4
@@ -569,9 +524,6 @@ describe('processKnowledgeJob', () => {
         relativePath: null,
       }) as any,
     );
-    mockCreateCleaningQuery.mockReturnValue(
-      makeSdkGenerator(makeCleaningResultSdkMessages(VALID_MARKDOWN)),
-    );
     mockParseFrontMatter.mockReturnValue({
       frontMatter: VALID_FRONT_MATTER as any,
       body: 'body',
@@ -585,71 +537,33 @@ describe('processKnowledgeJob', () => {
     // URL was NOT re-fetched (cache hit)
     expect(mockFetchUrl).not.toHaveBeenCalled();
     // Cleaner still ran (with cached text)
-    expect(mockCreateCleaningQuery).toHaveBeenCalled();
+    expect(mockCleanWithLlmDirect).toHaveBeenCalled();
   });
 
-  // ─── llm-direct backend: cleanWithLlmDirect path (no Qoder fallback) ─────
-
-  describe('llm-direct backend', () => {
-    beforeEach(() => {
-      mockGetCleaningBackend.mockReturnValue('llm-direct');
+  it('always uses LLM direct cleaning and ignores a legacy qoder-sdk setting', async () => {
+    mockGetSource.mockReturnValue(makeSource() as any);
+    mockExtract.mockResolvedValue({
+      text: 'extracted text content',
+      charCount: 22,
+      truncated: false,
+      warnings: [],
     });
-
-    it('uses cleanWithLlmDirect (not the SDK) and completes the pipeline', async () => {
-      mockGetSource.mockReturnValue(makeSource() as any);
-      mockExtract.mockResolvedValue({
-        text: 'extracted text content',
-        charCount: 22,
-        truncated: false,
-        warnings: [],
-      });
-      mockCleanWithLlmDirect.mockResolvedValue(VALID_MARKDOWN);
-      mockParseFrontMatter.mockReturnValue({
-        frontMatter: VALID_FRONT_MATTER as any,
-        body: '# Test Article\n\nThis is the body content.',
-      });
-      mockValidateFrontMatter.mockReturnValue(VALID_FRONT_MATTER as any);
-      mockGetJob.mockReturnValue({ sourceId: 'source-1' } as any);
-
-      const job = makeLeasedJob();
-      await processKnowledgeJob(job);
-
-      // LLM-direct was used
-      expect(mockCleanWithLlmDirect).toHaveBeenCalledWith(
-        expect.objectContaining({
-          maxOutputChars: 4500,
-          maxTokens: 2500,
-          rawText: 'extracted text content',
-        }),
-      );
-      // Qoder SDK was NOT used (strict binary — no fallback on the chosen backend)
-      expect(mockCreateCleaningQuery).not.toHaveBeenCalled();
-      // Pipeline still completed: draft created, CAS to pending_review
-      expect(mockCreateDraft).toHaveBeenCalled();
-      expect(mockCompleteJob).toHaveBeenCalledWith('job-1');
+    mockCleanWithLlmDirect.mockResolvedValue(VALID_MARKDOWN);
+    mockParseFrontMatter.mockReturnValue({
+      frontMatter: VALID_FRONT_MATTER as any,
+      body: '# Test Article\n\nThis is the body content.',
     });
+    mockValidateFrontMatter.mockReturnValue(VALID_FRONT_MATTER as any);
+    mockGetJob.mockReturnValue({ sourceId: 'source-1' } as any);
 
-    it('fails with AGENT_UNAVAILABLE when cleanWithLlmDirect throws (no Qoder fallback)', async () => {
-      mockGetSource.mockReturnValue(makeSource() as any);
-      mockExtract.mockResolvedValue({
-        text: 'some text',
-        charCount: 9,
-        truncated: false,
-        warnings: [],
-      });
-      mockCleanWithLlmDirect.mockRejectedValue(new Error('LongCat rate limited'));
+    await processKnowledgeJob(makeLeasedJob());
 
-      const job = makeLeasedJob();
-      await processKnowledgeJob(job);
-
-      // Job failed with AGENT_UNAVAILABLE
-      expect(mockFailJob).toHaveBeenCalledWith(
-        'job-1',
-        'AGENT_UNAVAILABLE',
-        expect.stringContaining('LongCat rate limited'),
-      );
-      // Qoder SDK was NOT used as a fallback (strict binary)
-      expect(mockCreateCleaningQuery).not.toHaveBeenCalled();
-    });
+    expect(mockCleanWithLlmDirect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawText: 'extracted text content',
+        maxOutputChars: 12_000,
+        maxTokens: 6_000,
+      }),
+    );
   });
 });

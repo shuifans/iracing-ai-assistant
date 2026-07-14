@@ -3,7 +3,6 @@ import {
   CHAT_SYSTEM_PROMPT,
   WIKI_SEARCH_PROMPT,
   WEB_RESEARCH_PROMPT,
-  KNOWLEDGE_CLEANER_PROMPT,
 } from '@/modules/agent/prompts';
 
 describe('CHAT_SYSTEM_PROMPT', () => {
@@ -75,19 +74,5 @@ describe('WEB_RESEARCH_PROMPT', () => {
 
   it('forbids calling sub-agents', () => {
     expect(WEB_RESEARCH_PROMPT).toMatch(/not call any sub-agent|Do NOT call/i);
-  });
-});
-
-describe('KNOWLEDGE_CLEANER_PROMPT', () => {
-  it('mentions Markdown output', () => {
-    expect(KNOWLEDGE_CLEANER_PROMPT).toContain('Markdown');
-  });
-
-  it('sets max turns guidance', () => {
-    expect(KNOWLEDGE_CLEANER_PROMPT).toContain('8 turns');
-  });
-
-  it('preserves factual accuracy constraint', () => {
-    expect(KNOWLEDGE_CLEANER_PROMPT).toMatch(/factual accuracy|do not paraphrase/i);
   });
 });

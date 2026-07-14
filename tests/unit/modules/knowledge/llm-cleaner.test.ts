@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
-import { cleanWithLlmDirect, buildCleanerSystemPrompt, StopCleaningError } from '@/modules/knowledge/llm-cleaner';
+import {
+  cleanWithLlmDirect,
+  buildCleanerSystemPrompt,
+  StopCleaningError,
+} from '@/modules/knowledge/llm-cleaner';
 
 // ---------------------------------------------------------------------------
 // global.fetch mock
@@ -104,16 +108,13 @@ describe('cleanWithLlmDirect', () => {
     expect(body.messages[0].content).toContain('4500');
   });
 
-  it('slices rawText to 40K characters in the user prompt', async () => {
-    fetchMock.mockResolvedValue(okResponse('ok'));
-    const huge = 'a'.repeat(50_000);
+  it('rejects oversized input instead of silently slicing it', async () => {
+    const huge = 'a'.repeat(100_001);
 
-    await cleanWithLlmDirect({ rawText: huge });
-
-    const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string);
-    // 40K slice + the prompt wrapper — the raw text portion must be exactly 40K
-    expect(body.messages[1].content).toContain('a'.repeat(40_000));
-    expect(body.messages[1].content).not.toContain('a'.repeat(40_001));
+    await expect(cleanWithLlmDirect({ rawText: huge, maxInputChars: 100_000 })).rejects.toThrow(
+      /拆分|exceeds/i,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('appends reviewer feedback to the user prompt when provided', async () => {
@@ -157,5 +158,25 @@ describe('buildCleanerSystemPrompt', () => {
     const prompt = buildCleanerSystemPrompt();
     expect(prompt.toLowerCase()).toContain('source_url');
     expect(prompt.toLowerCase()).toContain('omit');
+  });
+
+  it('defines the iRacing professional one-source-one-note contract', () => {
+    const prompt = buildCleanerSystemPrompt({ maxOutputChars: 12_000 });
+    expect(prompt).toContain('official-racing');
+    expect(prompt).toContain('hardware-and-software');
+    expect(prompt).toMatch(/one source.*one note/i);
+    expect(prompt).toContain('## Summary');
+    expect(prompt).toContain('## Details');
+    expect(prompt).toContain('## Source');
+    expect(prompt).toContain('12,000');
+  });
+
+  it('contains source-specific fidelity rules', () => {
+    const prompt = buildCleanerSystemPrompt({ maxOutputChars: 12_000 });
+    expect(prompt).toMatch(/Week.*timezone/is);
+    expect(prompt).toMatch(/may.*should.*must/is);
+    expect(prompt).toMatch(/prerequisite.*UI/is);
+    expect(prompt).toMatch(/car.*track.*weather.*units/is);
+    expect(prompt).toMatch(/reviewer feedback.*source facts/is);
   });
 });

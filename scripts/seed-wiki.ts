@@ -3,8 +3,7 @@
  *
  * 流程：
  *   1. 从白名单域名抓取 iRacing 相关页面原始文本
- *   2. 优先通过可配置的 OpenAI 兼容 LLM API 清洗（如 LongCat-2.0）
- *      非限流/额度错误时，兜底使用 Qoder SDK + Qwen3.7-Plus
+ *   2. 仅通过可配置的 OpenAI 兼容 LLM API 清洗（如 LongCat-2.0）
  *   3. 写入 ./data/md-wiki 对应目录
  *   4. 调用 rebuildIndex 生成 index.md
  *
@@ -17,13 +16,10 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { query, accessTokenFromEnv } from '@qoder-ai/qoder-agent-sdk';
 import {
   cleanWithLlmDirect,
-  buildCleanerSystemPrompt,
-  makeCleanerUserPrompt,
   getOpenAiCompatibleProviders,
   StopCleaningError,
 } from '@/modules/knowledge/llm-cleaner';
@@ -41,7 +37,6 @@ for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
 
 // ── 常量 ──────────────────────────────────────────────────────────────────
 
-const MODEL = process.env.QODER_MODEL ?? 'Qwen3.7-Plus';
 const WIKI_ROOT = resolve(__dirname, '..', process.env.WIKI_ROOT ?? './data/md-wiki');
 const TEMP_DIR = join(WIKI_ROOT, '..', '.seed-temp');
 const DRY_RUN = process.argv.includes('--dry-run');
@@ -64,81 +59,81 @@ const SEED_URLS: Array<{ url: string; hint: string; category: string }> = [
   {
     url: 'https://iracing.com/getting-started/',
     hint: 'iRacing 官方新手入门指南：如何注册、下载、开始第一场比赛',
-    category: 'basics',
+    category: 'getting-started',
   },
   {
     url: 'https://hipole.com/iracing/',
     hint: '嗨跑赛车中文 iRacing 教程：模拟赛车驾驶学校，新手入门',
-    category: 'basics',
+    category: 'getting-started',
   },
   // ── basics / series-and-league ────────────────────────────────────
   {
     url: 'https://iracing.com/safety-rating/',
     hint: 'iRacing 安全评分（Safety Rating）系统详解：如何计算、如何提升',
-    category: 'basics',
+    category: 'getting-started',
   },
   // ── basics / buying-guide ─────────────────────────────────────────
   {
     url: 'https://iracing.com/cars/',
     hint: 'iRacing 车辆目录：所有可用赛车分类与购买说明',
-    category: 'basics',
+    category: 'getting-started',
   },
-  // ── track-technique / driving-line ────────────────────────────────
+  // ── driving-technique / driving-line ────────────────────────────────
   {
     url: 'https://iracing.com/tracks/',
     hint: 'iRacing 赛道目录：全球真实赛道的激光扫描数据与赛道列表',
-    category: 'track-technique',
+    category: 'driving-technique',
   },
-  // ── track-technique / braking ─────────────────────────────────────
+  // ── driving-technique / braking ─────────────────────────────────────
   {
     url: 'https://www.iracing.com/physics-modeling-ntm-v7-info-plus/',
     hint: 'iRacing 官方物理模型与轮胎模型说明：NTM v7、抓地、轮胎行为与驾驶感受',
-    category: 'track-technique',
+    category: 'driving-technique',
   },
   // ── basics / hardware ─────────────────────────────────────────────
   {
     url: 'https://www.iracing.com/wheels/',
     hint: 'iRacing 模拟赛车硬件建议：方向盘、踏板、座舱与显示设备',
-    category: 'basics',
+    category: 'getting-started',
   },
   // ── basics / series-and-league ────────────────────────────────────
   {
     url: 'https://www.iracing.com/series/',
     hint: 'iRacing 官方系列赛说明：不同赛事系列、赛程和参赛方式',
-    category: 'basics',
+    category: 'getting-started',
   },
   // ── basics / getting-started ──────────────────────────────────────
   {
     url: 'https://support.iracing.com/support/solutions/articles/31000133336-new-racer-guide-how-to-get-started',
     hint: 'iRacing 官方新手指南：从零开始完成账户创建、安装、硬件与首场比赛准备',
-    category: 'basics',
+    category: 'getting-started',
   },
   {
     url: 'https://support.iracing.com/support/solutions/articles/31000168572-iracing-setup-a-beginner-s-guide-on-how-to-get-started',
     hint: 'iRacing 新手安装与设置指南：软件安装、控制器配置、座椅位置与基础车辆调校',
-    category: 'basics',
+    category: 'getting-started',
   },
   // ── basics / series-and-league ────────────────────────────────────
   {
     url: 'https://support.iracing.com/support/solutions/articles/31000133523-what-is-irating',
     hint: 'iRating 官方解释：评分机制、分类独立性、与驾照等级的关系',
-    category: 'basics',
+    category: 'getting-started',
   },
   {
     url: 'https://support.iracing.com/support/solutions/articles/31000133459-iracing-how-to-what-are-licenses-',
     hint: 'iRacing 驾照等级说明：Rookie/D/C/B/A/Pro 分类与晋升规则',
-    category: 'basics',
+    category: 'getting-started',
   },
   {
     url: 'https://support.iracing.com/support/solutions/articles/31000173706-graduating-from-rookie-class',
     hint: '如何从 Rookie 毕业：晋级条件、赛季规则与新手晋升建议',
-    category: 'basics',
+    category: 'getting-started',
   },
-  // ── track-technique / driving-line ────────────────────────────────
+  // ── driving-technique / driving-line ────────────────────────────────
   {
     url: 'https://www.hipole.com/2016/02/racingline-i/',
     hint: 'HiPole 赛车线基础教程：外内外的物理原理、弯心与入弯出弯参照物',
-    category: 'track-technique',
+    category: 'driving-technique',
   },
   // ── car-setup / tools ─────────────────────────────────────────────
   {
@@ -146,23 +141,22 @@ const SEED_URLS: Array<{ url: string; hint: string; category: string }> = [
     hint: 'Coach Dave Academy 刹车曲线分析教程：初始刹车、trail braking 与数据对比方法',
     category: 'car-setup',
   },
-  // ── track-technique / braking ─────────────────────────────────────
+  // ── driving-technique / braking ─────────────────────────────────────
   {
     url: 'https://coachdaveacademy.com/tutorials/racecraft-how-to-get-better-in-sim-racing/',
     hint: 'Coach Dave Academy Racecraft 教程：刹车稳定性、trail braking、超车判断与驾驶一致性',
-    category: 'track-technique',
+    category: 'driving-technique',
   },
   // ── basics / getting-started ──────────────────────────────────────
   {
     url: 'https://coachdaveacademy.com/tutorials/iracing-for-dummies/',
     hint: 'Coach Dave Academy iRacing 入门指南：从车辆、赛道、设置到新手训练路径',
-    category: 'basics',
+    category: 'getting-started',
   },
 ];
 
 // ── Front Matter 模板 ──────────────────────────────────────────────────────
 // (CLEANER_SYSTEM_PROMPT moved to @/modules/knowledge/llm-cleaner → buildCleanerSystemPrompt)
-
 
 function sourceAlreadyExists(sourceUrl: string): string | null {
   if (FORCE || !fs.existsSync(WIKI_ROOT)) return null;
@@ -255,77 +249,16 @@ async function fetchPage(url: string): Promise<{ text: string; truncated: boolea
   }
 }
 
-// ── OpenAI 兼容 LLM API 清洗（LongCat 优先，失败兜底 Qoder SDK）────────────
+// ── OpenAI 兼容 LLM API 清洗 ──────────────────────────────────────────────
 // Provider 循环、prompt 组装、限流判定已收敛到 @/modules/knowledge/llm-cleaner。
-// 这里只保留"LLM 失败 → Qoder 兜底"的包装（seed 脚本特有；Worker 不兜底）。
+// Qoder SDK 仅用于 Agent 问答，不参与任何知识清洗路径。
 
-async function cleanWithConfiguredLLMs(rawText: string, sourceUrl: string, hint: string): Promise<string> {
-  try {
-    return await cleanWithLlmDirect({ rawText, sourceUrl, hint, maxTokens: 6000 });
-  } catch (err) {
-    if (err instanceof StopCleaningError) throw err;
-    const message = err instanceof Error ? err.message : String(err);
-    console.log(`        LLM API 失败，兜底到 Qoder SDK: ${message}`);
-  }
-
-  console.log(`        使用 Qoder SDK + ${MODEL} 兜底清洗`);
-  return cleanWithQwen(rawText, sourceUrl, hint);
-}
-
-// ── Qoder SDK + Qwen3.7-Plus 兜底清洗 ─────────────────────────────────────
-
-async function cleanWithQwen(rawText: string, sourceUrl: string, hint: string): Promise<string> {
-  const cliPath =
-    process.platform === 'win32'
-      ? [
-          join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@qoder-ai', 'qodercli', 'bundle', 'qodercli.js'),
-        ].find(existsSync)
-      : undefined;
-
-  const prompt = makeCleanerUserPrompt({ rawText, sourceUrl, hint });
-
-  const q = query({
-    prompt,
-    options: {
-      auth: accessTokenFromEnv(),
-      model: MODEL,
-      maxTurns: 3,
-      ...(cliPath ? { pathToQoderCLIExecutable: cliPath } : {}),
-      systemPrompt: buildCleanerSystemPrompt(),
-      disallowedTools: ['Write', 'Edit', 'Bash', 'Agent', 'WebFetch', 'WebSearch'],
-    },
-  });
-
-  let fullText = '';
-
-  for await (const msg of q) {
-    // 捕获流式输出
-    if (msg.type === 'stream_event') {
-      const event = msg.event;
-      if (event.type === 'content_block_delta') {
-        const delta = event.delta as { text?: string } | undefined;
-        if (delta?.text) fullText += delta.text;
-      }
-    }
-    // 捕获完整 assistant 消息（某些模型不输出 stream_event）
-    if (msg.type === 'assistant') {
-      const assistantMsg = msg.message as { content?: Array<{ type: string; text?: string }> };
-      for (const block of assistantMsg.content ?? []) {
-        if (block.type === 'text' && block.text && !fullText.includes(block.text)) {
-          fullText = block.text;
-        }
-      }
-    }
-    // 错误处理
-    if (msg.type === 'result') {
-      if (msg.subtype !== 'success') {
-        const errs = 'errors' in msg ? (msg.errors as string[])?.join('; ') : 'unknown';
-        throw new Error(`Qoder query failed: ${errs}`);
-      }
-    }
-  }
-
-  return fullText.trim();
+async function cleanWithConfiguredLLMs(
+  rawText: string,
+  sourceUrl: string,
+  hint: string,
+): Promise<string> {
+  return cleanWithLlmDirect({ rawText, sourceUrl, hint, maxTokens: 6000 });
 }
 
 // ── Front Matter 验证 + 路径生成 ─────────────────────────────────────────
@@ -350,7 +283,8 @@ function parseAndValidate(content: string): ParsedWiki & { fixedContent: string 
   let fixed = content;
   if (!fixed.startsWith('---')) {
     // 找到第一个 Front Matter 字段
-    const fmFieldRe = /^(title|category|subcategory|tags|source_name|source_url|season|updated_at):/m;
+    const fmFieldRe =
+      /^(title|category|subcategory|tags|source_name|source_url|season|updated_at):/m;
     const match = fmFieldRe.exec(fixed);
     if (match) {
       // 找 Front Matter 结束位置（下一个 H1 或空行后的非 FM 字段）
@@ -395,7 +329,11 @@ function parseAndValidate(content: string): ParsedWiki & { fixedContent: string 
     const key = trimmed.slice(0, colonIdx).trim();
     const raw = trimmed.slice(colonIdx + 1).trim();
     if (raw.startsWith('[') && raw.endsWith(']')) {
-      fm[key] = raw.slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean);
+      fm[key] = raw
+        .slice(1, -1)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
     } else {
       fm[key] = raw;
     }
@@ -407,7 +345,14 @@ function parseAndValidate(content: string): ParsedWiki & { fixedContent: string 
     if (!fm[key]) throw new Error(`Missing required Front Matter field: ${key}`);
   }
 
-  const validCategories = ['track-technique', 'car-setup', 'basics'];
+  const validCategories = [
+    'official-racing',
+    'getting-started',
+    'driving-technique',
+    'car-setup',
+    'cars-and-tracks',
+    'hardware-and-software',
+  ];
   if (!validCategories.includes(fm.category as string)) {
     throw new Error(`Invalid category: ${fm.category}`);
   }
@@ -422,7 +367,13 @@ function parseAndValidate(content: string): ParsedWiki & { fixedContent: string 
 
 function rebuildIndex(wikiRoot: string): string {
   const lines: string[] = ['# Knowledge Index'];
-  const entries: Array<{ title: string; category: string; subcategory: string; path: string; tags: string[] }> = [];
+  const entries: Array<{
+    title: string;
+    category: string;
+    subcategory: string;
+    path: string;
+    tags: string[];
+  }> = [];
 
   function walk(dir: string) {
     if (!fs.existsSync(dir)) return;
@@ -453,7 +404,14 @@ function rebuildIndex(wikiRoot: string): string {
 
   // 按 category → subcategory → title 排序
   entries.sort((a, b) => {
-    const catOrder = ['track-technique', 'car-setup', 'basics'];
+    const catOrder = [
+      'official-racing',
+      'getting-started',
+      'driving-technique',
+      'car-setup',
+      'cars-and-tracks',
+      'hardware-and-software',
+    ];
     const ca = catOrder.indexOf(a.category) - catOrder.indexOf(b.category);
     if (ca !== 0) return ca;
     const sub = a.subcategory.localeCompare(b.subcategory);
@@ -495,7 +453,6 @@ interface ProcessResult {
 async function main() {
   console.log(`\n${'═'.repeat(60)}`);
   console.log(`  知识库种子清洗脚本`);
-  console.log(`  Qoder 兜底模型: ${MODEL}`);
   const providers = getOpenAiCompatibleProviders();
   console.log(
     `  LLM API Providers: ${providers.length > 0 ? providers.map((p) => `${p.name}/${p.model}`).join(', ') : '(none)'}`,
@@ -597,7 +554,9 @@ async function main() {
   // ── 清理临时目录 ────────────────────────────────────────────────
   try {
     fs.rmSync(TEMP_DIR, { recursive: true, force: true });
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // ── 结果汇总 ────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(60)}`);

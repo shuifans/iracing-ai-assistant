@@ -166,7 +166,7 @@ describe('makeKnowledgeItem', () => {
     expect(item.sourceId).toBe('source-1');
     expect(item.draftId).toBe('draft-1');
     expect(item.title).toBe('Test Knowledge Item');
-    expect(item.category).toBe('track-technique');
+    expect(item.category).toBe('driving-technique');
     expect(item.subcategory).toBe('braking');
     expect(item.tagsJson).toBeTruthy();
     expect(item.season).toBe('2026-S1');

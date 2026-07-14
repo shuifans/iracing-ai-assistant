@@ -61,7 +61,7 @@ const mockMarkFeedbackApplied = vi.mocked(evalRepo.markFeedbackApplied);
 
 const VALID_DRAFT_CONTENT = `---
 title: Trail Braking Guide
-category: track-technique
+category: driving-technique
 subcategory: braking
 tags: [braking, trail, technique]
 ---
@@ -73,7 +73,7 @@ function makeDraft(overrides: Record<string, unknown> = {}) {
   return {
     id: 'draft-1',
     jobId: 'job-1',
-    suggestedPath: 'track-technique/braking/trail-braking-guide.md',
+    suggestedPath: 'driving-technique/braking/trail-braking-guide.md',
     title: 'Trail Braking Guide',
     status: 'pending_review',
     version: 1,
