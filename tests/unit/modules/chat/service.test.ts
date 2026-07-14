@@ -15,7 +15,6 @@ vi.mock('@/modules/chat/repository', () => ({
 }));
 
 vi.mock('@/modules/chat/session-context', () => ({
-  loadHistoryContext: vi.fn(() => ''),
   generateSessionTitle: vi.fn(() => 'Generated Title'),
 }));
 

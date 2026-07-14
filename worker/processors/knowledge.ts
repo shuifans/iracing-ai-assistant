@@ -12,8 +12,9 @@
  *  8. Word count check (>5000 → CONTENT_TOO_LARGE)
  *  9. Write draft to /data/drafts/<draft-id>.md
  * 10. CAS job cleaning → pending_review
- * 11. Create draft record in DB
+ * 11. Create draft record in DB (versioned for re-clean lineage)
  * 12. Supersede old drafts
+ * 13. Auto-evaluate draft (heuristic + probe) — non-fatal
  *
  * AbortController enforces 15-minute hard timeout and 30s idle timeout.
  *
@@ -37,6 +38,7 @@ import {
   generateWikiPath,
 } from '@/modules/knowledge/front-matter';
 import { createCleaningQuery } from '@/modules/agent/client';
+import { evaluateDraft } from '@/modules/knowledge-evaluation/service';
 import { AppError } from '@/lib/errors';
 import { generateId } from '@/lib/uuid';
 import { env } from '@/config/env';
@@ -84,9 +86,16 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
     );
   }
 
-  // Step 2: Extract text
+  // Step 2–3: Extract text (reuse cached extraction on re-clean to avoid
+  // re-fetching URLs / re-parsing files — the source content is unchanged).
+  const extractedDir = path.join(env.DATA_ROOT as string, 'extracted');
+  fs.mkdirSync(extractedDir, { recursive: true });
+  const extractedPath = path.join(extractedDir, `${source.id}.txt`);
+
   let extractedText: string;
-  if (source.inputType === 'url' && source.sourceUrl) {
+  if (fs.existsSync(extractedPath)) {
+    extractedText = fs.readFileSync(extractedPath, 'utf-8');
+  } else if (source.inputType === 'url' && source.sourceUrl) {
     const result = await fetchUrl(source.sourceUrl, {
       maxBytes: env.URL_FETCH_MAX_BYTES as number,
       connectTimeoutMs: 5000,
@@ -94,19 +103,15 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
       maxRedirects: 3,
     });
     extractedText = result.text;
+    fs.writeFileSync(extractedPath, extractedText, 'utf-8');
   } else {
     // File-based source — read the stored file and extract
     const filePath = path.join(env.DATA_ROOT as string, source.relativePath!);
     const fileBuffer = fs.readFileSync(filePath);
     const result = await extract(fileBuffer, source.mimeType ?? 'text/plain');
     extractedText = result.text;
+    fs.writeFileSync(extractedPath, extractedText, 'utf-8');
   }
-
-  // Step 3: Write extracted text to disk
-  const extractedDir = path.join(env.DATA_ROOT as string, 'extracted');
-  fs.mkdirSync(extractedDir, { recursive: true });
-  const extractedPath = path.join(extractedDir, `${source.id}.txt`);
-  fs.writeFileSync(extractedPath, extractedText, 'utf-8');
 
   // Step 4: CAS extracting → cleaning
   const casOk = jobsRepo.updateJobStatus(job.id, 'extracting', 'cleaning');
@@ -129,6 +134,7 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
     extractedText,
     draftId,
     signal,
+    job.instructionsJson ?? undefined,
   );
 
   // Step 7: Parse Front Matter + Zod validation
@@ -157,9 +163,17 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
     throw new AppError('INVALID_STATE', 'CAS cleaning→pending_review failed');
   }
 
-  // Step 11: Create draft record
+  // Step 11: Create draft record (versioned for re-clean lineage)
   const wikiPath = generateWikiPath(parsed.frontMatter);
   const contentHash = crypto.createHash('sha256').update(cleanedMarkdown).digest('hex');
+
+  // Compute version: re-clean jobs carry parentDraftId → parent.version + 1
+  let version = 1;
+  const parentDraftId = job.parentDraftId ?? null;
+  if (parentDraftId) {
+    const parent = knowledgeRepo.getDraft(parentDraftId);
+    if (parent) version = parent.version + 1;
+  }
 
   knowledgeRepo.createDraft({
     jobId: job.id,
@@ -172,10 +186,23 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
     reviewNotes: null,
     reviewedBy: null,
     reviewedAt: null,
+    parentDraftId,
+    version,
   });
 
   // Step 12: Supersede old drafts for the same source
   knowledgeRepo.supersedeOldDrafts(job.sourceId, draftId);
+
+  // Step 13: Auto-run evaluation (heuristic + probe) so the review page shows
+  // a scorecard immediately. Non-fatal — evaluation failure must not block review.
+  try {
+    await evaluateDraft(draftId, { deep: false });
+  } catch (evalErr) {
+    console.warn(
+      `[Worker] Auto-eval failed for draft ${draftId}:`,
+      evalErr instanceof Error ? evalErr.message : evalErr,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -187,8 +214,9 @@ async function consumeCleaningQuery(
   sourceText: string,
   draftId: string,
   hardSignal: AbortSignal,
+  feedback?: string,
 ): Promise<string> {
-  const generator = createCleaningQuery(config, sourceText, draftId);
+  const generator = createCleaningQuery(config, sourceText, draftId, feedback);
 
   let assistantText = '';
   let lastEventTime = Date.now();

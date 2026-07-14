@@ -9,7 +9,7 @@ import { SourceUploadForm } from '@/components/knowledge/SourceUploadForm';
 import { JobStatusBadge, SourceStatusBadge } from '@/components/knowledge/JobStatusBadge';
 import { ItemTable } from '@/components/knowledge/ItemTable';
 import type { JobStatus } from '@/config/constants';
-import { JOB_STATUSES, KNOWLEDGE_CATEGORIES } from '@/config/constants';
+import { JOB_STATUSES, KNOWLEDGE_CATEGORIES, EVALUATION_TIERS, EVALUATION_STATUSES } from '@/config/constants';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,6 +48,18 @@ interface KnowledgeItem {
   season: string;
   wikiPath: string;
   publishedAt: string;
+  [key: string]: unknown;
+}
+
+interface Evaluation {
+  id: string;
+  draftId: string;
+  tier: string;
+  overallScore: number;
+  status: string;
+  deepEval: boolean;
+  createdAt: string;
+  updatedAt: string;
   [key: string]: unknown;
 }
 
@@ -119,6 +131,36 @@ function useKnowledgePageData() {
   const [itemsCursorStack, setItemsCursorStack] = useState<(string | null)[]>([]);
   const [itemFilters, setItemFilters] = useState({ category: '', status: '' });
 
+  // ── Evaluations (评估 / 反馈 tabs share this data source) ────────────────
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+  const [evaluationsLoading, setEvaluationsLoading] = useState(false);
+  const [evaluationsCursor, setEvaluationsCursor] = useState<string | null>(null);
+  const [evaluationsCursorStack, setEvaluationsCursorStack] = useState<(string | null)[]>([]);
+  const [evalTierFilter, setEvalTierFilter] = useState('');
+  const [evalStatusFilter, setEvalStatusFilter] = useState('');
+
+  const fetchEvaluations = useCallback(async (cursor?: string, tier?: string, status?: string) => {
+    setEvaluationsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '20' });
+      if (cursor) params.set('cursor', cursor);
+      if (tier) params.set('tier', tier);
+      if (status) params.set('status', status);
+      const res = await authFetch(`/api/knowledge/evaluations?${params.toString()}`);
+      if (!res.ok) throw new Error('加载评估失败');
+      const json = (await res.json()) as {
+        data: { evaluations: Evaluation[] };
+        meta?: { nextCursor: string | null };
+      };
+      setEvaluations(json.data.evaluations);
+      setEvaluationsCursor(json.meta?.nextCursor ?? null);
+    } catch {
+      // handled by toast in component
+    } finally {
+      setEvaluationsLoading(false);
+    }
+  }, []);
+
   const fetchItems = useCallback(async (cursor?: string, filters?: Record<string, string>) => {
     setItemsLoading(true);
     try {
@@ -147,8 +189,20 @@ function useKnowledgePageData() {
       if (activeTab === 'sources') fetchSources();
       else if (activeTab === 'jobs') fetchJobs(undefined, jobStatusFilter || undefined);
       else if (activeTab === 'items') fetchItems(undefined, itemFilters);
+      else if (activeTab === 'evaluations' || activeTab === 'feedback')
+        fetchEvaluations(undefined, evalTierFilter || undefined, evalStatusFilter || undefined);
     });
-  }, [activeTab, fetchSources, fetchJobs, fetchItems, jobStatusFilter, itemFilters]);
+  }, [
+    activeTab,
+    fetchSources,
+    fetchJobs,
+    fetchItems,
+    fetchEvaluations,
+    jobStatusFilter,
+    itemFilters,
+    evalTierFilter,
+    evalStatusFilter,
+  ]);
 
   return {
     activeTab, setActiveTab,
@@ -157,7 +211,10 @@ function useKnowledgePageData() {
     jobStatusFilter, setJobStatusFilter,
     items, itemsLoading, itemsCursor, itemsCursorStack, setItemsCursor, setItemsCursorStack,
     itemFilters, setItemFilters,
-    fetchSources, fetchJobs, fetchItems,
+    evaluations, evaluationsLoading, evaluationsCursor, evaluationsCursorStack,
+    setEvaluationsCursor, setEvaluationsCursorStack,
+    evalTierFilter, setEvalTierFilter, evalStatusFilter, setEvalStatusFilter,
+    fetchSources, fetchJobs, fetchItems, fetchEvaluations,
   };
 }
 
@@ -176,7 +233,10 @@ export default function KnowledgePage() {
     jobStatusFilter, setJobStatusFilter,
     items, itemsLoading, itemsCursor, itemsCursorStack, setItemsCursor, setItemsCursorStack,
     itemFilters, setItemFilters,
-    fetchSources, fetchJobs, fetchItems,
+    evaluations, evaluationsLoading, evaluationsCursor, evaluationsCursorStack,
+    setEvaluationsCursor, setEvaluationsCursorStack,
+    evalTierFilter, setEvalTierFilter, evalStatusFilter, setEvalStatusFilter,
+    fetchSources, fetchJobs, fetchItems, fetchEvaluations,
   } = useKnowledgePageData();
 
   // ── Job actions ─────────────────────────────────────────────────────────
@@ -413,6 +473,134 @@ export default function KnowledgePage() {
     },
   ];
 
+  const TIER_BADGE: Record<string, string> = {
+    A: 'bg-green-100 text-green-800',
+    B: 'bg-blue-100 text-blue-800',
+    C: 'bg-yellow-100 text-yellow-800',
+    D: 'bg-red-100 text-red-800',
+    pending: 'bg-gray-100 text-gray-600',
+  };
+
+  const evaluationFilterConfig = [
+    {
+      name: 'tier',
+      label: '等级',
+      type: 'select' as const,
+      options: EVALUATION_TIERS.map((t) => ({ value: t, label: t })),
+    },
+    {
+      name: 'status',
+      label: '状态',
+      type: 'select' as const,
+      options: EVALUATION_STATUSES.map((s) => ({ value: s, label: s })),
+    },
+  ];
+
+  const evaluationColumns = [
+    {
+      key: 'draftId',
+      header: '草稿',
+      render: (e: Evaluation) => (
+        <button
+          type="button"
+          onClick={() => router.push(`/knowledge/review/${e.draftId}`)}
+          className="font-mono text-xs text-blue-600 hover:underline focus:outline-none"
+        >
+          {e.draftId.slice(0, 8)}…
+        </button>
+      ),
+    },
+    {
+      key: 'tier',
+      header: '等级',
+      render: (e: Evaluation) => (
+        <span
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+            TIER_BADGE[e.tier] ?? TIER_BADGE.pending
+          }`}
+        >
+          {e.tier}
+        </span>
+      ),
+    },
+    {
+      key: 'overallScore',
+      header: '总分',
+      render: (e: Evaluation) => (
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 w-12 overflow-hidden rounded-full bg-gray-200">
+            <div
+              className={`h-full rounded-full ${
+                e.overallScore >= 85 ? 'bg-green-500' : e.overallScore >= 60 ? 'bg-yellow-500' : 'bg-red-500'
+              }`}
+              style={{ width: `${e.overallScore}%` }}
+            />
+          </div>
+          <span className="text-xs text-gray-600">{e.overallScore}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: '状态',
+      render: (e: Evaluation) => <span className="text-xs text-gray-600">{e.status}</span>,
+    },
+    {
+      key: 'deepEval',
+      header: '深度',
+      render: (e: Evaluation) => <span className="text-xs text-gray-500">{e.deepEval ? '是' : '否'}</span>,
+    },
+    {
+      key: 'updatedAt',
+      header: '更新时间',
+      render: (e: Evaluation) => (
+        <span className="text-xs text-gray-500">{new Date(e.updatedAt).toLocaleString()}</span>
+      ),
+    },
+  ];
+
+  // Shared table for the 评估 / 反馈 tabs (both list evaluations; clicking a
+  // row opens the review page where feedback + re-clean happen).
+  const renderEvaluationsTable = (emptyMessage: string) => (
+    <div className="space-y-6">
+      <FilterBar
+        filters={evaluationFilterConfig}
+        values={{ tier: evalTierFilter, status: evalStatusFilter }}
+        onChange={(name, value) => {
+          if (name === 'tier') {
+            setEvalTierFilter(value);
+            fetchEvaluations(undefined, value || undefined, evalStatusFilter || undefined);
+          } else if (name === 'status') {
+            setEvalStatusFilter(value);
+            fetchEvaluations(undefined, evalTierFilter || undefined, value || undefined);
+          }
+        }}
+      />
+      <DataTable<Evaluation>
+        columns={evaluationColumns}
+        data={evaluations}
+        loading={evaluationsLoading}
+        emptyMessage={emptyMessage}
+      />
+      <Pagination
+        nextCursor={evaluationsCursor}
+        hasPrev={evaluationsCursorStack.length > 0}
+        onPrev={() => {
+          const stack = [...evaluationsCursorStack];
+          stack.pop();
+          const prev = stack[stack.length - 1] ?? undefined;
+          setEvaluationsCursorStack(stack);
+          fetchEvaluations(prev, evalTierFilter || undefined, evalStatusFilter || undefined);
+        }}
+        onNext={(cursor) => {
+          setEvaluationsCursorStack([...evaluationsCursorStack, evaluationsCursor]);
+          setEvaluationsCursor(cursor);
+          fetchEvaluations(cursor, evalTierFilter || undefined, evalStatusFilter || undefined);
+        }}
+      />
+    </div>
+  );
+
   // ── Job filter config ───────────────────────────────────────────────────
   const jobFilterConfig = [
     {
@@ -454,6 +642,8 @@ export default function KnowledgePage() {
             { id: 'sources', label: '来源管理' },
             { id: 'jobs', label: '任务列表' },
             { id: 'items', label: '知识条目' },
+            { id: 'evaluations', label: '评估' },
+            { id: 'feedback', label: '反馈' },
           ]}
           activeTab={activeTab}
           onChange={setActiveTab}
@@ -598,6 +788,12 @@ export default function KnowledgePage() {
             />
           </div>
         )}
+
+        {/* ── Evaluations tab ─────────────────────────────────────────────── */}
+        {activeTab === 'evaluations' && renderEvaluationsTable('暂无评估')}
+
+        {/* ── Feedback tab ────────────────────────────────────────────────── */}
+        {activeTab === 'feedback' && renderEvaluationsTable('暂无待反馈草稿')}
       </div>
     </div>
   );

@@ -84,6 +84,10 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
   const wikiRoot = env.WIKI_ROOT;
   const { draftContent, draftId, jobId, reviewedBy } = input;
 
+  // TODO(eval): when publishDraft is wired as the real publish path, mirror the
+  // evaluation publish guard from service.approveDraft here (read
+  // getPublishGuardSettings() + getEvaluationByDraftId(draftId) and reject when
+  // overallScore < threshold). See @/modules/knowledge-evaluation/repository.
   // Step 1: CAS job pending_review -> publishing (short transaction)
   const updated = jobsRepo.updateJobStatus(jobId, 'pending_review', 'publishing');
   if (!updated) {

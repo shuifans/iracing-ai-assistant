@@ -30,6 +30,16 @@ export interface ChatMessage {
   sources?: MessageSourceData[];
   feedback?: { rating: string; reason?: string } | null;
   createdAt: string;
+  /** Client-side pipeline timing (populated from SSE events, not persisted) */
+  timing?: PipelineTimingDisplay;
+}
+
+export interface PipelineTimingDisplay {
+  agentFirstByteMs: number;
+  agentStreamMs: number;
+  totalMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 // ---------------------------------------------------------------------------

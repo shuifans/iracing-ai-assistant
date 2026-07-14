@@ -59,12 +59,19 @@ export const knowledgeJobs = sqliteTable(
     errorMessage: text('error_message'),
     startedAt: text('started_at'),
     finishedAt: text('finished_at'),
+    instructionsJson: text('instructions_json'),
+    parentDraftId: text('parent_draft_id'),
+    jobKind: text('job_kind', { enum: ['clean', 're_clean'] as const })
+      .notNull()
+      .default('clean'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
   (table) => [
     index('idx_knowledge_jobs_status_available').on(table.status, table.availableAt),
     index('idx_knowledge_jobs_source_id').on(table.sourceId),
+    index('idx_knowledge_jobs_kind').on(table.jobKind),
+    index('idx_knowledge_jobs_parent_draft').on(table.parentDraftId),
   ],
 );
 
@@ -89,10 +96,16 @@ export const knowledgeDrafts = sqliteTable(
     reviewNotes: text('review_notes'),
     reviewedBy: text('reviewed_by').references(() => users.id),
     reviewedAt: text('reviewed_at'),
+    parentDraftId: text('parent_draft_id'),
+    version: integer('version').notNull().default(1),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
-  (table) => [uniqueIndex('idx_knowledge_drafts_job_id').on(table.jobId)],
+  (table) => [
+    uniqueIndex('idx_knowledge_drafts_job_id').on(table.jobId),
+    index('idx_knowledge_drafts_parent_draft').on(table.parentDraftId),
+    index('idx_knowledge_drafts_version').on(table.version),
+  ],
 );
 
 export type KnowledgeDraft = typeof knowledgeDrafts.$inferSelect;

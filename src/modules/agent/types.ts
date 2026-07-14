@@ -49,8 +49,6 @@ export interface ChatQueryOptions {
   sessionId?: string;
   /** SDK session ID returned by a previous query — enables `resume` */
   qoderSessionId?: string;
-  /** Pre-trimmed conversation history injected into the system prompt */
-  historyContext?: string;
   /** Base64-encoded image attachments (multipart vision) */
   imageAttachments?: Array<{ base64: string; mediaType: string }>;
   /** Caller-owned AbortController for cancellation */

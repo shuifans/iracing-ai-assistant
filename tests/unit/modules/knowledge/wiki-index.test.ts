@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { rebuildIndex, writeIndex } from '@/modules/knowledge/wiki-index';
+import { rebuildIndex, writeIndex, collectIndexEntries } from '@/modules/knowledge/wiki-index';
 import * as fs from 'fs';
 
 vi.mock('fs', () => ({
@@ -246,6 +246,72 @@ describe('rebuildIndex', () => {
     const result = rebuildIndex('/wiki');
     expect(result).toContain('Guide');
     expect(result).not.toContain('2024S3');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectIndexEntries
+// ---------------------------------------------------------------------------
+
+describe('collectIndexEntries', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('返回解析后的条目（title/category/subcategory/wikiPath/tags）', () => {
+    mockFs({
+      '/wiki/track-technique/braking/late-braking-guide.md': makeFrontMatter(
+        'Late Braking Guide',
+        'track-technique',
+        'braking',
+        ['trail-braking', 'threshold'],
+      ),
+    });
+    const entries = collectIndexEntries('/wiki');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      title: 'Late Braking Guide',
+      category: 'track-technique',
+      subcategory: 'braking',
+      wikiPath: 'track-technique/braking/late-braking-guide.md',
+      tags: ['trail-braking', 'threshold'],
+    });
+  });
+
+  it('跳过 index.md 与无 Front Matter 的文件', () => {
+    mockFs({
+      '/wiki/index.md': '# Knowledge Index\n\nOld content',
+      '/wiki/README.md': '# README\n\nno front matter here',
+      '/wiki/track-technique/braking/guide.md': makeFrontMatter(
+        'Guide',
+        'track-technique',
+        'braking',
+        ['braking'],
+      ),
+    });
+    const entries = collectIndexEntries('/wiki');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.title).toBe('Guide');
+  });
+
+  it('season 字段 → 出现在条目里', () => {
+    mockFs({
+      '/wiki/track-technique/braking/guide.md': makeFrontMatter(
+        'Guide',
+        'track-technique',
+        'braking',
+        ['braking'],
+        '2024S3',
+      ),
+    });
+    const entries = collectIndexEntries('/wiki');
+    expect(entries[0]!.season).toBe('2024S3');
+  });
+
+  it('空目录 → 返回空数组', () => {
+    mockFs({});
+    const entries = collectIndexEntries('/wiki');
+    expect(entries).toEqual([]);
   });
 });
 

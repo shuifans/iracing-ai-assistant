@@ -27,6 +27,10 @@ export const AUDIT_ACTIONS = [
   'knowledge.archived',
   'knowledge.restored',
   'knowledge.git_retry',
+  'knowledge.eval.run',
+  'knowledge.eval.deep',
+  'knowledge.feedback',
+  'knowledge.reclean',
   // 系统
   'rate_limit.updated',
   'settings.updated',

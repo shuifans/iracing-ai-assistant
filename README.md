@@ -17,7 +17,7 @@ iRacing AI 助手整合官方文档、权威社区、专业教程等知识源，
 - **追问引导** — 问题过于宽泛时主动追问，获取赛道/车辆/天气等具体条件
 - **幻觉控制** — 知识库中找不到答案时坦诚告知，引导至社区专家
 - **图片理解** — 支持上传调校截图，Agent 具备视觉理解能力
-- **知识管理** — 支持上传文件/URL → 异步清洗 → 人工审核 → 自动发布到 Wiki
+- **知识管理** — 支持上传文件/URL → 异步清洗 → **知识评估（启发式+检索探针评分卡）** → 人工审核+反馈 → 带反馈重洗 → 自动发布到 Wiki
 - **管理后台** — 用户审批、会话质检、使用统计、限流配置和审计日志
 
 ### 目标用户
@@ -47,7 +47,8 @@ PM2 Process Manager (shserver, Ubuntu 24.04)
    ├── iracing-ai-worker (知识清洗 Worker, 256M limit)
    │   ├── SQLite Job Leasing
    │   ├── File & URL Extraction
-   │   ├── Qoder Knowledge Cleaning
+   │   ├── Qoder Knowledge Cleaning (支持带反馈重洗)
+   │   ├── Knowledge Evaluation (启发式+检索探针，清洗后自动评分)
    │   └── Draft Generation / Publish
    ├── SQLite (/srv/iracing-ai-assistant/data/db/app.sqlite)
    ├── Uploads (/srv/iracing-ai-assistant/data/uploads)
@@ -77,7 +78,7 @@ PM2 Process Manager (shserver, Ubuntu 24.04)
 主 Agent（对话管理 + 回答生成）
 ├── wiki-search Agent   → Glob/Grep/Read 本地知识检索
 ├── web-research Agent  → WebSearch/WebFetch 在线权威站点补充
-└── knowledge-cleaner   → 原始文本 → 候选 Markdown（离线 Worker）
+└── knowledge-cleaner   → 原始文本 → 候选 Markdown（离线 Worker，可带管理员反馈重洗）
 ```
 
 ---
@@ -137,6 +138,7 @@ src/
 │   ├── chat/               # 聊天与 SSE
 │   ├── agent/              # Qoder Agent 集成
 │   ├── knowledge/          # 知识处理与发布
+│   ├── knowledge-evaluation/ # 知识评估（启发式+检索探针+反馈→重洗回路）
 │   ├── jobs/               # 异步任务调度
 │   ├── analytics/          # 使用统计
 │   └── audit/              # 审计日志
@@ -144,7 +146,7 @@ src/
 ├── db/                     # 数据库 schema 与迁移
 ├── config/                 # 环境变量与常量
 └── lib/                    # 公共工具
-worker/                     # 离线知识清洗 Worker
+worker/                     # 离线知识清洗 Worker（清洗后自动评估）
 tests/                      # 单元 / 集成 / 契约 / E2E 测试
 config/nginx/                # Nginx 站点配置
 scripts/                    # 运维脚本
@@ -155,7 +157,8 @@ scripts/                    # 运维脚本
 ├── seed-wiki.ts          # 知识库种子清洗（LLM API 优先，Qoder SDK 兜底）
 ├── validate-wiki.ts      # Wiki 文件 Front Matter 验证
 ├── rebuild-index.ts      # 重建 index.md 索引
-└── test-model.ts         # LLM 模型可用性测试
+├── test-model.ts         # LLM 模型可用性测试
+└── smoke-eval.ts         # 知识评估仓库层端到端 smoke（真实 DB）
 ```
 
 ---
@@ -211,6 +214,7 @@ npm run dev
 | `npx tsx scripts/validate-wiki.ts`           | 验证所有 Wiki 文件格式         |
 | `npx tsx scripts/rebuild-index.ts`           | 重建 index.md                  |
 | `npx tsx scripts/test-model.ts`              | 测试 LLM 模型连通性            |
+| `npx tsx scripts/smoke-eval.ts`               | 知识评估仓库层端到端 smoke     |
 
 ---
 
@@ -253,6 +257,7 @@ npm run dev
 - [x] 聊天系统（多轮对话、SSE 流式输出、停止/重试、图片上传）
 - [x] Qoder Agent SDK 集成（wiki-search / web-research / knowledge-cleaner）
 - [x] 知识管理（文件/URL 上传 → 异步清洗 → 审核 → 发布 → Git 版本化）
+- [x] 知识评估与反馈回路（9 维评分卡：Front Matter/长度/标签/查重/时效/可检索性；管理员反馈 → 带反馈重洗 → 版本链；可选发布门禁）
 - [x] 管理后台（用户管理、会话质检、统计、限流、审计日志）
 - [x] 离线 Worker（知识清洗任务调度、租约、重试）
 - [x] PM2 部署配置（ecosystem.config.cjs、Nginx）

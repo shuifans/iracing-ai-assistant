@@ -89,6 +89,46 @@ describe('jobs/repository', () => {
       expect(job.errorMessage).toBeNull();
       expect(job.startedAt).toBeNull();
       expect(job.finishedAt).toBeNull();
+      // Plain cleaning job: feedback/version fields default
+      expect(job.instructionsJson).toBeNull();
+      expect(job.parentDraftId).toBeNull();
+      expect(job.jobKind).toBe('clean');
+    });
+  });
+
+  // ─── enqueueJobWithInstructions ───────────────────────────────────────────
+
+  describe('enqueueJobWithInstructions', () => {
+    it('inserts a re-clean job carrying feedback + parent + kind', async () => {
+      const { enqueueJobWithInstructions } = await import('@/modules/jobs/repository');
+      const job = enqueueJobWithInstructions('source-001', {
+        instructionsJson: '{"improvementInstructions":{"add":"examples"}}',
+        parentDraftId: 'draft-001',
+        kind: 're_clean',
+      });
+
+      expect(mockInsert).toHaveBeenCalled();
+      expect(mockValues).toHaveBeenCalled();
+      expect(job.sourceId).toBe('source-001');
+      expect(job.status).toBe('queued');
+      expect(job.instructionsJson).toBe('{"improvementInstructions":{"add":"examples"}}');
+      expect(job.parentDraftId).toBe('draft-001');
+      expect(job.jobKind).toBe('re_clean');
+
+      // The inserted record carries the feedback payload
+      const inserted = mockValues.mock.calls[0]![0];
+      expect(inserted.instructionsJson).toBe('{"improvementInstructions":{"add":"examples"}}');
+      expect(inserted.parentDraftId).toBe('draft-001');
+      expect(inserted.jobKind).toBe('re_clean');
+    });
+
+    it('defaults kind to clean and nulls when opts empty', async () => {
+      const { enqueueJobWithInstructions } = await import('@/modules/jobs/repository');
+      const job = enqueueJobWithInstructions('source-001', {});
+
+      expect(job.instructionsJson).toBeNull();
+      expect(job.parentDraftId).toBeNull();
+      expect(job.jobKind).toBe('clean');
     });
   });
 

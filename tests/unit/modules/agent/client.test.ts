@@ -239,4 +239,29 @@ describe('createCleaningQuery', () => {
     expect(cleaner.disallowedTools).toContain('WebSearch');
     expect(cleaner.disallowedTools).toContain('WebFetch');
   });
+
+  it('omits the reviewer-feedback block when no feedback is given', () => {
+    createCleaningQuery(baseConfig, sourceText, draftId);
+    const callArgs = lastCallArgs();
+    expect(callArgs.prompt).not.toContain('Reviewer Feedback');
+    expect(callArgs.prompt).toContain(sourceText);
+  });
+
+  it('appends reviewer feedback to the prompt when provided', () => {
+    const feedback =
+      '{"improvementInstructions":{"add":"telemetry examples"},"comments":"too verbose"}';
+    createCleaningQuery(baseConfig, sourceText, draftId, feedback);
+    const callArgs = lastCallArgs();
+    expect(callArgs.prompt).toContain('Reviewer Feedback');
+    expect(callArgs.prompt).toContain(feedback);
+    // Original content still present
+    expect(callArgs.prompt).toContain(sourceText);
+    expect(callArgs.prompt).toContain(draftId);
+  });
+
+  it('ignores a blank/whitespace feedback string', () => {
+    createCleaningQuery(baseConfig, sourceText, draftId, '   ');
+    const callArgs = lastCallArgs();
+    expect(callArgs.prompt).not.toContain('Reviewer Feedback');
+  });
 });

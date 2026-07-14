@@ -7,6 +7,7 @@ vi.mock('@/modules/knowledge/repository', () => ({
   listSources: vi.fn(),
   findDuplicateBySha256: vi.fn(),
   getDraft: vi.fn(),
+  getDraftByJobId: vi.fn(),
   updateDraft: vi.fn(),
   supersedeOldDrafts: vi.fn(),
   createItem: vi.fn(),
@@ -25,6 +26,11 @@ vi.mock('@/modules/jobs/service', () => ({
   submitJob: vi.fn(),
   getJobStatus: vi.fn(),
   listJobs: vi.fn(),
+}));
+
+vi.mock('@/modules/knowledge-evaluation/repository', () => ({
+  getPublishGuardSettings: vi.fn().mockReturnValue({ enabled: false, minScore: 60 }),
+  getEvaluationByDraftId: vi.fn(),
 }));
 
 vi.mock('@/modules/knowledge/extractors/url', () => ({
@@ -87,6 +93,10 @@ import {
   archiveItem,
   restoreItem,
 } from '@/modules/knowledge/service';
+import {
+  getPublishGuardSettings,
+  getEvaluationByDraftId,
+} from '@/modules/knowledge-evaluation/repository';
 
 const mockCreateSource = vi.mocked(knowledgeRepo.createSource);
 const mockGetSource = vi.mocked(knowledgeRepo.getSource);
@@ -100,6 +110,8 @@ const mockArchiveItem = vi.mocked(knowledgeRepo.archiveItem);
 const mockRestoreItem = vi.mocked(knowledgeRepo.restoreItem);
 const mockGetJob = vi.mocked(jobsRepo.getJob);
 const mockUpdateJobStatus = vi.mocked(jobsRepo.updateJobStatus);
+const mockGetPublishGuardSettings = vi.mocked(getPublishGuardSettings);
+const mockGetEvaluationByDraftId = vi.mocked(getEvaluationByDraftId);
 const mockSubmitJob = vi.mocked(jobsService.submitJob);
 const mockFetchUrl = vi.mocked(fetchUrl);
 const mockParseFrontMatter = vi.mocked(parseFrontMatter);
@@ -132,6 +144,8 @@ function makeMockDraft(overrides?: Partial<any>) {
     reviewNotes: null,
     reviewedBy: null,
     reviewedAt: null,
+    parentDraftId: null,
+    version: 1,
     createdAt: '2026-07-12T00:00:00.000Z',
     updatedAt: '2026-07-12T00:00:00.000Z',
     ...overrides,
@@ -172,6 +186,9 @@ function makeMockJob(overrides?: Partial<any>) {
     errorMessage: null,
     startedAt: null,
     finishedAt: null,
+    instructionsJson: null,
+    parentDraftId: null,
+    jobKind: 'clean' as const,
     createdAt: '2026-07-12T00:00:00.000Z',
     updatedAt: '2026-07-12T00:00:00.000Z',
     ...overrides,
@@ -442,6 +459,9 @@ describe('approveDraft', () => {
     mockUpdateJobStatus.mockReturnValue(true);
     mockGenerateWikiPath.mockReturnValue('track-technique/braking/test.md');
     mockCreateItem.mockReturnValue(makeMockItem());
+    // Publish guard off by default; guard tests override per-test.
+    mockGetPublishGuardSettings.mockReturnValue({ enabled: false, minScore: 60 });
+    mockGetEvaluationByDraftId.mockReturnValue(null);
   });
 
   it('should publish pending_review draft successfully', async () => {
@@ -479,6 +499,45 @@ describe('approveDraft', () => {
     await approveDraft('draft-001', 'user-001', 'key');
 
     expect(mockSupersedeOldDrafts).toHaveBeenCalledWith('source-001', 'draft-001');
+  });
+
+  // ─── Publish guard ───────────────────────────────────────────────────────
+
+  it('should throw INVALID_STATE when guard enabled and score below threshold', async () => {
+    mockGetPublishGuardSettings.mockReturnValue({ enabled: true, minScore: 80 });
+    mockGetEvaluationByDraftId.mockReturnValue({
+      status: 'heuristic_done',
+      overallScore: 50,
+    } as any);
+
+    await expect(approveDraft('draft-001', 'user-001', 'key')).rejects.toThrow(
+      '评估未通过发布门禁',
+    );
+    expect(mockCreateItem).not.toHaveBeenCalled();
+  });
+
+  it('should allow publish when guard enabled and score meets threshold', async () => {
+    mockGetPublishGuardSettings.mockReturnValue({ enabled: true, minScore: 60 });
+    mockGetEvaluationByDraftId.mockReturnValue({
+      status: 'heuristic_done',
+      overallScore: 85,
+    } as any);
+
+    const result = await approveDraft('draft-001', 'user-001', 'key');
+    expect(result.itemId).toBe('item-001');
+    expect(mockCreateItem).toHaveBeenCalled();
+  });
+
+  it('should block publish when guard enabled but evaluation failed', async () => {
+    mockGetPublishGuardSettings.mockReturnValue({ enabled: true, minScore: 60 });
+    mockGetEvaluationByDraftId.mockReturnValue({
+      status: 'failed',
+      overallScore: 0,
+    } as any);
+
+    await expect(approveDraft('draft-001', 'user-001', 'key')).rejects.toThrow(
+      '评估未通过发布门禁',
+    );
   });
 });
 

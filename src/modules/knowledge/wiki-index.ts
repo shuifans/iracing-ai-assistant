@@ -141,9 +141,13 @@ function renderIndex(entries: IndexEntry[]): string {
 
 /**
  * Scan the wiki directory, collect all `.md` files (excluding `index.md`),
- * parse their Front Matter, and generate a deterministic `index.md` string.
+ * parse their Front Matter, and return the entry list (unsorted).
+ *
+ * Shared by `rebuildIndex` (for index.md generation) and the evaluation
+ * dedup / retrieval-probe layers (which need the in-memory entry list
+ * without re-walking the wiki).
  */
-export function rebuildIndex(wikiRoot: string): string {
+export function collectIndexEntries(wikiRoot: string): IndexEntry[] {
   const normalizedRoot = wikiRoot.replace(/\\/g, '/');
   const allFiles = collectMdFiles(normalizedRoot);
 
@@ -159,7 +163,14 @@ export function rebuildIndex(wikiRoot: string): string {
     const entry = tryParseEntry(file, normalizedRoot);
     if (entry) entries.push(entry);
   }
+  return entries;
+}
 
+/**
+ * Scan the wiki directory and generate a deterministic `index.md` string.
+ */
+export function rebuildIndex(wikiRoot: string): string {
+  const entries = collectIndexEntries(wikiRoot);
   const sorted = sortEntries(entries);
   return renderIndex(sorted);
 }

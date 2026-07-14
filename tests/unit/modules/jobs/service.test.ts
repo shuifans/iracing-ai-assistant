@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock dependencies before importing service
 vi.mock('@/modules/jobs/repository', () => ({
   enqueueJob: vi.fn(),
+  enqueueJobWithInstructions: vi.fn(),
   getJob: vi.fn(),
   listJobs: vi.fn(),
   claimJob: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('@/modules/jobs/repository', () => ({
 // Import after mocks
 import {
   enqueueJob,
+  enqueueJobWithInstructions,
   getJob,
   listJobs as repoListJobs,
   claimJob,
@@ -31,6 +33,7 @@ import {
 import {
   canTransition,
   submitJob,
+  submitJobWithInstructions,
   getJobStatus,
   retryFailedJob,
   cancelQueuedJob,
@@ -45,6 +48,7 @@ import {
 import { AppError } from '@/lib/errors';
 
 const mockEnqueueJob = vi.mocked(enqueueJob);
+const mockEnqueueJobWithInstructions = vi.mocked(enqueueJobWithInstructions);
 const mockGetJob = vi.mocked(getJob);
 const mockRepoListJobs = vi.mocked(repoListJobs);
 const mockClaimJob = vi.mocked(claimJob);
@@ -75,6 +79,9 @@ function makeMockJob(overrides: Record<string, any> = {}) {
     errorMessage: null,
     startedAt: null,
     finishedAt: null,
+    instructionsJson: null,
+    parentDraftId: null,
+    jobKind: 'clean' as const,
     createdAt: '2026-07-12T00:00:00.000Z',
     updatedAt: '2026-07-12T00:00:00.000Z',
     ...overrides,
@@ -137,6 +144,25 @@ describe('jobs/service', () => {
 
       expect(mockEnqueueJob).toHaveBeenCalledWith('source-001');
       expect(result).toEqual({ jobId: 'new-job-001' });
+    });
+  });
+
+  // ─── submitJobWithInstructions ───────────────────────────────────────────
+
+  describe('submitJobWithInstructions', () => {
+    it('calls repository.enqueueJobWithInstructions with feedback opts and returns jobId', async () => {
+      const mockJob = makeMockJob({ id: 'reclean-job-001', jobKind: 're_clean' });
+      mockEnqueueJobWithInstructions.mockReturnValue(mockJob);
+
+      const opts = {
+        instructionsJson: '{"comments":"too verbose"}',
+        parentDraftId: 'draft-001',
+        kind: 're_clean' as const,
+      };
+      const result = await submitJobWithInstructions('source-001', opts);
+
+      expect(mockEnqueueJobWithInstructions).toHaveBeenCalledWith('source-001', opts);
+      expect(result).toEqual({ jobId: 'reclean-job-001' });
     });
   });
 

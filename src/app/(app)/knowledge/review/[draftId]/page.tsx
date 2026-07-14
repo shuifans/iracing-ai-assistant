@@ -5,6 +5,9 @@ import { useParams, useRouter } from 'next/navigation';
 import { authFetch } from '@/lib/auth-client';
 import { Toast } from '@/components/common';
 import { DraftReviewer } from '@/components/knowledge/DraftReviewer';
+import { EvaluationScorecard } from '@/components/knowledge/EvaluationScorecard';
+import { FeedbackForm } from '@/components/knowledge/FeedbackForm';
+import { ReCleanButton } from '@/components/knowledge/ReCleanButton';
 
 interface DraftDetail {
   draft: {
@@ -118,17 +121,26 @@ export default function ReviewPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-6">
-        <DraftReviewer
-          draft={data.draft}
-          source={data.source}
-          extractedText={data.extractedText}
-          renderedMarkdown={data.renderedMarkdown}
-          onSuccess={() => {
-            setToast({ message: '操作成功', type: 'success' });
-            fetchDraft();
-          }}
-          onError={(msg) => setToast({ message: msg, type: 'error' })}
-        />
+        <div className="space-y-6">
+          {data.draft.status === 'pending_review' && (
+            <>
+              <EvaluationScorecard draftId={data.draft.id} onRefresh={fetchDraft} />
+              <FeedbackForm draftId={data.draft.id} onSubmitted={fetchDraft} />
+              <ReCleanButton draftId={data.draft.id} onRefresh={fetchDraft} />
+            </>
+          )}
+          <DraftReviewer
+            draft={data.draft}
+            source={data.source}
+            extractedText={data.extractedText}
+            renderedMarkdown={data.renderedMarkdown}
+            onSuccess={() => {
+              setToast({ message: '操作成功', type: 'success' });
+              fetchDraft();
+            }}
+            onError={(msg) => setToast({ message: msg, type: 'error' })}
+          />
+        </div>
       </div>
     </div>
   );

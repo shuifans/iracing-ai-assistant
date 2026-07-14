@@ -59,6 +59,38 @@ export type KnowledgeItemStatus = (typeof KNOWLEDGE_ITEM_STATUSES)[number];
 export const WIKI_SYNC_STATUSES = ['committed', 'push_pending', 'synced', 'push_failed'] as const;
 export type WikiSyncStatus = (typeof WIKI_SYNC_STATUSES)[number];
 
+// 知识评估等级（A≥85 / B70-84 / C60-69 / D<60；pending=未评估）
+export const EVALUATION_TIERS = ['A', 'B', 'C', 'D', 'pending'] as const;
+export type EvaluationTier = (typeof EVALUATION_TIERS)[number];
+
+// 知识评估状态
+export const EVALUATION_STATUSES = [
+  'pending',
+  'heuristic_done',
+  'deep_running',
+  'complete',
+  'failed',
+] as const;
+export type EvaluationStatus = (typeof EVALUATION_STATUSES)[number];
+
+// 评估维度所属层（heuristic=启发式 / probe=检索探针 / llm=LLM 评审）
+export const DIMENSION_TIERS = ['heuristic', 'probe', 'llm'] as const;
+export type DimensionTier = (typeof DIMENSION_TIERS)[number];
+
+// 评估维度键（与 evaluation_dimensions.dimension_key 对应）
+export const EVALUATION_DIMENSION_KEYS = [
+  'front_matter_validity',
+  'content_length',
+  'tag_category_sanity',
+  'dedup_overlap',
+  'freshness',
+  'retrievability',
+  'accuracy',
+  'completeness',
+  'clarity',
+] as const;
+export type EvalDimensionKey = (typeof EVALUATION_DIMENSION_KEYS)[number];
+
 // 分类与子分类（SPEC 13.5）
 export const KNOWLEDGE_CATEGORIES = {
   'track-technique': ['driving-line', 'braking', 'tire-management', 'suspension'],
@@ -74,6 +106,13 @@ export type RateLimitScope = (typeof RATE_LIMIT_SCOPES)[number];
 // 反馈评分
 export const FEEDBACK_RATINGS = ['up', 'down'] as const;
 export type FeedbackRating = (typeof FEEDBACK_RATINGS)[number];
+
+// 对话答案后端选择（SPEC §11.1 — 多轮对话生成方案开关）
+// - 'llm-direct'：BM25 本地检索 + OpenAI 兼容 LLM 直调（默认，最快，当前 LongCat-2.0）
+// - 'qoder-sdk' ：Qoder Agent SDK + Qwen3.7-Plus 全量 Agent 循环（wiki-search + web-research 子 Agent）
+// 经 `CHAT_ANSWER_BACKEND` 环境变量切换；默认 'llm-direct'。
+export const CHAT_ANSWER_BACKENDS = ['llm-direct', 'qoder-sdk'] as const;
+export type ChatAnswerBackend = (typeof CHAT_ANSWER_BACKENDS)[number];
 
 // 业务错误码（SPEC 14.6 完整覆盖 — 22 个）
 export const ERROR_CODES = {

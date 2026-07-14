@@ -27,8 +27,8 @@ describe('CHAT_SYSTEM_PROMPT', () => {
     expect(CHAT_SYSTEM_PROMPT).toMatch(/injection|override|ignore/i);
   });
 
-  it('has a HISTORY_CONTEXT placeholder for trimmed history', () => {
-    expect(CHAT_SYSTEM_PROMPT).toContain('{{HISTORY_CONTEXT}}');
+  it('does not include HISTORY_CONTEXT placeholder (SDK resume handles context)', () => {
+    expect(CHAT_SYSTEM_PROMPT).not.toContain('{{HISTORY_CONTEXT}}');
   });
 });
 

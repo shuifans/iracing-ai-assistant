@@ -17,6 +17,12 @@ const envSchema = z.object({
   QODER_MODEL: z.string().optional(),
   QODER_CHAT_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   QODER_CLEAN_TIMEOUT_MS: z.coerce.number().int().positive().default(900000),
+  // 对话答案后端开关（llm-direct=BM25+OpenAI 兼容直调[默认] | qoder-sdk=Qoder SDK 全量循环）
+  CHAT_ANSWER_BACKEND: z.enum(['llm-direct', 'qoder-sdk']).default('llm-direct'),
+  // 对话 LLM 直调端点（OpenAI 兼容）。留空则回退到 LONGCAT_* 别名（与知识清洗共用配置）。
+  LLM_API_BASE_URL: z.string().optional(),
+  LLM_API_KEY: z.string().optional(),
+  LLM_MODEL: z.string().default('LongCat-2.0'),
   IQS_API_BASE_URL: z.string().optional(),
   IQS_API_KEY: z.string().optional(),
   KNOWLEDGE_WORKER_CONCURRENCY: z.coerce.number().int().positive().default(1),

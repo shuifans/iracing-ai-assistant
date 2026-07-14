@@ -8,6 +8,7 @@ import type { SDKMessage } from '@qoder-ai/qoder-agent-sdk';
 
 vi.mock('@/modules/knowledge/repository', () => ({
   getSource: vi.fn(),
+  getDraft: vi.fn(),
   createDraft: vi.fn(),
   supersedeOldDrafts: vi.fn(),
   updateDraft: vi.fn(),
@@ -41,6 +42,10 @@ vi.mock('@/modules/agent/client', () => ({
   createCleaningQuery: vi.fn(),
 }));
 
+vi.mock('@/modules/knowledge-evaluation/service', () => ({
+  evaluateDraft: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('@/config/env', () => ({
   env: {
     DATA_ROOT: '/data',
@@ -54,7 +59,7 @@ vi.mock('fs', () => ({
   mkdirSync: vi.fn(),
   writeFileSync: vi.fn(),
   readFileSync: vi.fn().mockReturnValue(Buffer.from('file content')),
-  existsSync: vi.fn().mockReturnValue(true),
+  existsSync: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock('crypto', () => ({
@@ -80,11 +85,13 @@ import {
   generateWikiPath,
 } from '@/modules/knowledge/front-matter';
 import { createCleaningQuery } from '@/modules/agent/client';
+import { evaluateDraft } from '@/modules/knowledge-evaluation/service';
 import * as fs from 'fs';
 
 import { processKnowledgeJob } from '../../../../worker/processors/knowledge';
 
 const mockGetSource = vi.mocked(knowledgeRepo.getSource);
+const mockGetDraft = vi.mocked(knowledgeRepo.getDraft);
 const mockCreateDraft = vi.mocked(knowledgeRepo.createDraft);
 const mockSupersedeOldDrafts = vi.mocked(knowledgeRepo.supersedeOldDrafts);
 const mockUpdateJobStatus = vi.mocked(jobsRepo.updateJobStatus);
@@ -97,8 +104,10 @@ const mockParseFrontMatter = vi.mocked(parseFrontMatter);
 const mockValidateFrontMatter = vi.mocked(validateFrontMatter);
 const mockGenerateWikiPath = vi.mocked(generateWikiPath);
 const mockCreateCleaningQuery = vi.mocked(createCleaningQuery);
+const mockEvaluateDraft = vi.mocked(evaluateDraft);
 const mockMkdirSync = vi.mocked(fs.mkdirSync);
 const mockWriteFileSync = vi.mocked(fs.writeFileSync);
+const mockExistsSync = vi.mocked(fs.existsSync);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -224,6 +233,8 @@ describe('processKnowledgeJob', () => {
     mockUpdateJobStatus.mockReturnValue(true);
     mockCreateDraft.mockReturnValue(makeDraft() as any);
     mockGenerateWikiPath.mockReturnValue('track-technique/driving-line/test-article.md');
+    // Default: no cached extraction → extract/fetch runs. Cache-hit tests override.
+    mockExistsSync.mockReturnValue(false);
   });
 
   // ─── Happy path: file extraction → cleaning → draft → pending_review ─────
@@ -262,6 +273,8 @@ describe('processKnowledgeJob', () => {
     expect(mockUpdateJobStatus).toHaveBeenCalledWith('job-1', 'cleaning', 'pending_review');
     // Verify supersede old drafts
     expect(mockSupersedeOldDrafts).toHaveBeenCalled();
+    // Verify auto-evaluation ran (heuristic + probe, non-deep)
+    expect(mockEvaluateDraft).toHaveBeenCalledWith(expect.any(String), { deep: false });
   });
 
   // ─── Happy path: URL source ─────────────────────────────────────────────
@@ -449,5 +462,81 @@ describe('processKnowledgeJob', () => {
     await processKnowledgeJob(job);
 
     expect(mockFailJob).toHaveBeenCalled();
+  });
+
+  // ─── Re-clean: feedback injection + versioning ──────────────────────────
+
+  it('passes job.instructionsJson to the cleaner and versions the draft', async () => {
+    mockGetSource.mockReturnValue(
+      makeSource({
+        inputType: 'url',
+        sourceUrl: 'https://example.com/x',
+        relativePath: null,
+      }) as any,
+    );
+    mockFetchUrl.mockResolvedValue({
+      text: 'fetched',
+      charCount: 7,
+      truncated: false,
+      warnings: [],
+    });
+    mockCreateCleaningQuery.mockReturnValue(
+      makeSdkGenerator(makeCleaningResultSdkMessages(VALID_MARKDOWN)),
+    );
+    mockParseFrontMatter.mockReturnValue({
+      frontMatter: VALID_FRONT_MATTER as any,
+      body: 'body',
+    });
+    mockValidateFrontMatter.mockReturnValue(VALID_FRONT_MATTER as any);
+    mockGetJob.mockReturnValue({ sourceId: 'source-1' } as any);
+    // Re-clean carries a parent draft (v3) → new draft should be v4
+    mockGetDraft.mockReturnValue({ version: 3 } as any);
+
+    const job = makeLeasedJob({
+      instructionsJson: '{"comments":["too verbose"]}',
+      parentDraftId: 'parent-draft-1',
+      jobKind: 're_clean',
+    });
+    await processKnowledgeJob(job);
+
+    // Feedback forwarded to the cleaner as the 4th arg
+    const cleanerCall = mockCreateCleaningQuery.mock.calls[0]!;
+    expect(cleanerCall[3]).toBe('{"comments":["too verbose"]}');
+    // Parent draft looked up for versioning
+    expect(mockGetDraft).toHaveBeenCalledWith('parent-draft-1');
+    // New draft created with parentDraftId + version 4
+    const draftCall = mockCreateDraft.mock.calls[0]![0];
+    expect(draftCall.parentDraftId).toBe('parent-draft-1');
+    expect(draftCall.version).toBe(4);
+  });
+
+  // ─── Re-clean reuses cached extracted text (no re-fetch) ────────────────
+
+  it('reuses cached extracted text and does not re-fetch the URL', async () => {
+    mockExistsSync.mockReturnValue(true); // extracted cache hit
+    mockGetSource.mockReturnValue(
+      makeSource({
+        inputType: 'url',
+        sourceUrl: 'https://example.com/x',
+        relativePath: null,
+      }) as any,
+    );
+    mockCreateCleaningQuery.mockReturnValue(
+      makeSdkGenerator(makeCleaningResultSdkMessages(VALID_MARKDOWN)),
+    );
+    mockParseFrontMatter.mockReturnValue({
+      frontMatter: VALID_FRONT_MATTER as any,
+      body: 'body',
+    });
+    mockValidateFrontMatter.mockReturnValue(VALID_FRONT_MATTER as any);
+    mockGetJob.mockReturnValue({ sourceId: 'source-1' } as any);
+
+    const job = makeLeasedJob();
+    await processKnowledgeJob(job);
+
+    // URL was NOT re-fetched (cache hit)
+    expect(mockFetchUrl).not.toHaveBeenCalled();
+    // Cleaner still ran (with cached text)
+    expect(mockCreateCleaningQuery).toHaveBeenCalled();
   });
 });

@@ -8,6 +8,28 @@
  */
 
 // ---------------------------------------------------------------------------
+// Pipeline timing breakdown
+// ---------------------------------------------------------------------------
+
+/** Stage-by-stage timing for a single chat message round. */
+export interface PipelineTiming {
+  /** Auth middleware (requireAuth + requireActiveUser) */
+  authMs: number;
+  /** Build agent context (loadMemory, loadProfile, wiki search) */
+  loadAgentContextMs: number;
+  /** Time from fetch() call to receiving HTTP response headers */
+  agentConnectMs: number;
+  /** Time from agentConnect start to first SSE event from agent */
+  agentFirstByteMs: number;
+  /** Duration of streaming the agent response body */
+  agentStreamMs: number;
+  /** Saving assistant message + sources to DB */
+  saveMessageMs: number;
+  /** Total wall-clock from request received to stream close */
+  totalMs: number;
+}
+
+// ---------------------------------------------------------------------------
 // Base
 // ---------------------------------------------------------------------------
 
@@ -45,17 +67,83 @@ export interface SSESourceEvent extends SSEEventBase {
   };
 }
 
+/** event: tool — emitted when the agent invokes a tool (tool_use block) */
+export interface SSEToolEvent extends SSEEventBase {
+  /** Matches the tool_use block id (e.g. toolu_xxx) */
+  toolUseId: string;
+  /** Tool name: Read/Glob/Grep/WebSearch/WebFetch/Agent */
+  name: string;
+  /** true when name === 'Agent' (sub-agent invocation) */
+  isSubAgent: boolean;
+  /** Sub-agent name when isSubAgent (wiki-search/web-research) */
+  agentName?: string;
+  /** Truncated input preview (≤200 chars) for observability */
+  inputPreview?: string;
+}
+
+/** event: status — live pipeline stage indicator for frontend display */
+export interface SSEStatusEvent extends SSEEventBase {
+  stage: 'cache_check' | 'local_search' | 'generating' | 'web_fallback' | 'complete';
+  message: string;
+  /** Optional 0..1 progress hint */
+  progress?: number;
+}
+
+/** Per-model usage breakdown (camelCase, from SDK ModelUsage) */
+export interface SSEModelUsage {
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  costUsd: number;
+  contextWindow: number;
+}
+
 /** event: usage — token / timing telemetry sent at end of stream */
 export interface SSEUsageEvent extends SSEEventBase {
   inputTokens: number;
   outputTokens: number;
   durationMs: number;
+  timing?: PipelineTiming;
+  // Cache telemetry (from result.usage, NonNullableUsage)
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheHit?: boolean;
+  contextUsageRatio?: number;
+  // Agent workflow telemetry (from result)
+  numTurns?: number;
+  durationApiMs?: number;
+  stopReason?: string | null;
+  serverToolUse?: {
+    webFetchRequests: number;
+    webSearchRequests: number;
+  };
+  /** Per-model breakdown keyed by model name */
+  modelUsage?: Record<string, SSEModelUsage>;
+}
+
+/** Agent workflow summary collected across the stream */
+export interface SSEWorkflow {
+  /** Distinct sub-agents invoked (wiki-search, web-research, ...) */
+  subAgents: string[];
+  /** Total tool_use blocks emitted */
+  toolCallCount: number;
+  /** Whether context compaction was triggered */
+  compacted: boolean;
+  /** Compaction metadata if triggered */
+  compactMetadata?: {
+    preTokens?: number;
+    postTokens?: number;
+    messagesSummarized?: number;
+  };
+  /** Number of API retries */
+  retries: number;
 }
 
 /** event: done — final status; grounding classification */
 export interface SSEDoneEvent extends SSEEventBase {
   status: 'complete' | 'interrupted';
   grounding: 'grounded' | 'inferred' | 'insufficient';
+  timing?: PipelineTiming;
+  workflow?: SSEWorkflow;
 }
 
 /** event: error — terminal error; no `done` is sent after this */
@@ -70,7 +158,14 @@ export interface SSEErrorEvent extends SSEEventBase {
 // ---------------------------------------------------------------------------
 
 export type SSEEvent =
-  SSEStartEvent | SSEDeltaEvent | SSESourceEvent | SSEUsageEvent | SSEDoneEvent | SSEErrorEvent;
+  | SSEStartEvent
+  | SSEDeltaEvent
+  | SSESourceEvent
+  | SSEToolEvent
+  | SSEStatusEvent
+  | SSEUsageEvent
+  | SSEDoneEvent
+  | SSEErrorEvent;
 
 // ---------------------------------------------------------------------------
 // Serialization

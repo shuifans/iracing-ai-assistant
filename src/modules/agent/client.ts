@@ -175,7 +175,7 @@ const postToolUseHook = async (input: any): Promise<any> => {
  */
 function createModelPolicy(model?: string): ModelPolicyProvider {
   return async (_ctx) => ({
-    model: model ?? 'qmodel',
+    model: model || 'Qwen3.7-Plus',
     parameters: { reasoningEffort: 'high' },
   });
 }
@@ -199,7 +199,7 @@ function chatAgentDefinitions(wikiRoot: string): Record<string, AgentDefinition>
       prompt: WEB_RESEARCH_PROMPT,
       tools: ['WebSearch', 'WebFetch'],
       disallowedTools: [...DISALLOWED_TOOLS, 'Agent'],
-      maxTurns: 5,
+      maxTurns: 2,
       effort: 'medium',
     },
   };
@@ -219,10 +219,7 @@ export function createChatQuery(
   config: AgentConfig,
   options: ChatQueryOptions,
 ): AsyncGenerator<SDKMessage> {
-  const systemPrompt = CHAT_SYSTEM_PROMPT.replace(
-    '{{HISTORY_CONTEXT}}',
-    options.historyContext ?? '',
-  );
+  const systemPrompt = CHAT_SYSTEM_PROMPT;
 
   const cliPath = resolveCliPath();
 
@@ -230,7 +227,7 @@ export function createChatQuery(
     auth: accessTokenFromEnv(),
     cwd: config.wikiRoot,
     model: config.model,
-    maxTurns: 15,
+    maxTurns: 6,
     ...(cliPath ? { pathToQoderCLIExecutable: cliPath } : {}),
     resolveModel: createModelPolicy(config.model),
     systemPrompt,
@@ -263,6 +260,7 @@ export function createCleaningQuery(
   config: AgentConfig,
   sourceText: string,
   draftId: string,
+  feedback?: string,
 ): AsyncGenerator<SDKMessage> {
   const agents: Record<string, AgentDefinition> = {
     'knowledge-cleaner': {
@@ -292,6 +290,12 @@ export function createCleaningQuery(
     },
   };
 
-  const prompt = `Clean the following raw text (draft ID: ${draftId}) into a well-structured Markdown document:\n\n${sourceText}`;
+  let prompt = `Clean the following raw text (draft ID: ${draftId}) into a well-structured Markdown document:\n\n${sourceText}`;
+  // Re-clean path: when reviewer feedback is present (from the evaluation
+  // feedback loop), append it so the knowledge-cleaner incorporates the
+  // requested adjustments into the new draft.
+  if (feedback && feedback.trim()) {
+    prompt += `\n\n## Reviewer Feedback (incorporate these requirements into the cleaned output)\n${feedback.trim()}`;
+  }
   return query({ prompt, options: queryOptions });
 }

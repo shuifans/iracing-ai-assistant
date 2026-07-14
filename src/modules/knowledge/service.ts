@@ -21,6 +21,7 @@ import { AppError } from '@/lib/errors';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
 import { env } from '@/config/env';
+import { getPublishGuardSettings, getEvaluationByDraftId } from '@/modules/knowledge-evaluation/repository';
 import { submitUrlSchema, ALLOWED_KNOWLEDGE_MIMES } from './schemas';
 import type {
   CursorPageParams,
@@ -265,7 +266,10 @@ export async function getItem(id: string): Promise<KnowledgeItem> {
  * Get a draft with its associated source and extracted text for review.
  */
 export async function getDraftWithDiff(draftId: string): Promise<DraftReview> {
-  const draft = knowledgeRepo.getDraft(draftId);
+  // Accept either a draft id or a job id — the review page is reached via
+  // /knowledge/review/{jobId}, so resolve the draft flexibly.
+  let draft = knowledgeRepo.getDraft(draftId);
+  if (!draft) draft = knowledgeRepo.getDraftByJobId(draftId);
   if (!draft) {
     throw new AppError('NOT_FOUND', `Draft ${draftId} not found`);
   }
@@ -372,6 +376,25 @@ export async function approveDraft(
       'INVALID_STATE',
       `Draft must be in pending_review status to be approved, got '${draft.status}'`,
     );
+  }
+
+  // Optional publish guard: when enabled in system_settings, require a passing
+  // evaluation before allowing publish. Off by default — evaluation is advisory.
+  const guard = getPublishGuardSettings();
+  if (guard.enabled) {
+    const evaluation = getEvaluationByDraftId(draftId);
+    const passed =
+      !!evaluation &&
+      (evaluation.status === 'heuristic_done' || evaluation.status === 'complete') &&
+      evaluation.overallScore >= guard.minScore;
+    if (!passed) {
+      throw new AppError(
+        'INVALID_STATE',
+        `评估未通过发布门禁（需 ≥${guard.minScore} 分且评估完成，当前 ${
+          evaluation ? `${evaluation.overallScore} 分 / ${evaluation.status}` : '未评估'
+        }）`,
+      );
+    }
   }
 
   // CAS: job pending_review → publishing

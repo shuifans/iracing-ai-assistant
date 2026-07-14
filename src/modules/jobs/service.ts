@@ -10,6 +10,7 @@
 import { AppError } from '@/lib/errors';
 import {
   enqueueJob,
+  enqueueJobWithInstructions,
   getJob,
   listJobs as repoListJobs,
   claimJob,
@@ -44,6 +45,23 @@ export function canTransition(from: string, to: string): boolean {
  */
 export async function submitJob(sourceId: string): Promise<{ jobId: string }> {
   const job = enqueueJob(sourceId);
+  return { jobId: job.id };
+}
+
+/**
+ * Submit a re-clean job carrying reviewer feedback (from the evaluation
+ * feedback loop). The instructions are forwarded to the knowledge-cleaner
+ * sub-agent; `parentDraftId` links the resulting draft to its predecessor.
+ */
+export async function submitJobWithInstructions(
+  sourceId: string,
+  opts: {
+    instructionsJson?: string | null;
+    parentDraftId?: string | null;
+    kind?: 'clean' | 're_clean';
+  },
+): Promise<{ jobId: string }> {
+  const job = enqueueJobWithInstructions(sourceId, opts);
   return { jobId: job.id };
 }
 

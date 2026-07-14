@@ -5,7 +5,18 @@ import { useParams, useRouter } from 'next/navigation';
 import { authFetch, getAccessToken } from '@/lib/auth-client';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { ChatInput } from '@/components/chat/ChatInput';
-import type { ChatMessage, MessageSourceData } from '@/modules/chat/types';
+import type { ChatMessage, MessageSourceData, PipelineTimingDisplay } from '@/modules/chat/types';
+
+interface PipelineTiming {
+  authMs: number;
+  loadContextMs: number;
+  loadAgentContextMs: number;
+  agentConnectMs: number;
+  agentFirstByteMs: number;
+  agentStreamMs: number;
+  saveMessageMs: number;
+  totalMs: number;
+}
 
 interface SSEEventBase {
   requestId: string;
@@ -37,6 +48,12 @@ interface SSESourceEvent extends SSEEventBase {
 interface SSEDoneEvent extends SSEEventBase {
   status: 'complete' | 'interrupted';
   grounding: 'grounded' | 'inferred' | 'insufficient';
+  timing?: PipelineTiming;
+}
+
+interface SSEStatusEvent extends SSEEventBase {
+  stage: 'cache_check' | 'local_search' | 'generating' | 'web_fallback' | 'complete';
+  message: string;
 }
 
 interface SSEErrorEvent extends SSEEventBase {
@@ -45,7 +62,13 @@ interface SSEErrorEvent extends SSEEventBase {
   retryable: boolean;
 }
 
-type SSEEvent = SSEStartEvent | SSEDeltaEvent | SSESourceEvent | SSEDoneEvent | SSEErrorEvent;
+type SSEEvent =
+  | SSEStartEvent
+  | SSEDeltaEvent
+  | SSESourceEvent
+  | SSEStatusEvent
+  | SSEDoneEvent
+  | SSEErrorEvent;
 
 export default function SessionPage() {
   const params = useParams<{ sessionId: string }>();
@@ -56,6 +79,7 @@ export default function SessionPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [statusStage, setStatusStage] = useState<{ stage: string; message: string } | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -116,6 +140,7 @@ export default function SessionPage() {
   async function sendMessage(content: string, attachmentIds: string[]) {
     if (isStreaming) return;
     setError(null);
+    setStatusStage(null);
 
     // 添加用户消息到列表
     const userMessage: ChatMessage = {
@@ -185,6 +210,7 @@ export default function SessionPage() {
       let assistantMessageId = '';
       let accumulatedText = '';
       const sources: MessageSourceData[] = [];
+      let capturedTiming: PipelineTimingDisplay | undefined;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -233,8 +259,21 @@ export default function SessionPage() {
                   wikiPath: sourceEvent.source.wikiPath,
                 };
                 sources.push(source);
+              } else if (currentEventType === 'status') {
+                const statusEvent = event as SSEStatusEvent;
+                setStatusStage({ stage: statusEvent.stage, message: statusEvent.message });
+                if (statusEvent.stage === 'complete') setStatusStage(null);
               } else if (currentEventType === 'done') {
                 const doneEvent = event as SSEDoneEvent;
+                setStatusStage(null);
+                // Capture timing from done event
+                if (doneEvent.timing) {
+                  capturedTiming = {
+                    agentFirstByteMs: doneEvent.timing.agentFirstByteMs,
+                    agentStreamMs: doneEvent.timing.agentStreamMs,
+                    totalMs: doneEvent.timing.totalMs,
+                  };
+                }
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === assistantMessageId
@@ -243,6 +282,7 @@ export default function SessionPage() {
                           status: doneEvent.status === 'complete' ? 'complete' : 'interrupted',
                           content: accumulatedText,
                           sources: sources.length > 0 ? sources : undefined,
+                          timing: capturedTiming,
                         }
                       : m,
                   ),
@@ -250,6 +290,7 @@ export default function SessionPage() {
               } else if (currentEventType === 'error') {
                 const errorEvent = event as SSEErrorEvent;
                 setError(errorEvent.message);
+                setStatusStage(null);
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === (assistantMessageId || assistantPlaceholder.id)
@@ -457,6 +498,17 @@ export default function SessionPage() {
           {messages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} />
           ))}
+
+          {/* 实时阶段状态条 (cache_check / local_search / generating / web_fallback) */}
+          {statusStage && isStreaming && (
+            <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+              <span>{statusStage.message}</span>
+              {statusStage.stage === 'web_fallback' && (
+                <span className="ml-1 text-amber-600">(联网检索,预计较久)</span>
+              )}
+            </div>
+          )}
 
           {/* 重试按钮 */}
           {lastFailedMessage && !isStreaming && (

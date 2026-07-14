@@ -20,7 +20,7 @@ for (const line of envContent.split('\n')) {
   if (!process.env[key]) process.env[key] = val;
 }
 
-const model = process.env.QODER_MODEL ?? 'qmodel';
+const model = process.env.QODER_MODEL ?? 'Qwen3.7-Plus';
 console.log(`[test] 测试模型: ${model}`);
 console.log(`[test] PAT: ${process.env.QODER_PERSONAL_ACCESS_TOKEN?.slice(0, 12)}...`);
 

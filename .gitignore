@@ -37,6 +37,7 @@ Thumbs.db
 
 # Debug
 npm-debug.log*
+*.log
 
 # SSL certificates
 ssl_cert/

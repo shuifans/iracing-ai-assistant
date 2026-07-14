@@ -127,6 +127,20 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     return message.content;
   }, [message.content, isAssistant]);
 
+  // Format timing for display
+  const formatMs = (ms: number | undefined): string => {
+    if (ms === undefined) return '-';
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  };
+
+  const timingColor = (ms: number | undefined, good: number, warn: number): string => {
+    if (ms === undefined) return 'text-gray-400';
+    if (ms <= good) return 'text-green-600';
+    if (ms <= warn) return 'text-yellow-600';
+    return 'text-red-600';
+  };
+
   return (
     <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
@@ -181,6 +195,40 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               messageId={message.id}
               initialRating={(message.feedback?.rating as 'up' | 'down' | null) ?? null}
             />
+          </div>
+        )}
+
+        {/* 性能计时信息（完整 assistant 消息） */}
+        {isAssistant && isComplete && message.timing && (
+          <div className="mt-2 border-t border-gray-100 pt-2">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500">首字节:</span>
+                <span className={`font-mono font-medium ${timingColor(message.timing.agentFirstByteMs, 5000, 15000)}`}>
+                  {formatMs(message.timing.agentFirstByteMs)}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500">流式传输:</span>
+                <span className={`font-mono font-medium ${timingColor(message.timing.agentStreamMs, 20000, 60000)}`}>
+                  {formatMs(message.timing.agentStreamMs)}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500">总计:</span>
+                <span className={`font-mono font-medium ${timingColor(message.timing.totalMs, 30000, 90000)}`}>
+                  {formatMs(message.timing.totalMs)}
+                </span>
+              </div>
+              {message.timing.inputTokens && message.timing.outputTokens && (
+                <div className="flex items-center gap-1">
+                  <span className="text-gray-500">Token:</span>
+                  <span className="font-mono font-medium text-gray-600">
+                    {message.timing.inputTokens.toLocaleString()} → {message.timing.outputTokens.toLocaleString()}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

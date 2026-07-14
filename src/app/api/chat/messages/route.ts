@@ -74,6 +74,8 @@ export async function POST(request: NextRequest): Promise<Response> {
  */
 function getEventType(event: SSEEvent): string {
   if ('seq' in event && 'text' in event) return 'delta';
+  if ('stage' in event) return 'status';
+  if ('toolUseId' in event) return 'tool';
   if ('source' in event) return 'source';
   if ('inputTokens' in event) return 'usage';
   if ('status' in event && 'grounding' in event) return 'done';

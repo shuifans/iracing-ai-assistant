@@ -24,9 +24,39 @@ const TERMINAL_STATUSES = ['published', 'rejected', 'cancelled'] as const;
 // ---------------------------------------------------------------------------
 
 /**
- * Enqueue a new knowledge processing job for a source.
+ * Enqueue a new knowledge processing job for a source (plain cleaning job).
  */
 export function enqueueJob(sourceId: string): KnowledgeJob {
+  return enqueueJobWith(sourceId, {});
+}
+
+/**
+ * Enqueue a knowledge processing job carrying reviewer feedback for a re-clean.
+ *
+ * Used by the evaluation feedback loop: `instructionsJson` is forwarded to the
+ * knowledge-cleaner sub-agent; `parentDraftId` links the new draft to its
+ * predecessor for version history; `kind: 're_clean'` distinguishes it from
+ * an initial clean.
+ */
+export function enqueueJobWithInstructions(
+  sourceId: string,
+  opts: {
+    instructionsJson?: string | null;
+    parentDraftId?: string | null;
+    kind?: 'clean' | 're_clean';
+  },
+): KnowledgeJob {
+  return enqueueJobWith(sourceId, opts);
+}
+
+function enqueueJobWith(
+  sourceId: string,
+  opts: {
+    instructionsJson?: string | null;
+    parentDraftId?: string | null;
+    kind?: 'clean' | 're_clean';
+  },
+): KnowledgeJob {
   const db = getDb();
   const now = utcNow();
   const id = generateId();
@@ -45,6 +75,9 @@ export function enqueueJob(sourceId: string): KnowledgeJob {
     errorMessage: null,
     startedAt: null,
     finishedAt: null,
+    instructionsJson: opts.instructionsJson ?? null,
+    parentDraftId: opts.parentDraftId ?? null,
+    jobKind: opts.kind ?? 'clean',
     createdAt: now,
     updatedAt: now,
   };
@@ -163,6 +196,9 @@ export function claimJob(workerId: string): ClaimResult {
       leaseOwner: workerId,
       leaseExpiresAt: expiresAt,
       attempt: candidate.attempt,
+      instructionsJson: candidate.instructionsJson,
+      parentDraftId: candidate.parentDraftId,
+      jobKind: candidate.jobKind,
     },
   };
 }

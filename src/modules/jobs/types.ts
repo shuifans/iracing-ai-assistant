@@ -21,6 +21,12 @@ export interface QueuedJob {
   maxAttempts: number;
   availableAt: string;
   createdAt: string;
+  /** Reviewer feedback forwarded to the knowledge-cleaner (re-clean jobs). */
+  instructionsJson?: string | null;
+  /** Predecessor draft for version history (re-clean jobs). */
+  parentDraftId?: string | null;
+  /** 'clean' for initial cleaning, 're_clean' for feedback-driven re-cleaning. */
+  jobKind?: 'clean' | 're_clean';
 }
 
 // ---------------------------------------------------------------------------
@@ -34,6 +40,12 @@ export interface LeasedJob {
   leaseOwner: string;
   leaseExpiresAt: string;
   attempt: number;
+  /** Reviewer feedback forwarded to the knowledge-cleaner (re-clean jobs). */
+  instructionsJson?: string | null;
+  /** Predecessor draft for version history (re-clean jobs). */
+  parentDraftId?: string | null;
+  /** 'clean' for initial cleaning, 're_clean' for feedback-driven re-cleaning. */
+  jobKind?: 'clean' | 're_clean';
 }
 
 // ---------------------------------------------------------------------------
