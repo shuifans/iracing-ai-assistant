@@ -277,6 +277,7 @@ npm run dev
 - [x] 认证系统（注册/审批/登录/JWT/Refresh Token 轮换）
 - [x] RBAC 三角色权限（user / knowledge_admin / admin）
 - [x] 聊天系统（多轮对话、SSE 流式输出、停止/重试、图片上传）
+- [x] 聊天气泡排版优化（AI/用户消息行高统一为 1.65 倍，段落/标题/列表间距收紧，单换行行高不再跳变）
 - [x] Qoder Agent SDK 集成（wiki-search / web-research / knowledge-cleaner）
 - [x] 知识管理（文件/URL 上传 → 异步清洗 → 审核 → 发布 → Git 版本化）
 - [x] 知识评估与反馈回路（9 维评分卡：Front Matter/长度/标签/查重/时效/可检索性；管理员反馈 → 带反馈重洗 → 版本链；可选发布门禁）

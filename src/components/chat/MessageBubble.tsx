@@ -39,9 +39,9 @@ function renderMarkdown(text: string): string {
   );
 
   // 标题 ### h3, ## h2, # h1
-  html = html.replace(/^### (.+)$/gm, '<h3 class="mt-3 mb-1.5 text-sm font-semibold">$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2 class="mt-3 mb-1.5 text-[15px] font-semibold">$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1 class="mt-3 mb-1.5 text-base font-semibold">$1</h1>');
+  html = html.replace(/^### (.+)$/gm, '<h3 class="mt-2.5 mb-1 text-sm font-semibold">$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2 class="mt-2.5 mb-1 text-[15px] font-semibold">$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1 class="mt-2.5 mb-1 text-base font-semibold">$1</h1>');
 
   // 粗体 **text** 和斜体 *text*
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -91,23 +91,23 @@ function renderMarkdown(text: string): string {
   // 无序列表 - item
   html = html.replace(/^[-*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>');
   // 连续 li 包裹在 ul
-  html = html.replace(/((?:<li[^>]*>.*?<\/li>\n?)+)/g, '<ul class="my-1.5 space-y-0.5">$1</ul>');
+  html = html.replace(/((?:<li[^>]*>.*?<\/li>\n?)+)/g, '<ul class="my-1 space-y-0.5">$1</ul>');
 
   // 有序列表 1. item
   html = html.replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal">$1</li>');
   html = html.replace(
     /((?:<li class="ml-4 list-decimal">.*?<\/li>\n?)+)/g,
-    '<ol class="my-1.5 space-y-0.5">$1</ol>',
+    '<ol class="my-1 space-y-0.5">$1</ol>',
   );
 
   // 段落换行（连续换行变段落分隔）
-  html = html.replace(/\n{2,}/g, '</p><p class="my-1.5">');
+  html = html.replace(/\n{2,}/g, '</p><p class="my-1">');
   html = html.replace(/\n/g, '<br/>');
 
   // 包裹在段落中（不包裹已有块级元素）
   const blockTags = /<(h[1-6]|ul|ol|pre|div|table|blockquote)/;
   if (!blockTags.test(html)) {
-    html = `<p class="my-1.5">${html}</p>`;
+    html = `<p class="my-1">${html}</p>`;
   }
 
   return html;
@@ -153,11 +153,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         {/* 消息内容 */}
         {isAssistant ? (
           <div
-            className="max-w-none overflow-x-auto break-words text-[14px] leading-6 tracking-normal text-gray-900 [&_br]:leading-5 [&_li]:pl-0.5 [&_li]:leading-6 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold"
+            className="max-w-none overflow-x-auto break-words text-[14px] leading-[1.65] tracking-normal text-gray-900 [&_li]:pl-0.5 [&_li]:leading-[1.65] [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold"
             dangerouslySetInnerHTML={{ __html: renderedContent }}
           />
         ) : (
-          <p className="whitespace-pre-wrap break-words text-[14px] leading-6 tracking-normal">{renderedContent}</p>
+          <p className="whitespace-pre-wrap break-words text-[14px] leading-[1.65] tracking-normal">{renderedContent}</p>
         )}
 
         {/* 流式指示器 */}
