@@ -17,14 +17,17 @@ import {
   accessTokenFromEnv,
   type Options,
   type SDKMessage,
+  type HookCallback,
+  type PostToolUseHookInput,
 } from '@qoder-ai/qoder-agent-sdk';
 import type { AgentDefinition } from '@qoder-ai/qoder-agent-sdk';
 import type { ModelPolicyProvider } from '@qoder-ai/qoder-agent-sdk';
-import type { ChatQueryOptions, AgentConfig } from './types';
+import { parseEvidenceEnvelope, type ChatQueryOptions, type AgentConfig } from './types';
 import {
   CHAT_SYSTEM_PROMPT,
   WIKI_SEARCH_PROMPT,
   WEB_RESEARCH_PROMPT,
+  WEB_RESEARCH_MAX_TURNS,
   KNOWLEDGE_CLEANER_PROMPT,
 } from './prompts';
 
@@ -33,15 +36,23 @@ import {
 // ---------------------------------------------------------------------------
 
 /** SPEC 10.2 — domains the web-research agent is allowed to query */
-export const WEB_ALLOWLIST: string[] = [
-  'support.iracing.com',
-  'iracing.com',
-  'forums.iracing.com',
-  'reddit.com/r/iRacing',
-  'hipole.com',
-  'coachdaveacademy.com',
-  'newsroom.porsche.com',
+type WebFetchRule = Readonly<{ hostname: string; pathPrefix?: string }>;
+
+const WEB_FETCH_RULES: readonly WebFetchRule[] = [
+  { hostname: 'support.iracing.com' },
+  { hostname: 'iracing.com' },
+  { hostname: 'forums.iracing.com' },
+  { hostname: 'reddit.com', pathPrefix: '/r/iRacing' },
+  { hostname: 'hipole.com' },
+  { hostname: 'coachdaveacademy.com' },
+  { hostname: 'newsroom.porsche.com' },
 ];
+
+export const WEB_ALLOWLIST: string[] = WEB_FETCH_RULES.map(
+  ({ hostname, pathPrefix }) => `${hostname}${pathPrefix ?? ''}`,
+);
+
+export const MAX_WEB_SEARCH_QUERY_LENGTH = 500;
 
 /** SPEC 10.3 — tools the main agent and all sub-agents must never invoke */
 export const DISALLOWED_TOOLS: string[] = [
@@ -71,19 +82,52 @@ function resolveCliPath(): string | undefined {
 // ---------------------------------------------------------------------------
 
 /**
- * Check whether a URL targets an allowlisted domain.
- * Used by the PreToolUse hook to gate WebFetch / WebSearch calls.
+ * Check whether a URL targets an explicit allowlisted hostname/path.
+ * Subdomains, non-default ports, trailing-dot hostnames, non-HTTPS URLs, and
+ * ambiguous encoded path separators are rejected.
  */
-function isUrlAllowlisted(url: string): boolean {
+function isWebFetchAllowlisted(target: unknown): boolean {
+  if (typeof target !== 'string' || target.length === 0) return false;
+
   try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return WEB_ALLOWLIST.some((domain) => {
-      const d = domain.toLowerCase();
-      return hostname === d || hostname.endsWith(`.${d}`);
-    });
+    const url = new URL(target);
+    if (
+      url.protocol !== 'https:' ||
+      url.username !== '' ||
+      url.password !== '' ||
+      url.port !== ''
+    ) {
+      return false;
+    }
+
+    const rule = WEB_FETCH_RULES.find(({ hostname }) => url.hostname === hostname);
+    if (!rule) return false;
+    if (!rule.pathPrefix) return true;
+
+    // Do not decode security-sensitive separators/dot segments into a
+    // different path than the one we authorize.
+    if (/%(?:2f|5c|2e)/i.test(url.pathname)) return false;
+    return url.pathname === rule.pathPrefix || url.pathname.startsWith(`${rule.pathPrefix}/`);
   } catch {
     return false;
   }
+}
+
+function isWebSearchQueryValid(query: unknown): query is string {
+  return (
+    typeof query === 'string' &&
+    query.trim().length > 0 &&
+    query.length <= MAX_WEB_SEARCH_QUERY_LENGTH
+  );
+}
+
+function isPathContained(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return (
+    relative !== '..' &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
 }
 
 /**
@@ -97,30 +141,51 @@ const preToolUseHook = async (input: any): Promise<any> => {
   // File read tools — enforce wikiRoot boundary
   if (['Read', 'Glob', 'Grep'].includes(toolName)) {
     const toolInput = input?.tool_input ?? {};
-    const filePath: string = toolInput.file_path ?? toolInput.path ?? toolInput.pattern ?? '';
+    const filePath: unknown =
+      toolName === 'Read'
+        ? toolInput.file_path
+        : toolName === 'Glob'
+          ? toolInput.pattern
+          : toolInput.path;
     const wikiRoot = path.resolve(input?.cwd ?? '/');
 
-    if (filePath && !path.resolve(wikiRoot, filePath).startsWith(wikiRoot)) {
+    if (
+      (toolName !== 'Grep' && (typeof filePath !== 'string' || filePath.length === 0)) ||
+      (filePath !== undefined && typeof filePath !== 'string') ||
+      (typeof filePath === 'string' &&
+        !isPathContained(wikiRoot, path.resolve(wikiRoot, filePath)))
+    ) {
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
-          permissionDecisionReason: `File path "${filePath}" is outside wiki root`,
+          permissionDecisionReason: 'File path is outside wiki root',
         },
       };
     }
   }
 
-  // Web tools — enforce domain allowlist
-  if (['WebFetch', 'WebSearch'].includes(toolName)) {
+  if (toolName === 'WebSearch') {
     const toolInput = input?.tool_input ?? {};
-    const target: string = toolInput.url ?? toolInput.query ?? '';
-    if (target && !isUrlAllowlisted(target)) {
+    if (!isWebSearchQueryValid(toolInput.query)) {
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
-          permissionDecisionReason: `Target "${target}" is not in the web allowlist`,
+          permissionDecisionReason: 'Search query must be a non-empty string of at most 500 characters',
+        },
+      };
+    }
+  }
+
+  if (toolName === 'WebFetch') {
+    const toolInput = input?.tool_input ?? {};
+    if (!isWebFetchAllowlisted(toolInput.url)) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'URL is not in the web fetch allowlist',
         },
       };
     }
@@ -138,31 +203,34 @@ const preToolUseHook = async (input: any): Promise<any> => {
  * PostToolUse hook — extracts evidence JSON emitted by sub-agents so the
  * orchestration layer can persist it alongside the chat message.
  */
-const postToolUseHook = async (input: any): Promise<any> => {
-  const toolOutput: string = input?.tool_output ?? '';
-  if (!toolOutput) return {};
-
-  const match = toolOutput.match(/\[[\s\S]*?\]/);
-  if (!match) return {};
-
-  try {
-    const parsed = JSON.parse(match[0]);
-    if (!Array.isArray(parsed)) return {};
-
-    const evidence = parsed.filter(
-      (e: Record<string, unknown>) => typeof e === 'object' && e !== null && 'evidenceId' in e,
-    );
-    if (evidence.length === 0) return {};
-
-    return {
-      hookSpecificOutput: {
-        hookEventName: 'PostToolUse',
-        updatedToolOutput: JSON.stringify({ evidence }),
-      },
-    };
-  } catch {
-    return {};
+function evidenceCandidateFromToolResponse(
+  toolResponse: PostToolUseHookInput['tool_response'],
+): unknown {
+  if (typeof toolResponse === 'string') return toolResponse;
+  if (!toolResponse || typeof toolResponse !== 'object' || Array.isArray(toolResponse)) {
+    return null;
   }
+
+  const response = toolResponse as Record<string, unknown>;
+  if ('evidence' in response) return response;
+  return response.result;
+}
+
+const postToolUseHook: HookCallback = async (hookInput) => {
+  if (hookInput.hook_event_name !== 'PostToolUse') return {};
+  const input: PostToolUseHookInput = hookInput;
+  const evidenceCandidate = evidenceCandidateFromToolResponse(input.tool_response);
+  if (!evidenceCandidate) return {};
+
+  const envelope = parseEvidenceEnvelope(evidenceCandidate);
+  if (!envelope || envelope.evidence.length === 0) return {};
+
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PostToolUse',
+      updatedToolOutput: JSON.stringify(envelope),
+    },
+  };
 };
 
 // ---------------------------------------------------------------------------
@@ -199,7 +267,7 @@ function chatAgentDefinitions(wikiRoot: string): Record<string, AgentDefinition>
       prompt: WEB_RESEARCH_PROMPT,
       tools: ['WebSearch', 'WebFetch'],
       disallowedTools: [...DISALLOWED_TOOLS, 'Agent'],
-      maxTurns: 2,
+      maxTurns: WEB_RESEARCH_MAX_TURNS,
       effort: 'medium',
     },
   };
@@ -247,7 +315,32 @@ export function createChatQuery(
     ...(options.qoderSessionId ? { resume: options.qoderSessionId } : {}),
   };
 
-  return query({ prompt: options.userMessage, options: queryOptions });
+  if (!options.imageAttachments?.length) {
+    return query({ prompt: options.userMessage, options: queryOptions });
+  }
+
+  async function* promptWithImages() {
+    yield {
+      type: 'user' as const,
+      message: {
+        role: 'user' as const,
+        content: [
+          { type: 'text', text: options.userMessage },
+          ...options.imageAttachments!.map((image) => ({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: image.mediaType,
+              data: image.base64,
+            },
+          })),
+        ],
+      },
+      parent_tool_use_id: null,
+    };
+  }
+
+  return query({ prompt: promptWithImages(), options: queryOptions });
 }
 
 /**

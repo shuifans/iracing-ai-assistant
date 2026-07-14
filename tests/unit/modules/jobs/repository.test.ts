@@ -326,14 +326,19 @@ describe('jobs/repository', () => {
   // ─── completeJob ───────────────────────────────────────────────────────────
 
   describe('completeJob', () => {
-    it('sets status to pending_review with finished_at', async () => {
+    it('CAS transitions to pending_review and clears all worker lease fields', async () => {
+      mockRun.mockReturnValue({ changes: 1 });
       const { completeJob } = await import('@/modules/jobs/repository');
-      completeJob('job-001');
+      const completed = completeJob('job-001');
 
+      expect(completed).toBe(true);
       expect(mockUpdate).toHaveBeenCalled();
       expect(mockSet).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'pending_review',
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          heartbeatAt: null,
           finishedAt: '2026-07-12T00:00:00.000Z',
         }),
       );
@@ -448,6 +453,18 @@ describe('jobs/repository', () => {
 
       expect(count).toBe(0);
       expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    it('returns the update count when a selected lease advances concurrently', async () => {
+      mockAll.mockReturnValue([
+        { id: 'job-001', status: 'extracting', leaseExpiresAt: '2026-07-11T23:55:00.000Z' },
+      ]);
+      mockRun.mockReturnValue({ changes: 0 });
+
+      const { recoverExpiredLeases } = await import('@/modules/jobs/repository');
+
+      expect(recoverExpiredLeases()).toBe(0);
+      expect(mockRun).toHaveBeenCalled();
     });
   });
 });

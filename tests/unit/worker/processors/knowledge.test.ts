@@ -21,7 +21,7 @@ vi.mock('@/modules/jobs/repository', () => ({
 
 vi.mock('@/modules/jobs/service', () => ({
   failJob: vi.fn().mockResolvedValue(undefined),
-  completeJob: vi.fn().mockResolvedValue(undefined),
+  completeJob: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock('@/modules/knowledge/extractors/index', () => ({
@@ -244,6 +244,7 @@ describe('processKnowledgeJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUpdateJobStatus.mockReturnValue(true);
+    mockCompleteJob.mockResolvedValue(true);
     mockCreateDraft.mockReturnValue(makeDraft() as any);
     mockGenerateWikiPath.mockReturnValue('track-technique/driving-line/test-article.md');
     // Default: no cached extraction → extract/fetch runs. Cache-hit tests override.
@@ -284,9 +285,9 @@ describe('processKnowledgeJob', () => {
     expect(mockCreateCleaningQuery).toHaveBeenCalled();
     // Verify draft was created
     expect(mockCreateDraft).toHaveBeenCalled();
-    // Verify CAS transitions: extracting→cleaning, cleaning→pending_review
+    // Verify CAS transitions: extracting→cleaning, then atomic completion.
     expect(mockUpdateJobStatus).toHaveBeenCalledWith('job-1', 'extracting', 'cleaning');
-    expect(mockUpdateJobStatus).toHaveBeenCalledWith('job-1', 'cleaning', 'pending_review');
+    expect(mockCompleteJob).toHaveBeenCalledWith('job-1');
     // Verify supersede old drafts
     expect(mockSupersedeOldDrafts).toHaveBeenCalled();
     // Verify auto-evaluation ran (heuristic + probe, non-deep)
@@ -324,13 +325,44 @@ describe('processKnowledgeJob', () => {
 
     expect(mockFetchUrl).toHaveBeenCalledWith(
       'https://example.com/article',
-      expect.any(Object),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(mockCreateDraft).toHaveBeenCalled();
-    expect(mockUpdateJobStatus).toHaveBeenCalledWith('job-1', 'cleaning', 'pending_review');
+    expect(mockCompleteJob).toHaveBeenCalledWith('job-1');
   });
 
   // ─── Extraction failure → failJob ───────────────────────────────────────
+
+  it('does not create a draft and fails INVALID_STATE when completion CAS loses', async () => {
+    mockGetSource.mockReturnValue(makeSource() as any);
+    mockExtract.mockResolvedValue({
+      text: 'extracted text content',
+      charCount: 22,
+      truncated: false,
+      warnings: [],
+    });
+    mockCreateCleaningQuery.mockReturnValue(
+      makeSdkGenerator(makeCleaningResultSdkMessages(VALID_MARKDOWN)),
+    );
+    mockParseFrontMatter.mockReturnValue({
+      frontMatter: VALID_FRONT_MATTER as any,
+      body: '# Test Article\n\nThis is the body content.',
+    });
+    mockValidateFrontMatter.mockReturnValue(VALID_FRONT_MATTER as any);
+    mockCompleteJob.mockResolvedValue(false);
+
+    await processKnowledgeJob(makeLeasedJob());
+
+    expect(mockCompleteJob).toHaveBeenCalledWith('job-1');
+    expect(mockCreateDraft).not.toHaveBeenCalled();
+    expect(mockSupersedeOldDrafts).not.toHaveBeenCalled();
+    expect(mockEvaluateDraft).not.toHaveBeenCalled();
+    expect(mockFailJob).toHaveBeenCalledWith(
+      'job-1',
+      'INVALID_STATE',
+      'CAS cleaning→pending_review failed',
+    );
+  });
 
   it('fails the job with EXTRACTION_FAILED when extraction throws', async () => {
     mockGetSource.mockReturnValue(makeSource() as any);
@@ -594,7 +626,7 @@ describe('processKnowledgeJob', () => {
       expect(mockCreateCleaningQuery).not.toHaveBeenCalled();
       // Pipeline still completed: draft created, CAS to pending_review
       expect(mockCreateDraft).toHaveBeenCalled();
-      expect(mockUpdateJobStatus).toHaveBeenCalledWith('job-1', 'cleaning', 'pending_review');
+      expect(mockCompleteJob).toHaveBeenCalledWith('job-1');
     });
 
     it('fails with AGENT_UNAVAILABLE when cleanWithLlmDirect throws (no Qoder fallback)', async () => {

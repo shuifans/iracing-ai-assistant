@@ -41,7 +41,12 @@ export function isLlmDirectConfigured(): boolean {
 
 export interface LlmChatMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content:
+    | string
+    | Array<
+        | { type: 'text'; text: string }
+        | { type: 'image_url'; image_url: { url: string } }
+      >;
 }
 
 export interface LlmChatChunk {
@@ -54,6 +59,7 @@ export interface StreamLlmDirectParams {
   evidence: Evidence[];
   history: LlmChatMessage[];
   userMessage: string;
+  imageAttachments?: Array<{ base64: string; mediaType: string }>;
   signal: AbortSignal;
 }
 
@@ -67,6 +73,7 @@ export function buildMessages(params: {
   evidence: Evidence[];
   history: LlmChatMessage[];
   userMessage: string;
+  imageAttachments?: Array<{ base64: string; mediaType: string }>;
 }): LlmChatMessage[] {
   const evidenceBlock =
     params.evidence.length === 0
@@ -83,7 +90,16 @@ export function buildMessages(params: {
     role: 'system',
     content: params.systemPrompt + evidenceBlock,
   };
-  return [system, ...params.history, { role: 'user', content: params.userMessage }];
+  const userContent: LlmChatMessage['content'] = params.imageAttachments?.length
+    ? [
+        { type: 'text', text: params.userMessage },
+        ...params.imageAttachments.map((image) => ({
+          type: 'image_url' as const,
+          image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
+        })),
+      ]
+    : params.userMessage;
+  return [system, ...params.history, { role: 'user', content: userContent }];
 }
 
 // ---------------------------------------------------------------------------

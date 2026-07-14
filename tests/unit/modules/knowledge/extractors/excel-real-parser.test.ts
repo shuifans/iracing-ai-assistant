@@ -1,0 +1,19 @@
+import { describe, expect, it } from 'vitest';
+import { extractExcel } from '@/modules/knowledge/extractors/excel';
+
+// Minimal standards-compliant XLSX archive containing Drivers!A1:B2.
+const SAMPLE_XLSX =
+  'UEsDBBQAAAAIAHmz7lxbma6u5gAAAAsCAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbK2RvVLDMBCEX8WjlonOoaBgbKcAWqDgBQ75HGusv9Epwbw9spJQZJJUqW6k3dtvNWo2szXVniJr71qxlrXYdM3XbyCusuK4FWNK4RmA1UgWWfpALiuDjxZTPsYtBFQTbgke6/oJlHeJXFqlJUN0zSsNuDOpepvz9YESybCoXg7GhdUKDMFohSnrsHf9GWV1JMi8WTw86sAP2SDgImFRrgOOex/52VH3VH1iTO9oswtmAz8+Tt/eT/J2yIWWfhi0ot6rnc0rkkMk7HkkStbIMqVF7U69b/CLmaGM9Z2L/OefekD57u4PUEsDBBQAAAAIAHmz7lxLg6M6lgAAAAUBAAALAAAAX3JlbHMvLnJlbHONzz0OwjAMBeCrRD5A3TIwoKZdWLoiLhBS90dt4sgJUG5PRooYGG0/fdar282t6kESZ/YaqqKEtqkvtJqUF3GaQ1Q54aOGKaVwQox2ImdiwYF8vgwszqQ8yojB2MWMhIeyPKJ8GrA3VddrkK6vQF1fgf6xeRhmS2e2d0c+/XjxlciykZGShm3FJ8tyY16KjAI2Ne4KNm9QSwMEFAAAAAgAebPuXH8S4/afAAAA+gAAAA8AAAB4bC93b3JrYm9vay54bWyNjzkSgzAMRa/i0QEwpEjBGNPQcAwHROwBLyM5y/HjQOhTafmjr/9U//abeCKxi6GDpqqh1+oVab3FuIoiBu7A5pxaKXmy6A1XMWEoyhLJm1xGuktOhGZmi5j9Ji91fZXeuACHQ0v/eMRlcRMOcXp4DPkwIdxMLtHYusSg1f6Bf1UE47GDgdwXAMS+HOeCAYJaVxoa5wakVvK8kyea/gBQSwMEFAAAAAgAebPuXG026XSaAAAABgEAABoAAAB4bC9fcmVscy93b3JrYm9vay54bWwucmVsc43POw7CMAwG4KtEPkDdMjCgpiwsXREXiFK3qdo8FJvX7YkYEJUYmCz/tj7L7fHhV3WjzHMMGpqqhmPXnmk1UgJ2c2JVNgJrcCLpgMjWkTdcxUShTMaYvZHS5gmTsYuZCHd1vcf8bcDWVP2gIfdDA+ryTPSPHcdxtnSK9uopyI8TeI95YUckBTV5ItHwiRjfpamKCti1uPmwewFQSwMEFAAAAAgAebPuXLTnPlHFAAAAaAEAABgAAAB4bC93b3Jrc2hlZXRzL3NoZWV0MS54bWx1kE2OwjAMha8S5QC4jUazQKlR0axnwwmiYGhEk1SOVTg+KUIVQrDzz3vvk213tziqmbiEnDrdbhq9Q3vNfCkDkai6TaXTg8i0BSh+oOjKJk+U6uaUOTqpLZ+hTEzu+DDFEUzT/EJ0IWm0xxApLfGK6dTpvt3ujQa0D+2fE4eW81VxpVe1X4q+1Uo6HdIYEh2E6zwUtIL/LpIFQQtLD/6p33/TH3zmNwNU2Eo0K9F8SejH4D8iF+uMP8bC/BoML2fB+ke8A1BLAQIUABQAAAAIAHmz7lxbma6u5gAAAAsCAAATAAAAAAAAAAAAAAAAAAAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQAFAAAAAgAebPuXEuDozqWAAAABQEAAAsAAAAAAAAAAAAAAAAAFwEAAF9yZWxzLy5yZWxzUEsBAhQAFAAAAAgAebPuXH8S4/afAAAA+gAAAA8AAAAAAAAAAAAAAAAA1gEAAHhsL3dvcmtib29rLnhtbFBLAQIUABQAAAAIAHmz7lxtNul0mgAAAAYBAAAaAAAAAAAAAAAAAAAAAKICAAB4bC9fcmVscy93b3JrYm9vay54bWwucmVsc1BLAQIUABQAAAAIAHmz7ly05z5RxQAAAGgBAAAYAAAAAAAAAAAAAAAAAHQDAAB4bC93b3Jrc2hlZXRzL3NoZWV0MS54bWxQSwUGAAAAAAUABQBFAQAAbwQAAAAA';
+
+describe('extractExcel with the production parser', () => {
+  it('extracts worksheet values from a real XLSX archive', async () => {
+    const result = await extractExcel(
+      Buffer.from(SAMPLE_XLSX, 'base64'),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+
+    expect(result.text).toContain('## Drivers');
+    expect(result.text).toContain('| Name | Score |');
+    expect(result.text).toContain('| Alice | 42 |');
+  });
+});

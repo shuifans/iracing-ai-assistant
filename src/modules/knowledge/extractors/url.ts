@@ -9,6 +9,11 @@
  */
 
 import dns from 'dns';
+import https from 'https';
+import net from 'net';
+import type { ClientRequest, IncomingMessage } from 'http';
+import type { RequestOptions as HttpsRequestOptions } from 'https';
+import type { LookupAddress } from 'dns';
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import type { ExtractionResult } from '@/modules/knowledge/types';
@@ -27,15 +32,32 @@ export interface UrlFetchOptions {
   downloadTimeoutMs: number;
   /** Maximum number of redirects to follow. Default: 3. */
   maxRedirects: number;
+  /** Optional caller cancellation (the worker hard timeout passes this). */
+  signal?: AbortSignal;
+  /** Injectable network boundary for deterministic security tests. */
+  network?: UrlNetworkDependencies;
 }
+
+export interface UrlNetworkDependencies {
+  /** Resolve DNS records for a hostname. Production requests every IPv4 A record. */
+  lookup: (hostname: string) => Promise<readonly LookupAddress[]>;
+  /** Node HTTPS request implementation. */
+  request: (
+    options: HttpsRequestOptions,
+    onResponse: (response: IncomingMessage) => void,
+  ) => ClientRequest;
+}
+
+const DEFAULT_NETWORK: UrlNetworkDependencies = {
+  lookup: (hostname) => dns.promises.lookup(hostname, { all: true, family: 4, verbatim: true }),
+  request: (options, onResponse) => https.request(options, onResponse),
+};
 
 // ---------------------------------------------------------------------------
 // SSRF helpers
 // ---------------------------------------------------------------------------
 
 const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-const IPV6_LOOPBACK = '::1';
-const IPV6_LINK_LOCAL_PREFIX = 'fe80:';
 
 /**
  * Convert an IPv4 dotted-quad string to a 32-bit unsigned integer.
@@ -49,42 +71,36 @@ function ipv4ToNumber(ip: string): number | null {
   return ((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>> 0;
 }
 
-/**
- * Returns true when the given IP (v4 or v6) is private, link-local, loopback,
- * or otherwise reserved and must not be contacted.
- */
-function isPrivateOrReservedIp(ip: string): boolean {
-  // IPv6 checks
-  const lower = ip.toLowerCase();
-  if (lower === IPV6_LOOPBACK) return true;
-  if (lower.startsWith(IPV6_LINK_LOCAL_PREFIX)) return true;
-  // IPv4-mapped IPv6, e.g. ::ffff:127.0.0.1
-  if (lower.startsWith('::ffff:')) {
-    const v4Part = lower.slice(7);
-    if (isPrivateOrReservedIpv4(v4Part)) return true;
-  }
-
-  return isPrivateOrReservedIpv4(ip);
-}
-
 function isPrivateOrReservedIpv4(ip: string): boolean {
   const num = ipv4ToNumber(ip);
   if (num === null) return false;
 
   // 0.0.0.0/8 (unspecified)
-  if (((num & 0xff000000) >>> 0) === 0x00000000) return true;
+  if ((num & 0xff000000) >>> 0 === 0x00000000) return true;
   // 10.0.0.0/8
-  if (((num & 0xff000000) >>> 0) === 0x0a000000) return true;
+  if ((num & 0xff000000) >>> 0 === 0x0a000000) return true;
+  // 100.64.0.0/10 (shared address space)
+  if ((num & 0xffc00000) >>> 0 === 0x64400000) return true;
   // 127.0.0.0/8 (loopback)
-  if (((num & 0xff000000) >>> 0) === 0x7f000000) return true;
+  if ((num & 0xff000000) >>> 0 === 0x7f000000) return true;
   // 169.254.0.0/16 (link-local)
-  if (((num & 0xffff0000) >>> 0) === 0xa9fe0000) return true;
+  if ((num & 0xffff0000) >>> 0 === 0xa9fe0000) return true;
   // 172.16.0.0/12
-  if (((num & 0xfff00000) >>> 0) === 0xac100000) return true;
+  if ((num & 0xfff00000) >>> 0 === 0xac100000) return true;
   // 192.168.0.0/16
-  if (((num & 0xffff0000) >>> 0) === 0xc0a80000) return true;
-  // 255.255.255.255 (broadcast)
-  if (num === 0xffffffff) return true;
+  if ((num & 0xffff0000) >>> 0 === 0xc0a80000) return true;
+  // 192.0.0.0/24 and documentation ranges
+  if ((num & 0xffffff00) >>> 0 === 0xc0000000) return true;
+  if ((num & 0xffffff00) >>> 0 === 0xc0000200) return true;
+  // 192.88.99.0/24 (deprecated 6to4 relay)
+  if ((num & 0xffffff00) >>> 0 === 0xc0586300) return true;
+  // 198.18.0.0/15 (benchmarking)
+  if ((num & 0xfffe0000) >>> 0 === 0xc6120000) return true;
+  // Documentation ranges
+  if ((num & 0xffffff00) >>> 0 === 0xc6336400) return true;
+  if ((num & 0xffffff00) >>> 0 === 0xcb007100) return true;
+  // 224.0.0.0/4 multicast and 240.0.0.0/4 reserved/broadcast
+  if (num >>> 28 >= 0x0e) return true;
 
   return false;
 }
@@ -115,10 +131,7 @@ function parseUrl(raw: string): URL {
   }
 
   if (parsed.protocol !== 'https:') {
-    throw new AppError(
-      'VALIDATION_ERROR',
-      `Only HTTPS URLs are allowed; got "${parsed.protocol}"`,
-    );
+    throw new AppError('VALIDATION_ERROR', `Only HTTPS URLs are allowed; got "${parsed.protocol}"`);
   }
 
   if (parsed.username || parsed.password) {
@@ -159,24 +172,82 @@ function validateHost(url: URL): void {
 }
 
 /**
- * Perform DNS resolution and validate that the resolved IP is not private,
- * loopback, link-local, or otherwise reserved (DNS rebinding protection).
+ * Resolve and validate every IPv4 A result, then pin one validated address.
+ * Legitimate AAAA results from injected resolvers are ignored deliberately:
+ * this fetcher is IPv4-only and never offers them to the socket layer.
  */
-async function validateDns(hostname: string): Promise<void> {
-  let result: { address: string; family: number };
+async function validateDns(
+  hostname: string,
+  network: UrlNetworkDependencies,
+  signal: AbortSignal,
+): Promise<LookupAddress> {
+  let results: readonly LookupAddress[];
   try {
-    result = await dns.promises.lookup(hostname);
+    results = await waitForAbort(network.lookup(hostname), signal);
   } catch (err) {
+    if (signal.aborted) throw abortReason(signal);
     const msg = err instanceof Error ? err.message : String(err);
     throw new AppError('WEB_FETCH_FAILED', `DNS lookup failed for "${hostname}": ${msg}`);
   }
 
-  if (isPrivateOrReservedIp(result.address)) {
+  if (results.length === 0) {
+    throw new AppError('WEB_FETCH_FAILED', `DNS lookup returned no addresses for "${hostname}"`);
+  }
+
+  const ipv4Results: LookupAddress[] = [];
+  for (const result of results) {
+    const actualFamily = net.isIP(result.address);
+    if (actualFamily === 0 || actualFamily !== result.family) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        `DNS returned invalid address/family pair "${result.address}" (reported IPv${result.family}); request blocked`,
+      );
+    }
+    // The production resolver requests family 4. An injected resolver may
+    // still return a complete A/AAAA set; valid AAAA records are irrelevant to
+    // this IPv4-only transport and must never reach the socket lookup.
+    if (actualFamily === 6) continue;
+
+    if (isPrivateOrReservedIpv4(result.address)) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        `DNS resolved "${hostname}" to private/reserved IP "${result.address}"; request blocked`,
+      );
+    }
+    ipv4Results.push(result);
+  }
+
+  if (ipv4Results.length === 0) {
     throw new AppError(
-      'VALIDATION_ERROR',
-      `DNS resolved "${hostname}" to private/reserved IP "${result.address}"; request blocked`,
+      'WEB_FETCH_FAILED',
+      `DNS lookup returned no IPv4 A records for "${hostname}"`,
     );
   }
+
+  return ipv4Results[0]!;
+}
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error('URL fetch aborted');
+}
+
+async function waitForAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw abortReason(signal);
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +256,173 @@ async function validateDns(hostname: string): Promise<void> {
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
+interface DownloadedPage {
+  statusCode: number;
+  statusMessage: string;
+  location?: string;
+  rawHtml: string;
+  truncated: boolean;
+}
+
+type PinnedLookup = NonNullable<HttpsRequestOptions['lookup']>;
+
+function createPinnedLookup(pinned: LookupAddress): PinnedLookup {
+  return ((_hostname, options, callback) => {
+    const wantsAll = typeof options === 'object' && options.all === true;
+    queueMicrotask(() => {
+      if (wantsAll) {
+        const allCallback = callback as unknown as (
+          error: NodeJS.ErrnoException | null,
+          addresses: LookupAddress[],
+        ) => void;
+        allCallback(null, [pinned]);
+        return;
+      }
+
+      const oneCallback = callback as unknown as (
+        error: NodeJS.ErrnoException | null,
+        address: string,
+        family: number,
+      ) => void;
+      oneCallback(null, pinned.address, pinned.family);
+    });
+  }) as PinnedLookup;
+}
+
+function firstHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+/**
+ * Perform one HTTPS request. The original hostname remains in hostname,
+ * Host and servername so TLS certificate validation is unchanged; only the
+ * socket lookup is replaced with the already-validated address.
+ */
+function requestPinned(
+  url: URL,
+  pinned: LookupAddress,
+  options: UrlFetchOptions,
+  network: UrlNetworkDependencies,
+  signal: AbortSignal,
+): Promise<DownloadedPage> {
+  return new Promise<DownloadedPage>((resolve, reject) => {
+    let settled = false;
+    let response: IncomingMessage | undefined;
+    let connectTimer: ReturnType<typeof setTimeout> | undefined;
+    let request: ClientRequest | undefined;
+
+    const cleanup = () => {
+      if (connectTimer) clearTimeout(connectTimer);
+      signal.removeEventListener('abort', onAbort);
+    };
+    const succeed = (result: DownloadedPage) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onAbort = () => {
+      const reason = abortReason(signal);
+      response?.destroy(reason);
+      request?.destroy(reason);
+      fail(reason);
+    };
+
+    if (signal.aborted) {
+      fail(abortReason(signal));
+      return;
+    }
+
+    try {
+      request = network.request(
+        {
+          protocol: 'https:',
+          hostname: url.hostname,
+          port: url.port || undefined,
+          path: `${url.pathname}${url.search}`,
+          method: 'GET',
+          agent: false,
+          servername: url.hostname,
+          rejectUnauthorized: true,
+          lookup: createPinnedLookup(pinned),
+          headers: {
+            host: url.host,
+            'user-agent': 'iRacing-AI-Assistant/1.0 (+https://iracing-ai.local)',
+            accept: 'text/html,application/xhtml+xml,*/*;q=0.9',
+          },
+        },
+        (incoming) => {
+          response = incoming;
+          if (connectTimer) clearTimeout(connectTimer);
+
+          const statusCode = incoming.statusCode ?? 0;
+          const statusMessage = incoming.statusMessage ?? '';
+          const location = firstHeader(incoming.headers.location);
+
+          if (REDIRECT_STATUSES.has(statusCode) || statusCode < 200 || statusCode >= 300) {
+            incoming.destroy();
+            succeed({ statusCode, statusMessage, location, rawHtml: '', truncated: false });
+            return;
+          }
+
+          const chunks: Buffer[] = [];
+          let bytesRead = 0;
+          let truncated = false;
+
+          incoming.on('data', (value: Buffer | string) => {
+            if (settled) return;
+            const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+            const remaining = Math.max(0, options.maxBytes - bytesRead);
+            if (chunk.byteLength > remaining) {
+              if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
+              bytesRead += remaining;
+              truncated = true;
+              incoming.destroy();
+              succeed({
+                statusCode,
+                statusMessage,
+                rawHtml: Buffer.concat(chunks).toString('utf-8'),
+                truncated,
+              });
+              return;
+            }
+
+            chunks.push(chunk);
+            bytesRead += chunk.byteLength;
+          });
+          incoming.once('end', () => {
+            succeed({
+              statusCode,
+              statusMessage,
+              rawHtml: Buffer.concat(chunks).toString('utf-8'),
+              truncated,
+            });
+          });
+          incoming.once('error', fail);
+        },
+      );
+    } catch (error) {
+      fail(error);
+      return;
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    request.once('error', fail);
+    connectTimer = setTimeout(() => {
+      const error = new Error(`Connection timeout after ${options.connectTimeoutMs}ms`);
+      request?.destroy(error);
+      fail(error);
+    }, options.connectTimeoutMs);
+    request.end();
+  });
+}
+
 /**
  * Fetch the URL following redirects manually. Each redirect target is
  * re-validated (protocol, host, DNS) to prevent SSRF via open redirects.
@@ -192,55 +430,28 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 async function fetchWithRedirects(
   initialUrl: string,
   options: UrlFetchOptions,
-): Promise<Response> {
+  network: UrlNetworkDependencies,
+  signal: AbortSignal,
+): Promise<DownloadedPage> {
   let currentUrl = initialUrl;
 
   for (let hop = 0; hop <= options.maxRedirects; hop++) {
     const parsed = parseUrl(currentUrl);
     validateHost(parsed);
-    await validateDns(parsed.hostname);
-
-    const controller = new AbortController();
-    const connectTimer = setTimeout(
-      () => controller.abort(new Error('Connection timeout')),
-      options.connectTimeoutMs,
-    );
-    const downloadTimer = setTimeout(
-      () => controller.abort(new Error('Download timeout')),
-      options.downloadTimeoutMs,
-    );
-
-    let response: Response;
-    try {
-      response = await fetch(currentUrl, {
-        redirect: 'manual',
-        signal: controller.signal,
-        headers: {
-          'user-agent': 'iRacing-AI-Assistant/1.0 (+https://iracing-ai.local)',
-          accept: 'text/html,application/xhtml+xml,*/*;q=0.9',
-        },
-      });
-    } catch (err) {
-      clearTimeout(connectTimer);
-      clearTimeout(downloadTimer);
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new AppError('WEB_FETCH_FAILED', `HTTP request failed: ${msg}`);
-    }
-
-    clearTimeout(connectTimer);
-    clearTimeout(downloadTimer);
+    const pinned = await validateDns(parsed.hostname, network, signal);
+    const response = await requestPinned(parsed, pinned, options, network, signal);
 
     // Not a redirect — return the response
-    if (!REDIRECT_STATUSES.has(response.status)) {
+    if (!REDIRECT_STATUSES.has(response.statusCode)) {
       return response;
     }
 
     // Handle redirect
-    const location = response.headers.get('location');
+    const location = response.location;
     if (!location) {
       throw new AppError(
         'WEB_FETCH_FAILED',
-        `Redirect status ${response.status} without Location header`,
+        `Redirect status ${response.statusCode} without Location header`,
       );
     }
 
@@ -258,52 +469,6 @@ async function fetchWithRedirects(
     'WEB_FETCH_FAILED',
     `Too many redirects (>${options.maxRedirects}) while fetching "${initialUrl}"`,
   );
-}
-
-// ---------------------------------------------------------------------------
-// Body streaming with size limit
-// ---------------------------------------------------------------------------
-
-/**
- * Read the response body as text, enforcing the maxBytes limit via streaming.
- * Returns { text, truncated }.
- */
-async function readBodyWithLimit(
-  response: Response,
-  maxBytes: number,
-): Promise<{ text: string; truncated: boolean }> {
-  // Prefer streaming when body is available
-  if (!response.body) {
-    const text = await response.text();
-    const truncated = text.length > maxBytes;
-    return { text: truncated ? text.slice(0, maxBytes) : text, truncated };
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder('utf-8', { fatal: false });
-  const chunks: string[] =
-    [];
-  let bytesRead = 0;
-  let truncated = false;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      bytesRead += value.byteLength;
-      if (bytesRead > maxBytes) {
-        truncated = true;
-        reader.cancel();
-        break;
-      }
-      chunks.push(decoder.decode(value, { stream: true }));
-    }
-  } catch {
-    // Stream may be cancelled; ignore errors here
-  }
-
-  chunks.push(decoder.decode()); // flush
-  return { text: chunks.join(''), truncated };
 }
 
 // ---------------------------------------------------------------------------
@@ -349,40 +514,47 @@ function extractWithReadability(html: string): string {
  * @returns ExtractionResult with the extracted text content.
  * @throws AppError on validation, network, or extraction failures.
  */
-export async function fetchUrl(
-  url: string,
-  options: UrlFetchOptions,
-): Promise<ExtractionResult> {
-  // Step 1 — Parse and validate the initial URL (protocol, user-info)
-  const parsed = parseUrl(url);
+export async function fetchUrl(url: string, options: UrlFetchOptions): Promise<ExtractionResult> {
+  const network = options.network ?? DEFAULT_NETWORK;
+  const operationAbort = new AbortController();
+  const timeoutError = new Error(`Download timeout after ${options.downloadTimeoutMs}ms`);
+  const deadline = setTimeout(() => operationAbort.abort(timeoutError), options.downloadTimeoutMs);
+  const onCallerAbort = () => operationAbort.abort(options.signal?.reason);
 
-  // Step 2 — Validate hostname (no localhost, no bare IP)
-  validateHost(parsed);
+  if (options.signal?.aborted) {
+    onCallerAbort();
+  } else {
+    options.signal?.addEventListener('abort', onCallerAbort, { once: true });
+  }
 
-  // Step 3 — DNS resolution check (anti-rebinding)
-  await validateDns(parsed.hostname);
+  let response: DownloadedPage;
+  try {
+    response = await fetchWithRedirects(url, options, network, operationAbort.signal);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new AppError('WEB_FETCH_FAILED', `HTTP request failed: ${message}`);
+  } finally {
+    clearTimeout(deadline);
+    options.signal?.removeEventListener('abort', onCallerAbort);
+  }
 
-  // Step 4 — Fetch with manual redirect handling
-  const response = await fetchWithRedirects(url, options);
-
-  if (!response.ok) {
+  if (response.statusCode < 200 || response.statusCode >= 300) {
     throw new AppError(
       'WEB_FETCH_FAILED',
-      `HTTP ${response.status} ${response.statusText} while fetching "${url}"`,
+      `HTTP ${response.statusCode} ${response.statusMessage} while fetching "${url}"`,
     );
   }
 
-  // Step 5 — Read body with size limit
-  const { text: rawHtml, truncated } = await readBodyWithLimit(response, options.maxBytes);
+  const { rawHtml, truncated } = response;
 
-  // Step 6 — Extract readable text
+  // Extract readable text only after the complete (or size-truncated) body
+  // has been consumed while the total deadline remained active.
   const text = extractWithReadability(rawHtml);
 
   const warnings: string[] = [];
   if (truncated) {
-    warnings.push(
-      `Response body exceeded ${options.maxBytes} bytes and was truncated`,
-    );
+    warnings.push(`Response body exceeded ${options.maxBytes} bytes and was truncated`);
   }
 
   return {

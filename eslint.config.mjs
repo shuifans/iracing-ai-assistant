@@ -1,7 +1,8 @@
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import nextConfig from 'eslint-config-next';
+import { FlatCompat } from '@eslint/eslintrc';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const compat = new FlatCompat({ baseDirectory: __dirname });
 
-export default [...nextConfig];
+export default [...compat.config({ extends: ['next'] })];

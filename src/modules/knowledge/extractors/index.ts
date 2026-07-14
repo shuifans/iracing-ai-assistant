@@ -19,7 +19,6 @@ export { fetchUrl, type UrlFetchOptions } from './url';
  * - `application/vnd.openxmlformats-officedocument.wordprocessingml.document` → extractDocx
  * - `application/pdf` → extractPdf
  * - `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` → extractExcel
- * - `application/vnd.ms-excel` → extractExcel
  *
  * Unsupported MIME types throw AppError(EXTRACTION_FAILED).
  */
@@ -38,7 +37,6 @@ export async function extract(buffer: Buffer, mimeType: string): Promise<Extract
       return extractPdf(buffer);
 
     case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
-    case 'application/vnd.ms-excel':
       return extractExcel(buffer, mimeType);
 
     default:

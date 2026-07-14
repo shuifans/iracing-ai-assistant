@@ -60,6 +60,7 @@ describe.skipIf(!canLoadNative)('jobs/repository integration', () => {
   let claimJob: typeof import('@/modules/jobs/repository').claimJob;
   let heartbeatJob: typeof import('@/modules/jobs/repository').heartbeatJob;
   let updateJobStatus: typeof import('@/modules/jobs/repository').updateJobStatus;
+  let completeJob: typeof import('@/modules/jobs/repository').completeJob;
   let failJob: typeof import('@/modules/jobs/repository').failJob;
   let retryJob: typeof import('@/modules/jobs/repository').retryJob;
   let cancelJob: typeof import('@/modules/jobs/repository').cancelJob;
@@ -80,6 +81,7 @@ describe.skipIf(!canLoadNative)('jobs/repository integration', () => {
     claimJob = repo.claimJob;
     heartbeatJob = repo.heartbeatJob;
     updateJobStatus = repo.updateJobStatus;
+    completeJob = repo.completeJob;
     failJob = repo.failJob;
     retryJob = repo.retryJob;
     cancelJob = repo.cancelJob;
@@ -184,6 +186,42 @@ describe.skipIf(!canLoadNative)('jobs/repository integration', () => {
     });
   });
 
+  describe('completeJob CAS', () => {
+    it('atomically transitions cleaning to pending_review and clears the worker lease', () => {
+      enqueueJob(sourceId);
+      const claim = claimJob('worker-1');
+      const jobId = claim.job!.id;
+
+      heartbeatJob(jobId, 'worker-1');
+      expect(updateJobStatus(jobId, 'extracting', 'cleaning')).toBe(true);
+
+      const completed = completeJob(jobId);
+
+      expect(completed).toBe(true);
+      const after = getJob(jobId)!;
+      expect(after.status).toBe('pending_review');
+      expect(after.leaseOwner).toBeNull();
+      expect(after.leaseExpiresAt).toBeNull();
+      expect(after.heartbeatAt).toBeNull();
+    });
+
+    it('returns false outside cleaning and preserves status and lease metadata', () => {
+      enqueueJob(sourceId);
+      const claim = claimJob('worker-1');
+      const jobId = claim.job!.id;
+      heartbeatJob(jobId, 'worker-1');
+      const before = getJob(jobId)!;
+
+      expect(completeJob(jobId)).toBe(false);
+
+      const after = getJob(jobId)!;
+      expect(after.status).toBe('extracting');
+      expect(after.leaseOwner).toBe(before.leaseOwner);
+      expect(after.leaseExpiresAt).toBe(before.leaseExpiresAt);
+      expect(after.heartbeatAt).toBe(before.heartbeatAt);
+    });
+  });
+
   // ─── failJob → retryJob ──────────────────────────────────────────────────
 
   describe('failJob → retryJob', () => {
@@ -231,40 +269,141 @@ describe.skipIf(!canLoadNative)('jobs/repository integration', () => {
   // ─── recoverExpiredLeases ────────────────────────────────────────────────
 
   describe('recoverExpiredLeases', () => {
-    it('recovers jobs with expired leases', () => {
+    it.each(['extracting', 'cleaning'] as const)(
+      'recovers jobs with expired leases while %s',
+      (status) => {
+        enqueueJob(sourceId);
+        const claim = claimJob('worker-1');
+        const jobId = claim.job!.id;
+
+        if (status === 'cleaning') {
+          expect(updateJobStatus(jobId, 'extracting', 'cleaning')).toBe(true);
+        }
+
+        // Manually set lease_expires_at to the past
+        const past = new Date(Date.now() - 10000).toISOString();
+        db.update(knowledgeJobs).set({ leaseExpiresAt: past }).run();
+
+        const recovered = recoverExpiredLeases();
+        expect(recovered).toBe(1);
+
+        const after = getJob(jobId);
+        expect(after!.status).toBe('queued');
+        expect(after!.leaseOwner).toBeNull();
+        expect(after!.leaseExpiresAt).toBeNull();
+        expect(after!.heartbeatAt).toBeNull();
+      },
+    );
+
+    it('does not recover pending_review jobs even when a stale lease remains', () => {
       enqueueJob(sourceId);
       const claim = claimJob('worker-1');
       const jobId = claim.job!.id;
-
-      // Manually set lease_expires_at to the past
       const past = new Date(Date.now() - 10000).toISOString();
+
       db.update(knowledgeJobs)
-        .set({ leaseExpiresAt: past })
+        .set({ status: 'pending_review', leaseExpiresAt: past })
+        .where(eq(knowledgeJobs.id, jobId))
         .run();
 
-      const recovered = recoverExpiredLeases();
-      expect(recovered).toBe(1);
-
-      const after = getJob(jobId);
-      expect(after!.status).toBe('queued');
-      expect(after!.leaseOwner).toBeNull();
+      expect(recoverExpiredLeases()).toBe(0);
+      expect(getJob(jobId)!.status).toBe('pending_review');
     });
 
-    it('does not recover terminal jobs (published)', () => {
+    it('does not recover publishing jobs', () => {
       const job = enqueueJob(sourceId);
       const claim = claimJob('worker-1');
       const jobId = claim.job!.id;
 
-      // Manually set to published (terminal) with expired lease
+      // Manually advance to publishing with an expired worker lease.
       const past = new Date(Date.now() - 10000).toISOString();
       db.update(knowledgeJobs)
-        .set({ status: 'published', leaseExpiresAt: past })
+        .set({ status: 'publishing', leaseExpiresAt: past })
         .where(eq(knowledgeJobs.id, jobId))
         .run();
 
       const recovered = recoverExpiredLeases();
       expect(recovered).toBe(0);
+      expect(getJob(jobId)!.status).toBe('publishing');
     });
+
+    it('retains a concurrent status advance after selecting an expired execution lease', () => {
+      enqueueJob(sourceId);
+      const claim = claimJob('worker-1');
+      const jobId = claim.job!.id;
+      const past = new Date(Date.now() - 10000).toISOString();
+      db.update(knowledgeJobs)
+        .set({ leaseExpiresAt: past })
+        .where(eq(knowledgeJobs.id, jobId))
+        .run();
+
+      const originalUpdate = db.update.bind(db);
+      let advanced = false;
+      const updateSpy = vi.spyOn(db, 'update').mockImplementation(((table: any) => {
+        if (table === knowledgeJobs && !advanced) {
+          advanced = true;
+          originalUpdate(knowledgeJobs)
+            .set({ status: 'publishing' })
+            .where(eq(knowledgeJobs.id, jobId))
+            .run();
+        }
+        return originalUpdate(table);
+      }) as typeof db.update);
+
+      try {
+        expect(recoverExpiredLeases()).toBe(0);
+      } finally {
+        updateSpy.mockRestore();
+      }
+
+      expect(getJob(jobId)!.status).toBe('publishing');
+    });
+
+    it.each(['extracting', 'cleaning'] as const)(
+      'retains a concurrent lease renewal while the job remains %s',
+      (status) => {
+        enqueueJob(sourceId);
+        const claim = claimJob('worker-1');
+        const jobId = claim.job!.id;
+        if (status === 'cleaning') {
+          expect(updateJobStatus(jobId, 'extracting', 'cleaning')).toBe(true);
+        }
+
+        heartbeatJob(jobId, 'worker-1');
+        const heartbeatAt = getJob(jobId)!.heartbeatAt;
+        const past = new Date(Date.now() - 10000).toISOString();
+        const renewedUntil = new Date(Date.now() + 60000).toISOString();
+        db.update(knowledgeJobs)
+          .set({ leaseExpiresAt: past })
+          .where(eq(knowledgeJobs.id, jobId))
+          .run();
+
+        const originalUpdate = db.update.bind(db);
+        let renewed = false;
+        const updateSpy = vi.spyOn(db, 'update').mockImplementation(((table: any) => {
+          if (table === knowledgeJobs && !renewed) {
+            renewed = true;
+            originalUpdate(knowledgeJobs)
+              .set({ leaseExpiresAt: renewedUntil })
+              .where(eq(knowledgeJobs.id, jobId))
+              .run();
+          }
+          return originalUpdate(table);
+        }) as typeof db.update);
+
+        try {
+          expect(recoverExpiredLeases()).toBe(0);
+        } finally {
+          updateSpy.mockRestore();
+        }
+
+        const after = getJob(jobId)!;
+        expect(after.status).toBe(status);
+        expect(after.leaseOwner).toBe('worker-1');
+        expect(after.leaseExpiresAt).toBe(renewedUntil);
+        expect(after.heartbeatAt).toBe(heartbeatAt);
+      },
+    );
   });
 
   // ─── listJobs ────────────────────────────────────────────────────────────

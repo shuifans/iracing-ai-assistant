@@ -6,12 +6,25 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import type { TestDb } from '../../../helpers/test-db';
-import { makeUser, makeKnowledgeSource, makeKnowledgeJob, makeKnowledgeDraft, makeKnowledgeItem } from '../../../helpers/fixtures';
+import {
+  makeUser,
+  makeKnowledgeSource,
+  makeKnowledgeJob,
+  makeKnowledgeDraft,
+  makeKnowledgeItem,
+} from '../../../helpers/fixtures';
 import { users } from '@/db/schema/users';
-import { knowledgeSources, knowledgeJobs, knowledgeDrafts, knowledgeItems } from '@/db/schema/knowledge';
+import {
+  knowledgeSources,
+  knowledgeJobs,
+  knowledgeDrafts,
+  knowledgeItems,
+} from '@/db/schema/knowledge';
 import { knowledgeEvaluations } from '@/db/schema/evaluation';
+import { auditLogs } from '@/db/schema/admin';
 import { utcNow } from '@/lib/datetime';
 import { generateId } from '@/lib/uuid';
+import { eq } from 'drizzle-orm';
 
 // ── Skip if native module unavailable ────────────────────────────────────────
 let canLoadNative = true;
@@ -71,6 +84,8 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
   let restoreItem: typeof import('@/modules/knowledge/repository').restoreItem;
   let updateSyncStatus: typeof import('@/modules/knowledge/repository').updateSyncStatus;
   let updateItem: typeof import('@/modules/knowledge/repository').updateItem;
+  let commitPublishedDraft: typeof import('@/modules/knowledge/repository').commitPublishedDraft;
+  let completePushAttempt: typeof import('@/modules/knowledge/repository').completePushAttempt;
   let getKnowledgeStats: typeof import('@/modules/knowledge/repository').getKnowledgeStats;
   let listDrafts: typeof import('@/modules/knowledge/repository').listDrafts;
 
@@ -99,6 +114,8 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
     restoreItem = repo.restoreItem;
     updateSyncStatus = repo.updateSyncStatus;
     updateItem = repo.updateItem;
+    commitPublishedDraft = repo.commitPublishedDraft;
+    completePushAttempt = repo.completePushAttempt;
     getKnowledgeStats = repo.getKnowledgeStats;
     listDrafts = repo.listDrafts;
 
@@ -115,6 +132,7 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
 
   beforeEach(() => {
     // Clean all knowledge tables before each test (items depend on drafts/jobs/sources)
+    db.delete(auditLogs).run();
     db.delete(knowledgeItems).run();
     db.delete(knowledgeDrafts).run();
     db.delete(knowledgeJobs).run();
@@ -488,6 +506,177 @@ describe.skipIf(!canLoadNative)('knowledge/repository integration', () => {
       const updated = getItem(item.id);
       expect(updated!.wikiSyncStatus).toBe('synced');
       expect(updated!.gitCommitSha).toBe('abc123commit');
+    });
+
+    it('SQLite rejects an unsupported wiki sync status', () => {
+      const item = createItem({
+        sourceId,
+        draftId,
+        title: 'Invalid Sync Test',
+        category: 'basics',
+        subcategory: 'getting-started',
+        tagsJson: '[]',
+        sourceName: 'src.txt',
+        sourceUrl: null,
+        season: '',
+        wikiPath: 'basics/getting-started/invalid-sync.md',
+        status: 'published',
+        gitCommitSha: null,
+        wikiSyncStatus: 'committed',
+        publishedBy: userId,
+        publishedAt: utcNow(),
+      });
+
+      expect(() => updateSyncStatus(item.id, 'pushed' as any)).toThrow(/CHECK constraint failed/);
+      expect(getItem(item.id)!.wikiSyncStatus).toBe('committed');
+    });
+
+    it('atomically upserts item, approves draft, publishes job, and inserts audit', () => {
+      const job = db
+        .select()
+        .from(knowledgeJobs)
+        .where(eq(knowledgeJobs.id, getDraft(draftId)!.jobId))
+        .get()!;
+      db.update(knowledgeJobs)
+        .set({ status: 'publishing' })
+        .where(eq(knowledgeJobs.id, job.id))
+        .run();
+
+      const result = commitPublishedDraft({
+        jobId: job.id,
+        draftId,
+        reviewedBy: userId,
+        wikiPath: 'basics/getting-started/atomic-publish.md',
+        title: 'Atomic Publish',
+        category: 'basics',
+        subcategory: 'getting-started',
+        tagsJson: '["atomic"]',
+        sourceName: 'src.txt',
+        sourceUrl: null,
+        season: '',
+        publishedAt: utcNow(),
+      });
+
+      expect(getItem(result.itemId)).toMatchObject({
+        draftId,
+        status: 'published',
+        wikiSyncStatus: 'committed',
+      });
+      expect(getDraft(draftId)).toMatchObject({ status: 'approved', reviewedBy: userId });
+      expect(
+        db.select().from(knowledgeJobs).where(eq(knowledgeJobs.id, job.id)).get()!.status,
+      ).toBe('published');
+      expect(
+        db.select().from(auditLogs).where(eq(auditLogs.resourceId, result.itemId)).get(),
+      ).toMatchObject({
+        actorId: userId,
+        action: 'knowledge.published',
+        resource: 'knowledge_item',
+      });
+    });
+
+    it('rolls back item and draft changes when publishing job CAS fails', () => {
+      const draft = getDraft(draftId)!;
+      const job = db.select().from(knowledgeJobs).where(eq(knowledgeJobs.id, draft.jobId)).get()!;
+      expect(job.status).not.toBe('publishing');
+
+      expect(() =>
+        commitPublishedDraft({
+          jobId: job.id,
+          draftId,
+          reviewedBy: userId,
+          wikiPath: 'basics/getting-started/rollback-publish.md',
+          title: 'Rollback Publish',
+          category: 'basics',
+          subcategory: 'getting-started',
+          tagsJson: '[]',
+          sourceName: 'src.txt',
+          sourceUrl: null,
+          season: '',
+          publishedAt: utcNow(),
+        }),
+      ).toThrow('publishing state');
+
+      expect(getItemByWikiPath('basics/getting-started/rollback-publish.md')).toBeNull();
+      expect(getDraft(draftId)).toMatchObject({ status: 'pending_review', reviewedBy: null });
+      expect(db.select().from(auditLogs).all()).toHaveLength(0);
+    });
+
+    it('ignores an older push completion after a newer publication changes the SHA', () => {
+      const item = createItem({
+        sourceId,
+        draftId,
+        title: 'Push CAS',
+        category: 'basics',
+        subcategory: 'getting-started',
+        tagsJson: '[]',
+        sourceName: null,
+        sourceUrl: null,
+        season: '',
+        wikiPath: 'basics/getting-started/push-cas.md',
+        status: 'published',
+        gitCommitSha: 'old-sha',
+        wikiSyncStatus: 'push_pending',
+        publishedBy: userId,
+        publishedAt: utcNow(),
+      });
+      updateSyncStatus(item.id, 'push_pending', 'new-sha');
+
+      expect(completePushAttempt(item.id, 'old-sha', 'synced')).toBe(false);
+      expect(getItem(item.id)).toMatchObject({
+        gitCommitSha: 'new-sha',
+        wikiSyncStatus: 'push_pending',
+      });
+      expect(completePushAttempt(item.id, 'new-sha', 'synced')).toBe(true);
+      expect(getItem(item.id)).toMatchObject({
+        gitCommitSha: 'new-sha',
+        wikiSyncStatus: 'synced',
+      });
+    });
+
+    it('rolls back all publication mutations when audit insertion fails', () => {
+      const draft = getDraft(draftId)!;
+      db.update(knowledgeJobs)
+        .set({ status: 'publishing' })
+        .where(eq(knowledgeJobs.id, draft.jobId))
+        .run();
+      const rawDb = (db as any).$client;
+      rawDb.exec(`
+        CREATE TRIGGER fail_publish_audit
+        BEFORE INSERT ON audit_logs
+        WHEN NEW.action = 'knowledge.published'
+        BEGIN
+          SELECT RAISE(ABORT, 'audit insert failed');
+        END;
+      `);
+
+      try {
+        expect(() =>
+          commitPublishedDraft({
+            jobId: draft.jobId,
+            draftId,
+            reviewedBy: userId,
+            wikiPath: 'basics/getting-started/audit-rollback.md',
+            title: 'Audit Rollback',
+            category: 'basics',
+            subcategory: 'getting-started',
+            tagsJson: '[]',
+            sourceName: null,
+            sourceUrl: null,
+            season: '',
+            publishedAt: utcNow(),
+          }),
+        ).toThrow('audit insert failed');
+      } finally {
+        rawDb.exec('DROP TRIGGER fail_publish_audit');
+      }
+
+      expect(getItemByWikiPath('basics/getting-started/audit-rollback.md')).toBeNull();
+      expect(getDraft(draftId)).toMatchObject({ status: 'pending_review', reviewedBy: null });
+      expect(
+        db.select().from(knowledgeJobs).where(eq(knowledgeJobs.id, draft.jobId)).get()!.status,
+      ).toBe('publishing');
+      expect(db.select().from(auditLogs).all()).toHaveLength(0);
     });
   });
 

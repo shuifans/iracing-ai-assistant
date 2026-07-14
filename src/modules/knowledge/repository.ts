@@ -23,7 +23,16 @@ import {
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
 import { knowledgeEvaluations } from '@/db/schema/evaluation';
-import type { CursorPageParams, CursorPageResult, DraftListRow, KnowledgeStats, CountBucket } from './types';
+import { auditLogs } from '@/db/schema/admin';
+import { AppError } from '@/lib/errors';
+import type { WikiSyncStatus } from '@/config/constants';
+import type {
+  CursorPageParams,
+  CursorPageResult,
+  DraftListRow,
+  KnowledgeStats,
+  CountBucket,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // Sources
@@ -445,11 +454,7 @@ export function updateItem(
 /**
  * Update the wiki sync status of a knowledge item.
  */
-export function updateSyncStatus(
-  id: string,
-  syncStatus: string,
-  commitSha?: string,
-): void {
+export function updateSyncStatus(id: string, syncStatus: WikiSyncStatus, commitSha?: string): void {
   const db = getDb();
   const now = utcNow();
   const changes: Record<string, string> = {
@@ -460,6 +465,160 @@ export function updateSyncStatus(
     changes.gitCommitSha = commitSha;
   }
   db.update(knowledgeItems).set(changes).where(eq(knowledgeItems.id, id)).run();
+}
+
+/**
+ * Complete one specific asynchronous push attempt. The expected pending state
+ * and commit SHA prevent an older child process from overwriting a newer
+ * publication of the same item.
+ */
+export function completePushAttempt(
+  id: string,
+  expectedCommitSha: string,
+  finalStatus: Extract<WikiSyncStatus, 'synced' | 'push_failed'>,
+): boolean {
+  const db = getDb();
+  const result = db
+    .update(knowledgeItems)
+    .set({ wikiSyncStatus: finalStatus, updatedAt: utcNow() })
+    .where(
+      and(
+        eq(knowledgeItems.id, id),
+        eq(knowledgeItems.wikiSyncStatus, 'push_pending'),
+        eq(knowledgeItems.gitCommitSha, expectedCommitSha),
+      ),
+    )
+    .run();
+  return result.changes === 1;
+}
+
+export interface CommitPublishedDraftInput {
+  jobId: string;
+  draftId: string;
+  reviewedBy: string;
+  wikiPath: string;
+  title: string;
+  category: 'track-technique' | 'car-setup' | 'basics';
+  subcategory: string;
+  tagsJson: string;
+  sourceName: string | null;
+  sourceUrl: string | null;
+  season: string;
+  publishedAt: string;
+}
+
+/**
+ * Persist the published item, review decision, terminal job transition, and
+ * audit record as one SQLite transaction.
+ */
+export function commitPublishedDraft(input: CommitPublishedDraftInput): { itemId: string } {
+  const db = getDb();
+
+  return db.transaction((tx) => {
+    const job = tx
+      .select()
+      .from(knowledgeJobs)
+      .where(eq(knowledgeJobs.id, input.jobId))
+      .limit(1)
+      .all()[0];
+    if (!job) {
+      throw new AppError('NOT_FOUND', 'Knowledge job not found');
+    }
+
+    const now = utcNow();
+    const existing = tx
+      .select()
+      .from(knowledgeItems)
+      .where(eq(knowledgeItems.wikiPath, input.wikiPath))
+      .limit(1)
+      .all()[0];
+    const itemId = existing?.id ?? generateId();
+    const itemChanges = {
+      draftId: input.draftId,
+      title: input.title,
+      category: input.category,
+      subcategory: input.subcategory,
+      tagsJson: input.tagsJson,
+      sourceName: input.sourceName,
+      sourceUrl: input.sourceUrl,
+      season: input.season,
+      status: 'published' as const,
+      gitCommitSha: null,
+      wikiSyncStatus: 'committed' as const,
+      publishedBy: input.reviewedBy,
+      publishedAt: input.publishedAt,
+      updatedAt: now,
+    };
+
+    if (existing) {
+      tx.update(knowledgeItems).set(itemChanges).where(eq(knowledgeItems.id, itemId)).run();
+    } else {
+      tx.insert(knowledgeItems)
+        .values({
+          id: itemId,
+          sourceId: job.sourceId,
+          wikiPath: input.wikiPath,
+          ...itemChanges,
+        })
+        .run();
+    }
+
+    const siblingJobs = tx
+      .select({ id: knowledgeJobs.id })
+      .from(knowledgeJobs)
+      .where(eq(knowledgeJobs.sourceId, job.sourceId))
+      .all();
+    if (siblingJobs.length > 0) {
+      tx.update(knowledgeDrafts)
+        .set({ status: 'superseded', updatedAt: now })
+        .where(
+          and(
+            inArray(
+              knowledgeDrafts.jobId,
+              siblingJobs.map((row) => row.id),
+            ),
+            ne(knowledgeDrafts.id, input.draftId),
+            eq(knowledgeDrafts.status, 'pending_review'),
+          ),
+        )
+        .run();
+    }
+
+    tx.update(knowledgeDrafts)
+      .set({
+        status: 'approved',
+        reviewedBy: input.reviewedBy,
+        reviewedAt: input.publishedAt,
+        updatedAt: now,
+      })
+      .where(eq(knowledgeDrafts.id, input.draftId))
+      .run();
+
+    const jobResult = tx
+      .update(knowledgeJobs)
+      .set({ status: 'published', updatedAt: now })
+      .where(and(eq(knowledgeJobs.id, input.jobId), eq(knowledgeJobs.status, 'publishing')))
+      .run();
+    if (jobResult.changes !== 1) {
+      throw new AppError('INVALID_STATE', 'Knowledge job is not in publishing state');
+    }
+
+    tx.insert(auditLogs)
+      .values({
+        id: generateId(),
+        actorId: input.reviewedBy,
+        action: 'knowledge.published',
+        resource: 'knowledge_item',
+        resourceId: itemId,
+        requestId: null,
+        ipHash: null,
+        changesJson: JSON.stringify({ draftId: input.draftId, wikiPath: input.wikiPath }),
+        createdAt: now,
+      })
+      .run();
+
+    return { itemId };
+  });
 }
 
 /**

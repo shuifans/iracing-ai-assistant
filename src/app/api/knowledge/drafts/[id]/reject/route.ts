@@ -16,7 +16,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 const rejectDraftSchema = z.object({
@@ -31,7 +31,7 @@ export const POST = withErrorHandler(
     requireRole(user, 'knowledge_admin', 'admin');
     requireActiveUser(user);
 
-    const id = context!.params.id;
+    const id = (await context!.params).id;
 
     let body: unknown;
     try {

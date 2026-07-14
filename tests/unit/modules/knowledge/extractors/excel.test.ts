@@ -1,38 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AppError } from '@/lib/errors';
 
-// Use vi.hoisted so mock fns are available when vi.mock factory runs (it is hoisted)
-const { mockSheetToJson, mockRead } = vi.hoisted(() => ({
-  mockSheetToJson: vi.fn(),
-  mockRead: vi.fn(),
-}));
+const { mockRead } = vi.hoisted(() => ({ mockRead: vi.fn() }));
 
-vi.mock('xlsx', () => ({
-  default: {
-    read: mockRead,
-    utils: { sheet_to_json: mockSheetToJson },
-  },
-  read: mockRead,
-  utils: { sheet_to_json: mockSheetToJson },
-}));
+vi.mock('read-excel-file/node', () => ({ default: mockRead }));
 
 import { extractExcel } from '@/modules/knowledge/extractors/excel';
 
 function makeWorkbook(sheets: Record<string, unknown[][]>) {
-  const sheetNames = Object.keys(sheets);
-  const Sheets: Record<string, unknown> = {};
-  for (const name of sheetNames) {
-    Sheets[name] = { __data: sheets[name] };
-  }
-  // When sheet_to_json is called, return the data for that sheet
-  mockSheetToJson.mockImplementation((sheet: any) => {
-    // Find the sheet name by matching the sheet object
-    for (const [name, data] of Object.entries(sheets)) {
-      if (sheet === Sheets[name]) return data;
-    }
-    return [];
-  });
-  return { SheetNames: sheetNames, Sheets };
+  return Object.entries(sheets).map(([sheet, data]) => ({ sheet, data }));
 }
 
 beforeEach(() => {
@@ -51,7 +27,10 @@ describe('extractExcel', () => {
     const wb = makeWorkbook({ Sheet1: rows });
     mockRead.mockReturnValue(wb);
 
-    const result = await extractExcel(Buffer.from('fake-xlsx'), 'application/vnd.ms-excel');
+    const result = await extractExcel(
+      Buffer.from('fake-xlsx'),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
 
     expect(result.text).toContain('## Sheet1');
     expect(result.text).toContain('| Name | Age | Team |');
@@ -68,7 +47,10 @@ describe('extractExcel', () => {
     });
     mockRead.mockReturnValue(wb);
 
-    const result = await extractExcel(Buffer.from('multi'), 'application/vnd.ms-excel');
+    const result = await extractExcel(
+      Buffer.from('multi'),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
 
     expect(result.text).toContain('## Drivers');
     expect(result.text).toContain('## Teams');
@@ -85,7 +67,10 @@ describe('extractExcel', () => {
     mockRead.mockReturnValue(wb);
 
     await expect(
-      extractExcel(Buffer.from('too-many'), 'application/vnd.ms-excel'),
+      extractExcel(
+        Buffer.from('too-many'),
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ),
     ).rejects.toMatchObject({ code: 'CONTENT_TOO_LARGE' });
   });
 
@@ -95,7 +80,10 @@ describe('extractExcel', () => {
     mockRead.mockReturnValue(wb);
 
     await expect(
-      extractExcel(Buffer.from('too-many-rows'), 'application/vnd.ms-excel'),
+      extractExcel(
+        Buffer.from('too-many-rows'),
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ),
     ).rejects.toMatchObject({ code: 'CONTENT_TOO_LARGE' });
   });
 
@@ -105,7 +93,10 @@ describe('extractExcel', () => {
     mockRead.mockReturnValue(wb);
 
     await expect(
-      extractExcel(Buffer.from('wide'), 'application/vnd.ms-excel'),
+      extractExcel(
+        Buffer.from('wide'),
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ),
     ).rejects.toMatchObject({ code: 'CONTENT_TOO_LARGE' });
   });
 
@@ -119,7 +110,10 @@ describe('extractExcel', () => {
     const wb = makeWorkbook({ Sheet1: rows });
     mockRead.mockReturnValue(wb);
 
-    const result = await extractExcel(Buffer.from('empty-rows'), 'application/vnd.ms-excel');
+    const result = await extractExcel(
+      Buffer.from('empty-rows'),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
 
     // Count the number of data lines (excluding header and separator)
     const lines = result.text.split('\n').filter((l) => l.startsWith('|'));
@@ -128,28 +122,31 @@ describe('extractExcel', () => {
   });
 
   it('空 workbook（无 sheet）返回空结果', async () => {
-    mockRead.mockReturnValue({ SheetNames: [], Sheets: {} });
+    mockRead.mockResolvedValue([]);
 
-    const result = await extractExcel(Buffer.from('empty-wb'), 'application/vnd.ms-excel');
+    const result = await extractExcel(
+      Buffer.from('empty-wb'),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
 
     expect(result.text).toBe('');
     expect(result.charCount).toBe(0);
     expect(result.warnings).toContain('Workbook contains no sheets');
   });
 
-  it('xlsx.read 抛出错误 → AppError EXTRACTION_FAILED', async () => {
-    mockRead.mockImplementation(() => {
-      throw new Error('Invalid file');
-    });
+  it('解析器抛出错误 → AppError EXTRACTION_FAILED', async () => {
+    mockRead.mockRejectedValue(new Error('Invalid file'));
 
     await expect(
-      extractExcel(Buffer.from('bad'), 'application/vnd.ms-excel'),
+      extractExcel(
+        Buffer.from('bad'),
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ),
     ).rejects.toMatchObject({ code: 'EXTRACTION_FAILED' });
   });
 
-  it('公式单元格取缓存值（sheet_to_json 返回计算结果）', async () => {
-    // sheet_to_json returns computed values (cell.v), not formula strings (cell.f)
-    // Our mock simulates this: it returns 42 (the cached result) instead of '=SUM(A1:A2)'
+  it('公式单元格取解析器提供的缓存值', async () => {
+    // The parser returns the cached value rather than the formula expression.
     const rows = [
       ['Description', 'Result'],
       ['Total', 42],

@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/knowledge/git/retry — retry git sync for push_failed items.
  *
- * Resets sync status to push_pending so the publisher (D13) picks them up.
+ * Executes the publisher retry path and reports how many failed items were attempted.
  */
 export const POST = withErrorHandler(async (request: NextRequest): Promise<NextResponse> => {
   validateOrigin(request);

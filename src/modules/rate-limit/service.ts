@@ -19,35 +19,20 @@ import type { RateLimitConfig } from './types';
  * Throws AppError('RATE_LIMITED') if any scope exceeds its limit.
  */
 export function checkRateLimit(userId: string, userRole: string): void {
-  // 1. Global scope
-  const globalResult = repository.checkAndIncrement('global', 'minute');
-  if (!globalResult.allowed) {
-    throw new AppError('RATE_LIMITED', `全局限流：每分钟请求已达上限，${globalResult.resetAt} 后重置`);
-  }
-  const globalDayResult = repository.checkAndIncrement('global', 'day');
-  if (!globalDayResult.allowed) {
-    throw new AppError('RATE_LIMITED', `全局限流：每日请求已达上限，${globalDayResult.resetAt} 后重置`);
-  }
+  const result = repository.checkAndIncrementAll(userId, userRole);
+  if (result.allowed) return;
 
-  // 2. Role scope
-  const roleResult = repository.checkAndIncrement(userRole, 'minute');
-  if (!roleResult.allowed) {
-    throw new AppError('RATE_LIMITED', `角色限流（${userRole}）：每分钟请求已达上限，${roleResult.resetAt} 后重置`);
-  }
-  const roleDayResult = repository.checkAndIncrement(userRole, 'day');
-  if (!roleDayResult.allowed) {
-    throw new AppError('RATE_LIMITED', `角色限流（${userRole}）：每日请求已达上限，${roleDayResult.resetAt} 后重置`);
-  }
-
-  // 3. User scope
-  const userResult = repository.checkAndIncrement(userId, 'minute');
-  if (!userResult.allowed) {
-    throw new AppError('RATE_LIMITED', `用户限流：每分钟请求已达上限，${userResult.resetAt} 后重置`);
-  }
-  const userDayResult = repository.checkAndIncrement(userId, 'day');
-  if (!userDayResult.allowed) {
-    throw new AppError('RATE_LIMITED', `用户限流：每日请求已达上限，${userDayResult.resetAt} 后重置`);
-  }
+  const scopeLabel =
+    result.scope === 'global'
+      ? '全局限流'
+      : result.scope === 'role'
+        ? `角色限流（${userRole}）`
+        : '用户限流';
+  const windowLabel = result.limitType === 'minute' ? '每分钟' : '每日';
+  throw new AppError(
+    'RATE_LIMITED',
+    `${scopeLabel}：${windowLabel}请求已达上限，${result.resetAt} 后重置`,
+  );
 }
 
 /**

@@ -15,7 +15,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 // POST — derive a revision draft from a published knowledge item.
@@ -32,7 +32,7 @@ export const POST = withErrorHandler(
     requireRole(user, 'knowledge_admin', 'admin');
     requireActiveUser(user);
 
-    const itemId = context!.params.id;
+    const itemId = (await context!.params).id;
 
     const idempotencyKey = request.headers.get('Idempotency-Key');
     if (!idempotencyKey) {

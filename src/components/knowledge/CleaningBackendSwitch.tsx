@@ -47,10 +47,7 @@ export function CleaningBackendSwitch({ onSuccess, onError }: CleaningBackendSwi
   }, []);
 
   useEffect(() => {
-    // Fetch the current backend on mount. setState happens after await (async),
-    // but react-hooks/set-state-in-effect flags the callback call regardless —
-    // this is the canonical fetch-on-mount pattern (cf. FeedbackForm/ReCleanButton).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // Fetch the current backend on mount. State is updated after the request resolves.
     void refresh();
   }, [refresh]);
 

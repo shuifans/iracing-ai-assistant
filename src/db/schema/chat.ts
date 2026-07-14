@@ -58,20 +58,31 @@ export type NewMessage = typeof messages.$inferInsert;
 
 // ─── message_attachments ─────────────────────────────────────────────────────
 
-export const messageAttachments = sqliteTable('message_attachments', {
-  id: text('id').primaryKey(),
-  messageId: text('message_id')
-    .notNull()
-    .references(() => messages.id, { onDelete: 'cascade' }),
-  kind: text('kind').notNull().default('image'),
-  relativePath: text('relative_path').notNull(),
-  mimeType: text('mime_type').notNull(),
-  sizeBytes: integer('size_bytes').notNull(),
-  sha256: text('sha256').notNull(),
-  width: integer('width'),
-  height: integer('height'),
-  createdAt: text('created_at').notNull(),
-});
+export const messageAttachments = sqliteTable(
+  'message_attachments',
+  {
+    id: text('id').primaryKey(),
+    messageId: text('message_id').references(() => messages.id, { onDelete: 'cascade' }),
+    uploadedBy: text('uploaded_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull().default('image'),
+    relativePath: text('relative_path').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    width: integer('width'),
+    height: integer('height'),
+    createdAt: text('created_at').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    boundAt: text('bound_at'),
+  },
+  (table) => [
+    index('idx_message_attachments_message').on(table.messageId),
+    index('idx_message_attachments_owner_unbound').on(table.uploadedBy, table.messageId),
+    index('idx_message_attachments_expiry').on(table.expiresAt),
+  ],
+);
 
 export type MessageAttachment = typeof messageAttachments.$inferSelect;
 export type NewMessageAttachment = typeof messageAttachments.$inferInsert;

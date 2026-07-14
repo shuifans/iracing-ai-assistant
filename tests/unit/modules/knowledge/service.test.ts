@@ -15,6 +15,13 @@ vi.mock('@/modules/knowledge/repository', () => ({
   listItems: vi.fn(),
   archiveItem: vi.fn(),
   restoreItem: vi.fn(),
+  listItemsBySyncStatus: vi.fn(),
+  updateSyncStatus: vi.fn(),
+}));
+
+vi.mock('@/modules/knowledge/publisher', () => ({
+  publishDraft: vi.fn(),
+  retryGitPush: vi.fn(),
 }));
 
 vi.mock('@/modules/jobs/repository', () => ({
@@ -88,9 +95,14 @@ import * as knowledgeRepo from '@/modules/knowledge/repository';
 import * as jobsRepo from '@/modules/jobs/repository';
 import * as jobsService from '@/modules/jobs/service';
 import { fetchUrl } from '@/modules/knowledge/extractors/url';
-import { parseFrontMatter, validateFrontMatter, generateWikiPath } from '@/modules/knowledge/front-matter';
+import {
+  parseFrontMatter,
+  validateFrontMatter,
+  generateWikiPath,
+} from '@/modules/knowledge/front-matter';
 import { AppError } from '@/lib/errors';
 import * as fs from 'fs';
+import * as publisher from '@/modules/knowledge/publisher';
 import {
   submitFileSource,
   submitUrlSource,
@@ -102,6 +114,7 @@ import {
   rejectDraft,
   archiveItem,
   restoreItem,
+  retryGitSync,
 } from '@/modules/knowledge/service';
 import {
   getPublishGuardSettings,
@@ -118,6 +131,9 @@ const mockCreateItem = vi.mocked(knowledgeRepo.createItem);
 const mockGetItem = vi.mocked(knowledgeRepo.getItem);
 const mockArchiveItem = vi.mocked(knowledgeRepo.archiveItem);
 const mockRestoreItem = vi.mocked(knowledgeRepo.restoreItem);
+const mockListItemsBySyncStatus = vi.mocked(knowledgeRepo.listItemsBySyncStatus);
+const mockUpdateSyncStatus = vi.mocked(knowledgeRepo.updateSyncStatus);
+const mockRetryGitPush = vi.mocked(publisher.retryGitPush);
 const mockGetJob = vi.mocked(jobsRepo.getJob);
 const mockUpdateJobStatus = vi.mocked(jobsRepo.updateJobStatus);
 const mockGetPublishGuardSettings = vi.mocked(getPublishGuardSettings);
@@ -576,9 +592,7 @@ describe('rejectDraft', () => {
   });
 
   it('should throw VALIDATION_ERROR for empty reason', async () => {
-    await expect(rejectDraft('draft-001', 'user-001', '')).rejects.toThrow(
-      'between 1 and 500',
-    );
+    await expect(rejectDraft('draft-001', 'user-001', '')).rejects.toThrow('between 1 and 500');
   });
 
   it('should throw VALIDATION_ERROR for reason > 500 chars', async () => {
@@ -653,5 +667,23 @@ describe('restoreItem', () => {
   it('should throw NOT_FOUND when item missing', async () => {
     mockGetItem.mockReturnValue(null);
     await expect(restoreItem('missing')).rejects.toThrow('not found');
+  });
+});
+
+describe('retryGitSync', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('executes the real publisher retry path for every push_failed item', async () => {
+    mockListItemsBySyncStatus.mockReturnValue([
+      makeMockItem({ id: 'item-1', wikiSyncStatus: 'push_failed' }),
+      makeMockItem({ id: 'item-2', wikiSyncStatus: 'push_failed' }),
+    ]);
+    mockRetryGitPush.mockResolvedValue(undefined);
+
+    await expect(retryGitSync()).resolves.toBe(2);
+
+    expect(mockRetryGitPush).toHaveBeenNthCalledWith(1, 'item-1');
+    expect(mockRetryGitPush).toHaveBeenNthCalledWith(2, 'item-2');
+    expect(mockUpdateSyncStatus).not.toHaveBeenCalled();
   });
 });

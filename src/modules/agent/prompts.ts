@@ -77,8 +77,8 @@ the user's iRacing question.
 - Use Read, Glob, and Grep to locate and extract relevant passages.
 - Do NOT modify any file.
 - Do NOT call any sub-agent.
-- Return a JSON array of evidence objects with this shape:
-  [{
+- Return exactly one JSON evidence envelope with this shape:
+  {"evidence": [{
     "evidenceId": "<unique-id>",
     "type": "wiki",
     "title": "<page title or heading>",
@@ -86,8 +86,8 @@ the user's iRacing question.
     "excerpt": "<relevant text passage, max 600 chars>",
     "season": "<season tag if applicable, e.g. 2025S3>",
     "retrievedAt": "<ISO-8601 timestamp>"
-  }]
-- If nothing relevant is found, return an empty JSON array: []
+  }]}
+- If nothing relevant is found, return exactly: {"evidence": []}
 - Prioritise exact-match pages first, then broader category pages.
 - Maximum 5 turns — stop and return what you have.
 `.trim();
@@ -95,6 +95,8 @@ the user's iRacing question.
 // ---------------------------------------------------------------------------
 // web-research sub-agent prompt
 // ---------------------------------------------------------------------------
+
+export const WEB_RESEARCH_MAX_TURNS = 5;
 
 export const WEB_RESEARCH_PROMPT = /* text */ `
 You are a web research agent for the iRacing knowledge base.
@@ -116,8 +118,8 @@ the local Wiki has insufficient information.
 - Use WebSearch to find relevant pages, then WebFetch to extract content.
 - NEVER navigate to domains outside the allowlist above.
 - Do NOT call any sub-agent.
-- Return a JSON array of evidence objects with this shape:
-  [{
+- Return exactly one JSON evidence envelope with this shape:
+  {"evidence": [{
     "evidenceId": "<unique-id>",
     "type": "web",
     "title": "<page or article title>",
@@ -125,11 +127,11 @@ the local Wiki has insufficient information.
     "excerpt": "<relevant text passage, max 600 chars>",
     "season": "<season tag if applicable>",
     "retrievedAt": "<ISO-8601 timestamp>"
-  }]
-- If nothing relevant is found, return an empty JSON array: []
+  }]}
+- If nothing relevant is found, return exactly: {"evidence": []}
 - Prefer official sources (support.iracing.com, iracing.com) over community
   forums.
-- Maximum 5 turns — stop and return what you have.
+- Maximum ${WEB_RESEARCH_MAX_TURNS} turns — stop and return what you have.
 `.trim();
 
 // ---------------------------------------------------------------------------

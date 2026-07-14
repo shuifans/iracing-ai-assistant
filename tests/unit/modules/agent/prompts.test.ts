@@ -37,8 +37,9 @@ describe('WIKI_SEARCH_PROMPT', () => {
     expect(WIKI_SEARCH_PROMPT).toContain('evidence');
   });
 
-  it('instructs returning a JSON array', () => {
-    expect(WIKI_SEARCH_PROMPT).toContain('JSON array');
+  it('instructs returning the shared evidence envelope', () => {
+    expect(WIKI_SEARCH_PROMPT).toContain('{"evidence"');
+    expect(WIKI_SEARCH_PROMPT).toContain('{"evidence": []}');
   });
 
   it('restricts to Read / Glob / Grep', () => {
@@ -65,6 +66,11 @@ describe('WEB_RESEARCH_PROMPT', () => {
 
   it('mentions evidence', () => {
     expect(WEB_RESEARCH_PROMPT).toContain('evidence');
+  });
+
+  it('instructs returning the shared evidence envelope', () => {
+    expect(WEB_RESEARCH_PROMPT).toContain('{"evidence"');
+    expect(WEB_RESEARCH_PROMPT).toContain('{"evidence": []}');
   });
 
   it('forbids calling sub-agents', () => {

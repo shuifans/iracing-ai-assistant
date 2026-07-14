@@ -20,7 +20,7 @@
 
 import type { AuthenticatedUser } from '@/modules/auth/types';
 import type { SDKMessage } from '@qoder-ai/qoder-agent-sdk';
-import type { AgentConfig } from '@/modules/agent/types';
+import { parseEvidenceEnvelope, type AgentConfig } from '@/modules/agent/types';
 import { createChatQuery } from '@/modules/agent/client';
 import { streamLlmDirect, isLlmDirectConfigured, type LlmChatMessage } from '@/modules/agent/llm-client';
 import { CHAT_ANSWER_BACKENDS, type ChatAnswerBackend } from '@/config/constants';
@@ -37,18 +37,25 @@ import {
 import { getDb } from '@/db/client';
 import { usageEvents } from '@/db/schema/admin';
 import { AppError } from '@/lib/errors';
+import { checkRateLimit } from '@/modules/rate-limit/service';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
 import {
   createMessage,
   updateMessage,
   getMessage,
+  getMessageForUser,
   getMessagesBySession,
   getSession,
   createMessageSource,
   updateQoderSessionId,
-  getAttachment,
+  createUserMessageWithAttachments,
+  getAttachmentsByMessage,
 } from './repository';
+import {
+  assertAttachmentBackendSupported,
+  loadAttachmentImages,
+} from './attachment-input';
 import { loadHistoryContext, generateSessionTitle } from './session-context';
 import type {
   SSEEvent,
@@ -302,20 +309,20 @@ export async function* streamChatMessage(
     throw new AppError('NOT_FOUND', 'Session not found or access denied');
   }
 
-  // Validate attachments exist
-  if (attachmentIds?.length) {
-    for (const aid of attachmentIds) {
-      const att = getAttachment(aid);
-      if (!att) {
-        throw new AppError('NOT_FOUND', `Attachment ${aid} not found`);
-      }
-    }
-  }
+  const backend = getChatAnswerBackend();
+  assertAttachmentBackendSupported(backend, Boolean(attachmentIds?.length));
+
+  checkRateLimit(user.id, user.role);
   timing.authMs = Math.round(performance.now() - t0);
 
   // 2. Short transaction: create user message + pending assistant message
   const t1 = performance.now();
-  const userMessage = createMessage(sessionId, 'user', content, 'complete');
+  const userMessage = attachmentIds?.length
+    ? createUserMessageWithAttachments(sessionId, user.id, content, attachmentIds)
+    : createMessage(sessionId, 'user', content, 'complete');
+  const imageAttachments = attachmentIds?.length
+    ? await loadAttachmentImages(getAttachmentsByMessage(userMessage.id))
+    : [];
   const assistantMessage = createMessage(sessionId, 'assistant', '', 'pending');
   const assistantMsgId = assistantMessage.id;
 
@@ -378,7 +385,7 @@ export async function* streamChatMessage(
       .slice(-3)
       .map((m) => m.id);
     const cacheKey = makeCacheKey(content, recentMsgIds);
-    const cached = getCachedAnswer(cacheKey);
+    const cached = imageAttachments.length > 0 ? null : getCachedAnswer(cacheKey);
 
     if (cached) {
       // === CACHE HIT: replay as SSE deltas (streaming-compatible) ===
@@ -411,7 +418,6 @@ export async function* streamChatMessage(
       // === cache MISS: dispatch by answer backend ===
       // 'llm-direct' (默认): BM25 本地检索 + LLM 直调, 未命中降级 SDK
       // 'qoder-sdk'         : Qoder SDK 全量循环 (wiki-search + web-research 子 Agent)
-      const backend = getChatAnswerBackend();
       const LOCAL_THRESHOLD = Number(process.env.LOCAL_SEARCH_THRESHOLD ?? 0.5);
       let searchResults: Array<{
         evidenceId: string; title: string; wikiPath?: string;
@@ -430,7 +436,7 @@ export async function* streamChatMessage(
         // after which a later read of that row crashes on `cachedRetrieval.chunks.map`.
         retrievalKey = makeCacheKey('retrieval:' + content, []);
         const t2 = performance.now();
-        cachedRetrieval = getCachedRetrieval(retrievalKey);
+        cachedRetrieval = imageAttachments.length > 0 ? null : getCachedRetrieval(retrievalKey);
         // Defensive: a stale/malformed retrieval entry lacking an Array `.chunks`
         // falls back to a fresh BM25 search instead of crashing.
         searchResults = (cachedRetrieval && Array.isArray(cachedRetrieval.chunks))
@@ -460,7 +466,7 @@ export async function* streamChatMessage(
             retrievedAt: r.retrievedAt ?? utcNow(),
           });
         }
-        if (!cachedRetrieval) {
+        if (!cachedRetrieval && imageAttachments.length === 0) {
           setCachedRetrieval(retrievalKey, content, {
             chunks: searchResults.map((r) => ({
               evidenceId: r.evidenceId, title: r.title, wikiPath: r.wikiPath ?? '',
@@ -483,6 +489,7 @@ export async function* streamChatMessage(
             evidence: evidenceList,
             history: histMsgs,
             userMessage: content,
+            imageAttachments,
             signal: abortController.signal,
           })) {
             if (chunk.text) {
@@ -538,6 +545,7 @@ export async function* streamChatMessage(
           userMessage: content,
           sessionId,
           qoderSessionId: session.qoderSessionId ?? undefined,
+          imageAttachments,
           abortController,
         });
         console.log(`[ChatTiming] req=${requestId} SDK backend budget=${sdkBudget}ms stage=${sdkStage} topScore=${topScore}`);
@@ -597,17 +605,13 @@ export async function* streamChatMessage(
                 ? resultBlock.content
                 : resultBlock.content?.map((c) => c.text ?? '').join('');
             if (rawContent) {
-              try {
-                const parsed = JSON.parse(rawContent);
-                if (Array.isArray(parsed)) {
-                  for (const e of parsed) {
-                    if (e && typeof e === 'object' && 'evidenceId' in e) {
-                      evidenceList.push(e as Evidence);
-                    }
+              const envelope = parseEvidenceEnvelope(rawContent);
+              if (envelope) {
+                for (const evidence of envelope.evidence) {
+                  if (!evidenceList.some((item) => item.evidenceId === evidence.evidenceId)) {
+                    evidenceList.push(evidence);
                   }
                 }
-              } catch {
-                // Not JSON or not evidence — skip
               }
             }
           }
@@ -837,7 +841,11 @@ export async function* streamChatMessage(
       );
 
       // Quality-gate answer caching (skip if this was itself a cache hit)
-      if (workflow.subAgents[0] !== 'cache' && (grounding === 'grounded' || accumulatedContent.length > 200)) {
+      if (
+        imageAttachments.length === 0 &&
+        workflow.subAgents[0] !== 'cache' &&
+        (grounding === 'grounded' || accumulatedContent.length > 200)
+      ) {
         const cachedSources = evidenceList.map((e) => ({
           sourceType: e.type,
           title: e.title,
@@ -957,7 +965,7 @@ export async function* streamChatMessage(
  */
 export function stopMessage(messageId: string, userId: string): void {
   // Verify the message belongs to user (through session ownership)
-  const msg = getMessage(messageId);
+  const msg = getMessageForUser(messageId, userId);
   if (!msg) {
     throw new AppError('NOT_FOUND', 'Message not found');
   }

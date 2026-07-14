@@ -103,6 +103,7 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
       connectTimeoutMs: 5000,
       downloadTimeoutMs: 15000,
       maxRedirects: 3,
+      signal,
     });
     extractedText = result.text;
     fs.writeFileSync(extractedPath, extractedText, 'utf-8');
@@ -182,7 +183,7 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
   fs.writeFileSync(draftFilePath, cleanedMarkdown, 'utf-8');
 
   // Step 10: CAS cleaning → pending_review
-  const casOk2 = jobsRepo.updateJobStatus(job.id, 'cleaning', 'pending_review');
+  const casOk2 = await jobsService.completeJob(job.id);
   if (!casOk2) {
     throw new AppError('INVALID_STATE', 'CAS cleaning→pending_review failed');
   }

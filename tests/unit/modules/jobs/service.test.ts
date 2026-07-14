@@ -317,10 +317,13 @@ describe('jobs/service', () => {
   // ─── completeJob ───────────────────────────────────────────────────────────
 
   describe('completeJob', () => {
-    it('delegates to repository.completeJob', async () => {
-      await completeJob('job-001');
+    it.each([true, false])('forwards repository result %s unchanged', async (repoResult) => {
+      mockRepoCompleteJob.mockReturnValue(repoResult);
+
+      const result = await completeJob('job-001');
 
       expect(mockRepoCompleteJob).toHaveBeenCalledWith('job-001');
+      expect(result).toBe(repoResult);
     });
   });
 

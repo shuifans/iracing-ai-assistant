@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireActiveUser } from '@/modules/auth/middleware';
+import {
+  requireAuth,
+  requireActiveUser,
+  requireRole,
+  validateOrigin,
+} from '@/modules/auth/middleware';
 import { streamChatMessage } from '@/modules/chat/service';
+import { createSession, getSession } from '@/modules/chat/repository';
 import { AppError } from '@/lib/errors';
 import { errorResponse } from '@/lib/response';
 import type { SSEEvent, PipelineTiming } from '@/modules/chat/sse-events';
@@ -37,6 +43,14 @@ interface DiagnosticSummary {
   totalTokens: number;
 }
 
+const DEFAULT_QUESTIONS = [
+  '如何调整赛车刹车平衡以获得更好的入弯表现？',
+  '轮胎压力对圈速有什么影响？应该如何调整？',
+  'iRacing 的安全等级是如何计算的？',
+];
+const MAX_QUESTIONS = 10;
+const MAX_QUESTION_LENGTH = 8000;
+
 // ---------------------------------------------------------------------------
 // POST /api/chat/diagnostic — run multi-turn diagnostic test
 // ---------------------------------------------------------------------------
@@ -44,21 +58,49 @@ interface DiagnosticSummary {
 export async function POST(request: NextRequest): Promise<Response> {
   try {
     const user = await requireAuth(request);
+    requireRole(user, 'admin', 'knowledge_admin');
     requireActiveUser(user);
+    validateOrigin(request);
 
-    const body = await request.json();
-    const questions: string[] = body.questions ?? [
-      '如何调整赛车刹车平衡以获得更好的入弯表现？',
-      '轮胎压力对圈速有什么影响？应该如何调整？',
-      'iRacing 的安全等级是如何计算的？',
-    ];
-    const sessionId: string | undefined = body.sessionId;
-    const maxRounds = Math.min(questions.length, 10);
+    const rawBody: unknown = await request.json();
+    if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+      throw new AppError('VALIDATION_ERROR', '请求体必须为 JSON 对象');
+    }
+    const body = rawBody as Record<string, unknown>;
+    const questions: unknown = body.questions === undefined ? DEFAULT_QUESTIONS : body.questions;
+    if (
+      !Array.isArray(questions) ||
+      questions.length < 1 ||
+      questions.length > MAX_QUESTIONS ||
+      questions.some(
+        (question) =>
+          typeof question !== 'string' ||
+          question.trim().length < 1 ||
+          question.length > MAX_QUESTION_LENGTH,
+      )
+    ) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        `questions 必须包含 1-${MAX_QUESTIONS} 个非空字符串，单条不超过 ${MAX_QUESTION_LENGTH} 个字符`,
+      );
+    }
+    if (
+      body.sessionId !== undefined &&
+      (typeof body.sessionId !== 'string' || body.sessionId.trim().length < 1)
+    ) {
+      throw new AppError('VALIDATION_ERROR', 'sessionId 必须为非空字符串');
+    }
+    const validatedQuestions = questions as string[];
+    const sessionId = body.sessionId as string | undefined;
+    const maxRounds = validatedQuestions.length;
 
     // Create or reuse session
     let targetSessionId = sessionId;
-    if (!targetSessionId) {
-      const { createSession } = await import('@/modules/chat/repository');
+    if (targetSessionId) {
+      if (!getSession(targetSessionId, user.id)) {
+        throw new AppError('NOT_FOUND', 'Session not found or access denied');
+      }
+    } else {
       const session = createSession(user.id);
       targetSessionId = session.id;
     }
@@ -67,7 +109,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const startTime = Date.now();
 
     for (let i = 0; i < maxRounds; i++) {
-      const question = questions[i]!;
+      const question = validatedQuestions[i]!;
       const round: RoundResult = {
         round: i + 1,
         question: question,

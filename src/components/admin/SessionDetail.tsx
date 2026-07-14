@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo } from 'react';
 import { Badge } from '@/components/common/Badge';
+import { SafeMarkdown } from '@/components/chat/SafeMarkdown';
 import { formatForDisplay } from '@/lib/datetime';
 
 interface AdminMessage {
@@ -39,7 +39,10 @@ function statusVariant(status: string): 'default' | 'success' | 'warning' | 'dan
   }
 }
 
-function roleBadge(role: string): { label: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' } {
+function roleBadge(role: string): {
+  label: string;
+  variant: 'default' | 'success' | 'warning' | 'danger' | 'info';
+} {
   switch (role) {
     case 'user':
       return { label: '用户', variant: 'info' };
@@ -52,58 +55,7 @@ function roleBadge(role: string): { label: string; variant: 'default' | 'success
   }
 }
 
-/**
- * Simple markdown renderer (read-only, no feedback/sources).
- */
-function renderSimpleMarkdown(text: string): string {
-  if (!text) return '';
-
-  let html = text;
-  html = html
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-
-  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, _l, code) => {
-    return `<pre class="overflow-x-auto rounded-lg bg-gray-900 p-3 text-sm text-gray-100"><code>${code.trim()}</code></pre>`;
-  });
-  html = html.replace(/`([^`\n]+)`/g, '<code class="rounded bg-gray-100 px-1.5 py-0.5 text-sm text-red-600">$1</code>');
-  html = html.replace(/^### (.+)$/gm, '<h3 class="mt-3 mb-1 text-base font-bold">$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2 class="mt-3 mb-1 text-lg font-bold">$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1 class="mt-3 mb-1 text-xl font-bold">$1</h1>');
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">$1</a>',
-  );
-  html = html.replace(/^[-*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>');
-  html = html.replace(/((?:<li[^>]*>.*?<\/li>\n?)+)/g, '<ul class="my-2 space-y-1">$1</ul>');
-  html = html.replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal">$1</li>');
-  html = html.replace(/((?:<li class="ml-4 list-decimal">.*?<\/li>\n?)+)/g, '<ol class="my-2 space-y-1">$1</ol>');
-  html = html.replace(/\n{2,}/g, '</p><p class="my-2">');
-  html = html.replace(/\n/g, '<br/>');
-
-  const blockTags = /<(h[1-6]|ul|ol|pre|div|table|blockquote)/;
-  if (!blockTags.test(html)) {
-    html = `<p class="my-2">${html}</p>`;
-  }
-
-  return html;
-}
-
 export function SessionDetail({ session, messages, onClose }: SessionDetailProps) {
-  const renderedMessages = useMemo(
-    () =>
-      messages.map((msg) => ({
-        ...msg,
-        html: msg.role === 'assistant' ? renderSimpleMarkdown(msg.content) : msg.content,
-      })),
-    [messages],
-  );
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl">
@@ -127,22 +79,30 @@ export function SessionDetail({ session, messages, onClose }: SessionDetailProps
             aria-label="关闭"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
 
         {/* Messages */}
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
-          {renderedMessages.length === 0 ? (
+          {messages.length === 0 ? (
             <p className="py-10 text-center text-sm text-gray-400">暂无消息</p>
           ) : (
-            renderedMessages.map((msg) => {
+            messages.map((msg) => {
               const isUser = msg.role === 'user';
               const { label, variant } = roleBadge(msg.role);
 
               return (
-                <div key={msg.id} className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  key={msg.id}
+                  className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}
+                >
                   <div
                     className={`max-w-[85%] rounded-2xl px-4 py-3 ${
                       isUser
@@ -157,12 +117,11 @@ export function SessionDetail({ session, messages, onClose }: SessionDetailProps
                       </span>
                     </div>
                     {msg.role === 'assistant' ? (
-                      <div
-                        className="prose prose-sm max-w-none overflow-hidden break-words"
-                        dangerouslySetInnerHTML={{ __html: msg.html }}
-                      />
+                      <div className="prose prose-sm max-w-none overflow-hidden break-words">
+                        <SafeMarkdown>{msg.content}</SafeMarkdown>
+                      </div>
                     ) : (
-                      <p className="whitespace-pre-wrap break-words text-sm">{msg.html}</p>
+                      <p className="whitespace-pre-wrap break-words text-sm">{msg.content}</p>
                     )}
                   </div>
                 </div>

@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 // GET — version history for a draft (all drafts for the same source, newest first)
@@ -17,7 +17,7 @@ export const GET = withErrorHandler(
     requireRole(user, 'knowledge_admin', 'admin');
     requireActiveUser(user);
 
-    const draftId = context!.params.id;
+    const draftId = (await context!.params).id;
     const versions = evalService.getDraftVersions(draftId);
     return NextResponse.json(successResponse({ versions }));
   },

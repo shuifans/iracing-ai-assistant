@@ -22,6 +22,7 @@ const mockOrderBy = vi.fn();
 const mockWhere = vi.fn();
 const mockSet = vi.fn();
 const mockValues = vi.fn();
+const mockInnerJoin = vi.fn();
 const mockFrom = vi.fn();
 const mockInsert = vi.fn();
 const mockUpdate = vi.fn();
@@ -31,7 +32,8 @@ const mockSelect = vi.fn();
 function setupMockDb() {
   // Chain: select().from().where().limit() / .orderBy()
   mockSelect.mockReturnValue({ from: mockFrom });
-  mockFrom.mockReturnValue({ where: mockWhere });
+  mockFrom.mockReturnValue({ where: mockWhere, innerJoin: mockInnerJoin });
+  mockInnerJoin.mockReturnValue({ where: mockWhere });
   mockWhere.mockReturnValue({ limit: mockLimit, orderBy: mockOrderBy, run: mockRun });
   mockLimit.mockReturnValue({ all: mockAll, run: mockRun });
   mockAll.mockReturnValue([]);
@@ -201,6 +203,34 @@ describe('repository', () => {
 
       expect(mockUpdate).toHaveBeenCalled();
       expect(mockSet).toHaveBeenCalledWith({ status: 'complete', content: 'Final content' });
+    });
+  });
+
+  describe('getMessageForUser', () => {
+    it('resolves a message through its session ownership', async () => {
+      const message = {
+        id: 'msg-001',
+        sessionId: 'sess-001',
+        role: 'assistant',
+        status: 'streaming',
+        content: 'partial',
+        replyToMessageId: null,
+        errorCode: null,
+        tokenInput: 0,
+        tokenOutput: 0,
+        costMicrousd: 0,
+        durationMs: 0,
+        createdAt: '2026-07-12T00:00:00.000Z',
+        completedAt: null,
+      };
+      mockAll.mockReturnValue([message]);
+      const repository = await import('@/modules/chat/repository');
+
+      const result = repository.getMessageForUser('msg-001', 'user-001');
+
+      expect(result).toEqual(message);
+      expect(mockInnerJoin).toHaveBeenCalled();
+      expect(mockWhere).toHaveBeenCalled();
     });
   });
 

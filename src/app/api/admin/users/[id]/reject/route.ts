@@ -15,7 +15,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export const POST = withErrorHandler(
@@ -25,7 +25,7 @@ export const POST = withErrorHandler(
     requireRole(user, 'admin');
     requireActiveUser(user);
 
-    const id = context!.params.id;
+    const id = (await context!.params).id;
     const body = await request.json();
     const reason = body.reason;
 

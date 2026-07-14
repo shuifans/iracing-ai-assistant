@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock the repository module
 vi.mock('@/modules/rate-limit/repository', () => ({
-  checkAndIncrement: vi.fn(),
+  checkAndIncrementAll: vi.fn(),
   getRateLimitConfigs: vi.fn(),
   getRateLimitConfig: vi.fn(),
   updateRateLimitConfig: vi.fn(),
@@ -22,30 +22,20 @@ describe('rate-limit/service', () => {
 
   describe('checkRateLimit', () => {
     it('passes when all scopes are under limit', async () => {
-      vi.mocked(repository.checkAndIncrement).mockReturnValue({
-        allowed: true,
-        remaining: 5,
-        resetAt: '2026-07-12T00:01:00.000Z',
-        limitType: 'minute',
-      });
+      vi.mocked(repository.checkAndIncrementAll).mockReturnValue({ allowed: true });
 
       const { checkRateLimit } = await import('@/modules/rate-limit/service');
       expect(() => checkRateLimit('user-001', 'user')).not.toThrow();
 
-      // Should check global(minute+day) + role(minute+day) + user(minute+day) = 6 calls
-      expect(repository.checkAndIncrement).toHaveBeenCalledTimes(6);
-      expect(repository.checkAndIncrement).toHaveBeenCalledWith('global', 'minute');
-      expect(repository.checkAndIncrement).toHaveBeenCalledWith('global', 'day');
-      expect(repository.checkAndIncrement).toHaveBeenCalledWith('user', 'minute');
-      expect(repository.checkAndIncrement).toHaveBeenCalledWith('user', 'day');
-      expect(repository.checkAndIncrement).toHaveBeenCalledWith('user-001', 'minute');
-      expect(repository.checkAndIncrement).toHaveBeenCalledWith('user-001', 'day');
+      expect(repository.checkAndIncrementAll).toHaveBeenCalledTimes(1);
+      expect(repository.checkAndIncrementAll).toHaveBeenCalledWith('user-001', 'user');
     });
 
     it('throws RATE_LIMITED when global minute limit reached', async () => {
-      vi.mocked(repository.checkAndIncrement).mockReturnValueOnce({
+      vi.mocked(repository.checkAndIncrementAll).mockReturnValue({
         allowed: false,
-        remaining: 0,
+        scope: 'global',
+        scopeKey: 'global',
         resetAt: '2026-07-12T00:01:00.000Z',
         limitType: 'minute',
       });
@@ -55,74 +45,42 @@ describe('rate-limit/service', () => {
     });
 
     it('throws RATE_LIMITED when global day limit reached', async () => {
-      vi.mocked(repository.checkAndIncrement)
-        .mockReturnValueOnce({
-          allowed: true,
-          remaining: 5,
-          resetAt: '2026-07-12T00:01:00.000Z',
-          limitType: 'minute',
-        })
-        .mockReturnValueOnce({
-          allowed: false,
-          remaining: 0,
-          resetAt: '2026-07-13T00:00:00.000Z',
-          limitType: 'day',
-        });
+      vi.mocked(repository.checkAndIncrementAll).mockReturnValue({
+        allowed: false,
+        scope: 'global',
+        scopeKey: 'global',
+        resetAt: '2026-07-13T00:00:00.000Z',
+        limitType: 'day',
+      });
 
       const { checkRateLimit } = await import('@/modules/rate-limit/service');
       expect(() => checkRateLimit('user-001', 'user')).toThrow(AppError);
     });
 
     it('throws RATE_LIMITED when role minute limit reached', async () => {
-      vi.mocked(repository.checkAndIncrement)
-        .mockReturnValueOnce({ allowed: true, remaining: 5, resetAt: 'x', limitType: 'minute' })
-        .mockReturnValueOnce({ allowed: true, remaining: 5, resetAt: 'x', limitType: 'day' })
-        .mockReturnValueOnce({
-          allowed: false,
-          remaining: 0,
-          resetAt: '2026-07-12T00:01:00.000Z',
-          limitType: 'minute',
-        });
+      vi.mocked(repository.checkAndIncrementAll).mockReturnValue({
+        allowed: false,
+        scope: 'role',
+        scopeKey: 'admin',
+        resetAt: '2026-07-12T00:01:00.000Z',
+        limitType: 'minute',
+      });
 
       const { checkRateLimit } = await import('@/modules/rate-limit/service');
       expect(() => checkRateLimit('user-001', 'admin')).toThrow(AppError);
     });
 
     it('throws RATE_LIMITED when user limit reached', async () => {
-      vi.mocked(repository.checkAndIncrement)
-        .mockReturnValueOnce({ allowed: true, remaining: 5, resetAt: 'x', limitType: 'minute' })
-        .mockReturnValueOnce({ allowed: true, remaining: 5, resetAt: 'x', limitType: 'day' })
-        .mockReturnValueOnce({ allowed: true, remaining: 5, resetAt: 'x', limitType: 'minute' })
-        .mockReturnValueOnce({ allowed: true, remaining: 5, resetAt: 'x', limitType: 'day' })
-        .mockReturnValueOnce({
-          allowed: false,
-          remaining: 0,
-          resetAt: '2026-07-12T00:01:00.000Z',
-          limitType: 'minute',
-        });
-
-      const { checkRateLimit } = await import('@/modules/rate-limit/service');
-      expect(() => checkRateLimit('user-001', 'user')).toThrow(AppError);
-    });
-
-    it('checks scopes in order: global → role → user', async () => {
-      vi.mocked(repository.checkAndIncrement).mockReturnValue({
-        allowed: true,
-        remaining: 5,
-        resetAt: 'x',
+      vi.mocked(repository.checkAndIncrementAll).mockReturnValue({
+        allowed: false,
+        scope: 'user',
+        scopeKey: 'user-001',
+        resetAt: '2026-07-12T00:01:00.000Z',
         limitType: 'minute',
       });
 
       const { checkRateLimit } = await import('@/modules/rate-limit/service');
-      checkRateLimit('user-001', 'knowledge_admin');
-
-      const calls = vi.mocked(repository.checkAndIncrement).mock.calls;
-      expect(calls[0]).toEqual(['global', 'minute']);
-      expect(calls[1]).toEqual(['global', 'day']);
-      expect(calls[2]).toEqual(['knowledge_admin', 'minute']);
-      expect(calls[3]).toEqual(['knowledge_admin', 'day']);
-      expect(calls[4]).toEqual(['user-001', 'minute']);
-      expect(calls[5]).toEqual(['user-001', 'day']);
+      expect(() => checkRateLimit('user-001', 'user')).toThrow(AppError);
     });
   });
 

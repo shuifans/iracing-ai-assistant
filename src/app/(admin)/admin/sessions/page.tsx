@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, startTransition } from 'react';
+import { use, useEffect, useState, useCallback, startTransition } from 'react';
 import { authFetch } from '@/lib/auth-client';
 import { Pagination } from '@/components/common/Pagination';
 import { SessionTable } from '@/components/admin/SessionTable';
@@ -91,8 +91,9 @@ function useAdminSessions(userId: string, keyword: string, fromDate: string, toD
 export default function AdminSessionsPage({
   searchParams,
 }: {
-  searchParams: { sessionId?: string };
+  searchParams: Promise<{ sessionId?: string }>;
 }) {
+  const { sessionId } = use(searchParams);
   // Filters
   const [userId, setUserId] = useState('');
   const [keyword, setKeyword] = useState('');
@@ -109,7 +110,7 @@ export default function AdminSessionsPage({
   // Deep-link: /admin/sessions?sessionId=xxx (e.g. from PopularQuestions) auto-opens
   // that session's detail without requiring a row click in the table.
   useEffect(() => {
-    const sid = searchParams.sessionId;
+    const sid = sessionId;
     if (!sid) return;
     let cancelled = false;
     setDetailLoading(true);
@@ -133,7 +134,7 @@ export default function AdminSessionsPage({
     return () => {
       cancelled = true;
     };
-  }, [searchParams.sessionId]);
+  }, [sessionId]);
 
   async function handleSelectSession(session: AdminSession) {
     setSelectedSession(session);

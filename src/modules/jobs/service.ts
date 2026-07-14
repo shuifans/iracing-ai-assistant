@@ -169,8 +169,8 @@ export async function failJob(
 /**
  * Mark a job as complete (transitions to pending_review).
  */
-export async function completeJob(jobId: string): Promise<void> {
-  repoCompleteJob(jobId);
+export async function completeJob(jobId: string): Promise<boolean> {
+  return repoCompleteJob(jobId);
 }
 
 // ---------------------------------------------------------------------------

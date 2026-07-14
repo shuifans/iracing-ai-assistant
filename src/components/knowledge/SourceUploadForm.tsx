@@ -136,12 +136,12 @@ export function SourceUploadForm({ onSuccess, onError }: SourceUploadFormProps) 
               {file ? file.name : '拖拽文件到此处，或点击选择文件'}
             </p>
             <p className="mt-1 text-xs text-gray-400">
-              支持 .txt, .md, .docx, .pdf, .xlsx, .xls
+              支持 .txt, .md, .docx, .pdf, .xlsx
             </p>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".txt,.md,.docx,.pdf,.xlsx,.xls"
+              accept=".txt,.md,.docx,.pdf,.xlsx"
               onChange={handleFileSelect}
               className="hidden"
             />

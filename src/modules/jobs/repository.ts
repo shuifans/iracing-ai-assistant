@@ -16,8 +16,8 @@ import { JOB_STATUSES } from '@/config/constants';
 import { env } from '@/config/env';
 import type { ClaimResult, LeasedJob } from './types';
 
-// Terminal statuses — jobs in these states should not be recovered
-const TERMINAL_STATUSES = ['published', 'rejected', 'cancelled'] as const;
+// Only active worker execution states own a recoverable lease.
+const LEASED_EXECUTION_STATUSES = ['extracting', 'cleaning'] as const;
 
 // ---------------------------------------------------------------------------
 // Basic CRUD
@@ -334,20 +334,27 @@ export function failJob(id: string, errorCode: string, errorMessage: string): vo
 }
 
 /**
- * Mark a job as complete (pending_review).
+ * Mark an actively cleaning job as complete (pending_review), atomically
+ * ending its worker lease. Returns true if the CAS transition was applied.
  */
-export function completeJob(id: string): void {
+export function completeJob(id: string): boolean {
   const db = getDb();
   const now = utcNow();
 
-  db.update(knowledgeJobs)
+  const result = db
+    .update(knowledgeJobs)
     .set({
       status: 'pending_review',
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      heartbeatAt: null,
       finishedAt: now,
       updatedAt: now,
     })
-    .where(eq(knowledgeJobs.id, id))
+    .where(and(eq(knowledgeJobs.id, id), eq(knowledgeJobs.status, 'cleaning')))
     .run();
+
+  return result.changes > 0;
 }
 
 /**
@@ -420,21 +427,21 @@ export function cancelJob(id: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Recover jobs with expired leases that are not in a terminal state.
+ * Recover active worker executions with expired leases.
  * Resets them to 'queued' with lease cleared. Returns count of recovered jobs.
  */
 export function recoverExpiredLeases(): number {
   const db = getDb();
   const now = utcNow();
 
-  // Find expired non-terminal jobs
+  // Find expired active worker executions.
   const expired = db
     .select()
     .from(knowledgeJobs)
     .where(
       and(
         lt(knowledgeJobs.leaseExpiresAt, now),
-        inArray(knowledgeJobs.status, ['extracting', 'cleaning', 'pending_review', 'publishing']),
+        inArray(knowledgeJobs.status, LEASED_EXECUTION_STATUSES),
       ),
     )
     .all();
@@ -445,15 +452,23 @@ export function recoverExpiredLeases(): number {
 
   const ids = expired.map((j) => j.id);
 
-  db.update(knowledgeJobs)
+  const result = db
+    .update(knowledgeJobs)
     .set({
       status: 'queued',
       leaseOwner: null,
       leaseExpiresAt: null,
+      heartbeatAt: null,
       updatedAt: now,
     })
-    .where(inArray(knowledgeJobs.id, ids))
+    .where(
+      and(
+        inArray(knowledgeJobs.id, ids),
+        lt(knowledgeJobs.leaseExpiresAt, now),
+        inArray(knowledgeJobs.status, LEASED_EXECUTION_STATUSES),
+      ),
+    )
     .run();
 
-  return expired.length;
+  return result.changes;
 }

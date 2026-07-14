@@ -16,7 +16,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 // GET — list feedback for a draft
@@ -26,7 +26,7 @@ export const GET = withErrorHandler(
     requireRole(user, 'knowledge_admin', 'admin');
     requireActiveUser(user);
 
-    const draftId = context!.params.id;
+    const draftId = (await context!.params).id;
     const feedback = evalService.getFeedback(draftId);
     return NextResponse.json(successResponse({ feedback }));
   },
@@ -40,7 +40,7 @@ export const POST = withErrorHandler(
     requireRole(user, 'knowledge_admin', 'admin');
     requireActiveUser(user);
 
-    const draftId = context!.params.id;
+    const draftId = (await context!.params).id;
     const body = await request.json();
     const parsed = submitFeedbackSchema.safeParse(body);
     if (!parsed.success) {

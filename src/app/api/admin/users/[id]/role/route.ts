@@ -16,7 +16,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 const VALID_ROLES: readonly string[] = USER_ROLES;
@@ -28,7 +28,7 @@ export const PATCH = withErrorHandler(
     requireRole(user, 'admin');
     requireActiveUser(user);
 
-    const id = context!.params.id;
+    const id = (await context!.params).id;
     const body = await request.json();
     const role = body.role;
 

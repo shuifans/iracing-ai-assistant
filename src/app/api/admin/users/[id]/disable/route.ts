@@ -14,7 +14,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export const PATCH = withErrorHandler(
@@ -24,7 +24,7 @@ export const PATCH = withErrorHandler(
     requireRole(user, 'admin');
     requireActiveUser(user);
 
-    const id = context!.params.id;
+    const id = (await context!.params).id;
     const disabledUser = await disableUser(id);
 
     try {

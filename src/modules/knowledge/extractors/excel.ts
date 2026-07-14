@@ -1,5 +1,5 @@
 /**
- * Excel (.xlsx / .xls) extractor using the xlsx library.
+ * Excel (.xlsx) extractor using read-excel-file.
  *
  * Each sheet is converted to a Markdown table. Sheets are separated by a
  * heading (`## SheetName`) and blank rows are trimmed.
@@ -12,7 +12,7 @@
  * @module knowledge/extractors/excel
  */
 
-import XLSX from 'xlsx';
+import readExcelFile from 'read-excel-file/node';
 import type { ExtractionResult } from '@/modules/knowledge/types';
 import { AppError } from '@/lib/errors';
 
@@ -71,38 +71,30 @@ export async function extractExcel(
   buffer: Buffer,
   _mimeType: string,
 ): Promise<ExtractionResult> {
-  let workbook: XLSX.WorkBook;
+  let sheets: Awaited<ReturnType<typeof readExcelFile>>;
 
   try {
-    workbook = XLSX.read(buffer, { type: 'buffer' });
+    sheets = await readExcelFile(buffer);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     throw new AppError('EXTRACTION_FAILED', `Excel extraction failed: ${message}`);
   }
 
-  const sheetNames = workbook.SheetNames ?? [];
-
-  if (sheetNames.length === 0) {
+  if (sheets.length === 0) {
     return { text: '', charCount: 0, truncated: false, warnings: ['Workbook contains no sheets'] };
   }
 
-  if (sheetNames.length > MAX_SHEETS) {
+  if (sheets.length > MAX_SHEETS) {
     throw new AppError(
       'CONTENT_TOO_LARGE',
-      `Workbook contains ${sheetNames.length} sheets; limit is ${MAX_SHEETS}`,
+      `Workbook contains ${sheets.length} sheets; limit is ${MAX_SHEETS}`,
     );
   }
 
   const warnings: string[] = [];
   const parts: string[] = [];
 
-  for (const name of sheetNames) {
-    const sheet = workbook.Sheets[name];
-    if (!sheet) continue;
-
-    // Read as array-of-arrays; cell formulas use cached values (cell.v)
-    const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
+  for (const { sheet: name, data: rows } of sheets) {
     if (rows.length > MAX_ROWS_PER_SHEET) {
       throw new AppError(
         'CONTENT_TOO_LARGE',

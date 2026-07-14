@@ -15,7 +15,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 // POST — trigger a manual re-clean carrying accumulated reviewer feedback.
@@ -27,7 +27,7 @@ export const POST = withErrorHandler(
     requireRole(user, 'knowledge_admin', 'admin');
     requireActiveUser(user);
 
-    const draftId = context!.params.id;
+    const draftId = (await context!.params).id;
     const idempotencyKey = request.headers.get('Idempotency-Key');
     if (!idempotencyKey) {
       throw new AppError('VALIDATION_ERROR', 'Missing required header: Idempotency-Key');

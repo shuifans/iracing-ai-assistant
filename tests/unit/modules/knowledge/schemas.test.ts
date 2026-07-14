@@ -207,8 +207,8 @@ describe('cursorPageSchema', () => {
 // ─── ALLOWED_KNOWLEDGE_MIMES ────────────────────────────────────────────────
 
 describe('ALLOWED_KNOWLEDGE_MIMES', () => {
-  it('包含所有 6 种允许的 MIME 类型', () => {
-    expect(ALLOWED_KNOWLEDGE_MIMES).toHaveLength(6);
+  it('包含所有 5 种允许的 MIME 类型，并禁用旧版二进制 .xls', () => {
+    expect(ALLOWED_KNOWLEDGE_MIMES).toHaveLength(5);
     expect(ALLOWED_KNOWLEDGE_MIMES).toContain('text/plain');
     expect(ALLOWED_KNOWLEDGE_MIMES).toContain('text/markdown');
     expect(ALLOWED_KNOWLEDGE_MIMES).toContain(
@@ -218,6 +218,6 @@ describe('ALLOWED_KNOWLEDGE_MIMES', () => {
     expect(ALLOWED_KNOWLEDGE_MIMES).toContain(
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-    expect(ALLOWED_KNOWLEDGE_MIMES).toContain('application/vnd.ms-excel');
+    expect(ALLOWED_KNOWLEDGE_MIMES).not.toContain('application/vnd.ms-excel');
   });
 });

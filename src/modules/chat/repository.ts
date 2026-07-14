@@ -7,7 +7,7 @@
  * @module chat/repository
  */
 
-import { eq, and, desc, sql, lt, like, gte, lte } from 'drizzle-orm';
+import { eq, and, desc, sql, lt, like, gte, lte, inArray, isNull } from 'drizzle-orm';
 import { getDb } from '@/db/client';
 import {
   chatSessions,
@@ -22,8 +22,13 @@ import {
 } from '@/db/schema/chat';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
+import { AppError } from '@/lib/errors';
 import { users } from '@/db/schema/users';
 import type { AttachmentData, SourceData } from './types';
+import {
+  MAX_CHAT_ATTACHMENTS,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+} from './attachment-input';
 
 // ---------------------------------------------------------------------------
 // Session CRUD
@@ -345,20 +350,51 @@ export function getMessage(id: string): Message | null {
   return result[0] ?? null;
 }
 
+/**
+ * Get a message only when its parent session belongs to the given user.
+ */
+export function getMessageForUser(id: string, userId: string): Message | null {
+  const db = getDb();
+  const result = db
+    .select({
+      id: messages.id,
+      sessionId: messages.sessionId,
+      role: messages.role,
+      status: messages.status,
+      content: messages.content,
+      replyToMessageId: messages.replyToMessageId,
+      errorCode: messages.errorCode,
+      tokenInput: messages.tokenInput,
+      tokenOutput: messages.tokenOutput,
+      costMicrousd: messages.costMicrousd,
+      durationMs: messages.durationMs,
+      createdAt: messages.createdAt,
+      completedAt: messages.completedAt,
+    })
+    .from(messages)
+    .innerJoin(chatSessions, eq(messages.sessionId, chatSessions.id))
+    .where(and(eq(messages.id, id), eq(chatSessions.userId, userId)))
+    .limit(1)
+    .all();
+  return result[0] ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Attachments
 // ---------------------------------------------------------------------------
 
 /**
- * Create an attachment for a message.
+ * Create an unbound attachment owned by the uploading user.
  */
-export function createAttachment(messageId: string, data: AttachmentData): MessageAttachment {
+export function createAttachment(uploadedBy: string, data: AttachmentData): MessageAttachment {
   const db = getDb();
   const now = utcNow();
+  const expiresAt = new Date(new Date(now).getTime() + 24 * 60 * 60 * 1000).toISOString();
   const id = generateId();
   const newAttachment = {
     id,
-    messageId,
+    messageId: null,
+    uploadedBy,
     kind: data.kind,
     relativePath: data.relativePath,
     mimeType: data.mimeType,
@@ -367,10 +403,77 @@ export function createAttachment(messageId: string, data: AttachmentData): Messa
     width: data.width ?? null,
     height: data.height ?? null,
     createdAt: now,
+    expiresAt,
+    boundAt: null,
   };
 
   db.insert(messageAttachments).values(newAttachment).run();
   return newAttachment;
+}
+
+/**
+ * Create a user message and bind all supplied uploads in one SQLite
+ * transaction. Conditional updates close the validation/update race even if
+ * another sender attempts to bind the same attachment concurrently.
+ */
+export function createUserMessageWithAttachments(
+  sessionId: string,
+  userId: string,
+  content: string,
+  attachmentIds: string[],
+): Message {
+  const db = getDb();
+  const uniqueIds = [...new Set(attachmentIds)];
+  if (uniqueIds.length !== attachmentIds.length) {
+    throw new AppError('VALIDATION_ERROR', '附件 ID 不能重复');
+  }
+  if (uniqueIds.length > MAX_CHAT_ATTACHMENTS) {
+    throw new AppError('VALIDATION_ERROR', `每条消息最多允许 ${MAX_CHAT_ATTACHMENTS} 个附件`);
+  }
+
+  return db.transaction(() => {
+    const attachments = uniqueIds.length
+      ? db
+          .select()
+          .from(messageAttachments)
+          .where(inArray(messageAttachments.id, uniqueIds))
+          .all()
+      : [];
+
+    if (attachments.length !== uniqueIds.length || attachments.some((a) => a.uploadedBy !== userId)) {
+      throw new AppError('NOT_FOUND', '附件不存在或无权使用');
+    }
+    if (attachments.some((a) => a.messageId !== null)) {
+      throw new AppError('VALIDATION_ERROR', '附件已绑定到其他消息');
+    }
+    const totalBytes = attachments.reduce((sum, attachment) => sum + attachment.sizeBytes, 0);
+    if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
+      throw new AppError('VALIDATION_ERROR', '附件总大小不能超过 20MB');
+    }
+    const now = utcNow();
+    if (attachments.some((a) => a.expiresAt <= now)) {
+      throw new AppError('VALIDATION_ERROR', '附件已过期，请重新上传');
+    }
+
+    const message = createMessage(sessionId, 'user', content, 'complete');
+    for (const attachment of attachments) {
+      const result = db
+        .update(messageAttachments)
+        .set({ messageId: message.id, boundAt: now })
+        .where(
+          and(
+            eq(messageAttachments.id, attachment.id),
+            eq(messageAttachments.uploadedBy, userId),
+            isNull(messageAttachments.messageId),
+          ),
+        )
+        .run();
+      if (result.changes !== 1) {
+        throw new AppError('VALIDATION_ERROR', '附件已被使用，请重新上传');
+      }
+    }
+    return message;
+  });
 }
 
 /**

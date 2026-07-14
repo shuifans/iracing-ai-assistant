@@ -16,7 +16,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 // GET — fetch the draft's evaluation + dimensions (for the review-page scorecard)
@@ -26,7 +26,7 @@ export const GET = withErrorHandler(
     requireRole(user, 'knowledge_admin', 'admin');
     requireActiveUser(user);
 
-    const draftId = context!.params.id;
+    const draftId = (await context!.params).id;
     const evaluation = evalService.getEvaluation(draftId);
     return NextResponse.json(successResponse({ evaluation }));
   },
@@ -40,7 +40,7 @@ export const POST = withErrorHandler(
     requireRole(user, 'knowledge_admin', 'admin');
     requireActiveUser(user);
 
-    const draftId = context!.params.id;
+    const draftId = (await context!.params).id;
     let body: unknown = {};
     try {
       body = await request.json();

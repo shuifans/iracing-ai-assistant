@@ -15,7 +15,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface RouteContext {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 // POST — 批准 draft（发布知识）
@@ -26,7 +26,7 @@ export const POST = withErrorHandler(
     requireRole(user, 'knowledge_admin', 'admin');
     requireActiveUser(user);
 
-    const id = context!.params.id;
+    const id = (await context!.params).id;
 
     // Idempotency-Key header is required
     const idempotencyKey = request.headers.get('Idempotency-Key');

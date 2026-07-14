@@ -55,7 +55,6 @@ function getExtFromMime(mimeType: string): string {
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
     'application/pdf': 'pdf',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-    'application/vnd.ms-excel': 'xls',
   };
   return map[mimeType] ?? 'bin';
 }
@@ -800,13 +799,12 @@ export async function restoreItem(id: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Retry git sync for items in push_failed state.
- * Resets their sync status to push_pending so the publisher picks them up.
+ * Retry git sync for every item currently in push_failed state.
  */
 export async function retryGitSync(): Promise<number> {
   const failedItems = knowledgeRepo.listItemsBySyncStatus('push_failed');
   for (const item of failedItems) {
-    knowledgeRepo.updateSyncStatus(item.id, 'push_pending');
+    await publisher.retryGitPush(item.id);
   }
   return failedItems.length;
 }

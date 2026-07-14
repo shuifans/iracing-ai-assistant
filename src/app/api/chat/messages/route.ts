@@ -5,6 +5,7 @@ import { formatSSEEvent, SSE_HEADERS, type SSEEvent } from '@/modules/chat/sse-e
 import { AppError } from '@/lib/errors';
 import { errorResponse } from '@/lib/response';
 import { generateId } from '@/lib/uuid';
+import { MAX_CHAT_ATTACHMENTS } from '@/modules/chat/attachment-input';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,8 +31,20 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (typeof body.content !== 'string' || body.content.length < 1 || body.content.length > 8000) {
       throw new AppError('VALIDATION_ERROR', '消息内容必须为 1-8000 个字符');
     }
-    if (body.attachmentIds && !Array.isArray(body.attachmentIds)) {
-      throw new AppError('VALIDATION_ERROR', 'attachmentIds 必须为数组');
+    if (body.attachmentIds) {
+      if (!Array.isArray(body.attachmentIds)) {
+        throw new AppError('VALIDATION_ERROR', 'attachmentIds 必须为数组');
+      }
+      if (
+        body.attachmentIds.length > MAX_CHAT_ATTACHMENTS ||
+        body.attachmentIds.some((id: unknown) => typeof id !== 'string' || id.length === 0) ||
+        new Set(body.attachmentIds).size !== body.attachmentIds.length
+      ) {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          `attachmentIds 必须是最多 ${MAX_CHAT_ATTACHMENTS} 个不重复的非空字符串`,
+        );
+      }
     }
 
     const stream = new ReadableStream({

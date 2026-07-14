@@ -16,7 +16,12 @@ import {
 } from '@/db/schema/admin';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
-import type { RateLimitResult, RateLimitConfig } from './types';
+import type {
+  AppliedRateLimitScope,
+  RateLimitBatchResult,
+  RateLimitResult,
+  RateLimitConfig,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // Config CRUD
@@ -58,8 +63,141 @@ export function updateRateLimitConfig(
 }
 
 // ---------------------------------------------------------------------------
-// Core: checkAndIncrement — single transaction
+// Core rate-limit checks
 // ---------------------------------------------------------------------------
+
+/**
+ * Evaluate and increment the global, role, and per-user limits atomically.
+ *
+ * The transaction deliberately has two phases: all configured buckets are
+ * read and evaluated first; only an allowed request enters the write phase.
+ * Therefore a rejection at a later scope cannot consume earlier buckets.
+ */
+export function checkAndIncrementAll(
+  userId: string,
+  userRole: string,
+  now = new Date(),
+): RateLimitBatchResult {
+  const db = getDb();
+
+  return db.transaction(() => {
+    const scopes: Array<{
+      scope: AppliedRateLimitScope;
+      configKey: string;
+      bucketKey: string;
+      fallbackConfigKey?: string;
+    }> = [
+      { scope: 'global', configKey: 'global', bucketKey: 'global' },
+      { scope: 'role', configKey: userRole, bucketKey: userRole },
+      { scope: 'user', configKey: userId, bucketKey: userId, fallbackConfigKey: '*' },
+    ];
+    const pending: Array<{
+      scope: AppliedRateLimitScope;
+      scopeKey: string;
+      windowType: 'minute' | 'day';
+      windowStart: string;
+      resetAt: string;
+      currentCount: number;
+      bucketId?: string;
+    }> = [];
+
+    // Phase 1: evaluate every applicable scope without mutating counters.
+    for (const descriptor of scopes) {
+      let config = db
+        .select()
+        .from(rateLimitConfigs)
+        .where(
+          and(
+            eq(rateLimitConfigs.scope, descriptor.scope),
+            eq(rateLimitConfigs.scopeKey, descriptor.configKey),
+          ),
+        )
+        .limit(1)
+        .all()[0];
+
+      if (!config && descriptor.fallbackConfigKey) {
+        config = db
+          .select()
+          .from(rateLimitConfigs)
+          .where(
+            and(
+              eq(rateLimitConfigs.scope, descriptor.scope),
+              eq(rateLimitConfigs.scopeKey, descriptor.fallbackConfigKey),
+            ),
+          )
+          .limit(1)
+          .all()[0];
+      }
+      if (!config?.enabled) continue;
+
+      for (const windowType of ['minute', 'day'] as const) {
+        const limit =
+          windowType === 'minute' ? config.perMinuteLimit : config.perDayLimit;
+        if (limit === null) continue;
+
+        const windowStart = getWindowStart(now, windowType);
+        const resetAt = getResetAt(windowStart, windowType);
+        const bucket = db
+          .select()
+          .from(rateLimitBuckets)
+          .where(
+            and(
+              eq(rateLimitBuckets.scopeKey, descriptor.bucketKey),
+              eq(rateLimitBuckets.windowType, windowType),
+              eq(rateLimitBuckets.windowStart, windowStart),
+            ),
+          )
+          .limit(1)
+          .all()[0];
+        const currentCount = bucket?.count ?? 0;
+
+        if (currentCount >= limit) {
+          return {
+            allowed: false,
+            scope: descriptor.scope,
+            scopeKey: descriptor.bucketKey,
+            resetAt,
+            limitType: windowType,
+          };
+        }
+
+        pending.push({
+          scope: descriptor.scope,
+          scopeKey: descriptor.bucketKey,
+          windowType,
+          windowStart,
+          resetAt,
+          currentCount,
+          bucketId: bucket?.id,
+        });
+      }
+    }
+
+    // Phase 2: every scope passed, so increment the complete bucket set.
+    const nowIso = now.toISOString();
+    for (const item of pending) {
+      if (item.bucketId) {
+        db.update(rateLimitBuckets)
+          .set({ count: item.currentCount + 1, updatedAt: nowIso })
+          .where(eq(rateLimitBuckets.id, item.bucketId))
+          .run();
+      } else {
+        db.insert(rateLimitBuckets)
+          .values({
+            id: generateId(),
+            scopeKey: item.scopeKey,
+            windowType: item.windowType,
+            windowStart: item.windowStart,
+            count: 1,
+            updatedAt: nowIso,
+          })
+          .run();
+      }
+    }
+
+    return { allowed: true };
+  });
+}
 
 /**
  * Check rate limit and increment counter in a single SQLite transaction.

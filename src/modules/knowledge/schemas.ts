@@ -58,7 +58,6 @@ export const ALLOWED_KNOWLEDGE_MIMES = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-excel',
 ] as const;
 
 // ---------------------------------------------------------------------------
