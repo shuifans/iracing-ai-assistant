@@ -16,7 +16,10 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "build:search-index": "tsx scripts/build-search-index.ts",
-    "eval:chat": "tsx scripts/eval-chat.ts"
+    "eval:chat": "tsx scripts/eval-chat.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium",
+    "test:e2e:seed": "tsx scripts/e2e-seed.ts"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
@@ -55,6 +58,7 @@
     "prettier": "^3.9.5",
     "tsx": "^4.23.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "@playwright/test": "^1.41.2"
   }
 }

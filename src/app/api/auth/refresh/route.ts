@@ -42,6 +42,13 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     throw AppError.fromCode('UNAUTHENTICATED', '用户不存在');
   }
 
+  // Honour the account status: a disabled/pending user must not be able to
+  // keep minting access tokens via refresh. (AuthenticatedUser.status is typed
+  // as the literal 'active' by design — so verify first, then construct.)
+  if (dbUser.status !== 'active') {
+    throw AppError.fromCode('ACCOUNT_DISABLED', '账户已被禁用，无法刷新令牌');
+  }
+
   const user: AuthenticatedUser = {
     id: dbUser.id,
     username: dbUser.username,

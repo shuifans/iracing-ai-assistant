@@ -54,6 +54,11 @@ describeIf('Database migration', () => {
       'rate_limit_buckets',
       'audit_logs',
       'system_settings',
+      // knowledge-evaluation + retrieval-cache features (migrations B & C)
+      'knowledge_evaluations',
+      'evaluation_dimensions',
+      'evaluation_feedback',
+      'retrieval_cache',
     ];
 
     const rows = db
@@ -67,7 +72,7 @@ describeIf('Database migration', () => {
     for (const t of expectedTables) {
       expect(actualTables).toContain(t);
     }
-    expect(actualTables.length).toBe(16);
+    expect(actualTables.length).toBe(20);
   });
 
   // ── 2. Idempotent ──────────────────────────────────────────────────────────

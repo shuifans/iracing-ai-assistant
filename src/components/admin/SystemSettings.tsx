@@ -19,8 +19,9 @@ export function SystemSettings() {
       try {
         const res = await authFetch('/api/health/live');
         if (res.ok) {
-          const json = (await res.json()) as { data: HealthInfo };
-          setHealth(json.data ?? { status: 'ok' });
+          // /api/health/live returns the payload at the top level (no `data` envelope)
+          const json = (await res.json()) as HealthInfo;
+          setHealth(json);
         }
       } catch {
         // 静默

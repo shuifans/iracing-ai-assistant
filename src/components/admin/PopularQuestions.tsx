@@ -32,7 +32,7 @@ const columns = [
     header: 'Session',
     render: (item: Row) => (
       <a
-        href={`/admin/sessions/${item.sessionId}`}
+        href={`/admin/sessions?sessionId=${item.sessionId}`}
         className="text-blue-600 hover:underline"
         target="_blank"
         rel="noreferrer"

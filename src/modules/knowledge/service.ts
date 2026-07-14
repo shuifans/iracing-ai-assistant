@@ -115,8 +115,10 @@ export async function submitFileSource(params: {
 
   const relativePath = path.relative(env.DATA_ROOT as string, filePath);
 
-  // 5. Create source record
+  // 5. Create source record (reuse the caller-generated sourceId so the job,
+  // the upload dir, relative_path and the returned id all stay consistent).
   knowledgeRepo.createSource({
+    id: sourceId,
     inputType: 'file',
     originalName: params.originalName,
     mimeType: params.mimeType,
@@ -175,9 +177,10 @@ export async function submitUrlSource(params: {
     );
   }
 
-  // 5. Create source record
+  // 5. Create source record (reuse the caller-generated sourceId — see submitFileSource)
   const sourceId = generateId();
   knowledgeRepo.createSource({
+    id: sourceId,
     inputType: 'url',
     originalName: parsed.title ?? null,
     mimeType: 'text/html',

@@ -32,11 +32,15 @@ import type { CursorPageParams, CursorPageResult } from './types';
  * Create a new knowledge source record.
  */
 export function createSource(
-  data: Omit<NewKnowledgeSource, 'id' | 'createdAt' | 'updatedAt'>,
+  data: Omit<NewKnowledgeSource, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
 ): KnowledgeSource {
   const db = getDb();
   const now = utcNow();
-  const id = generateId();
+  // Allow callers to pass a predetermined id — the submit flow generates one
+  // up-front to name the upload dir + relative_path before the DB insert, and
+  // must reuse that same id for the job + return value (otherwise the job's
+  // source_id FK references a never-persisted row → SQLITE_CONSTRAINT_FOREIGNKEY).
+  const id = data.id ?? generateId();
   const record: NewKnowledgeSource = {
     ...data,
     id,

@@ -33,6 +33,7 @@ function useAdminSessions(userId: string, keyword: string, fromDate: string, toD
   const [loading, setLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const [searchNonce, setSearchNonce] = useState(0);
 
   const currentCursor = cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
 
@@ -66,11 +67,14 @@ function useAdminSessions(userId: string, keyword: string, fromDate: string, toD
     startTransition(() => {
       fetchSessions();
     });
-  }, [fetchSessions]);
+  }, [fetchSessions, searchNonce]);
 
   function handleSearch() {
+    // Reset to page 1. Don't call fetchSessions() directly — it closes over the
+    // stale currentCursor from this render and would issue a duplicate request
+    // with the old cursor before the effect re-runs with the reset cursor.
     setCursorStack([]);
-    fetchSessions();
+    setSearchNonce((n) => n + 1);
   }
 
   function handleNext(cursor: string) {
@@ -84,7 +88,11 @@ function useAdminSessions(userId: string, keyword: string, fromDate: string, toD
   return { sessions, loading, nextCursor, cursorStack, handleSearch, handleNext, handlePrev };
 }
 
-export default function AdminSessionsPage() {
+export default function AdminSessionsPage({
+  searchParams,
+}: {
+  searchParams: { sessionId?: string };
+}) {
   // Filters
   const [userId, setUserId] = useState('');
   const [keyword, setKeyword] = useState('');
@@ -97,6 +105,35 @@ export default function AdminSessionsPage() {
   const [selectedSession, setSelectedSession] = useState<AdminSession | null>(null);
   const [detailMessages, setDetailMessages] = useState<SessionMessage[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  // Deep-link: /admin/sessions?sessionId=xxx (e.g. from PopularQuestions) auto-opens
+  // that session's detail without requiring a row click in the table.
+  useEffect(() => {
+    const sid = searchParams.sessionId;
+    if (!sid) return;
+    let cancelled = false;
+    setDetailLoading(true);
+    setSelectedSession(null);
+    (async () => {
+      try {
+        const res = await authFetch(`/api/admin/sessions/${sid}`);
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as {
+          data: { session: AdminSession; messages: SessionMessage[] };
+        };
+        if (cancelled) return;
+        setSelectedSession(json.data.session);
+        setDetailMessages(json.data.messages);
+      } catch {
+        // ignore — user can still select from the table
+      } finally {
+        if (!cancelled) setDetailLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams.sessionId]);
 
   async function handleSelectSession(session: AdminSession) {
     setSelectedSession(session);

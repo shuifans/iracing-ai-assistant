@@ -25,6 +25,11 @@ data/db/
 # Test
 coverage/
 
+# Playwright (browser E2E)
+/test-results/
+/playwright-report/
+/data/e2e/
+
 # IDE
 .vscode/
 .idea/

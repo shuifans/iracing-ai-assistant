@@ -86,10 +86,10 @@ function useKnowledgePageData() {
       if (!res.ok) throw new Error('加载来源失败');
       const json = (await res.json()) as {
         data: { sources: Source[] };
-        pagination?: { nextCursor: string | null };
+        meta?: { nextCursor: string | null };
       };
       setSources(json.data.sources);
-      setSourcesCursor(json.pagination?.nextCursor ?? null);
+      setSourcesCursor(json.meta?.nextCursor ?? null);
     } catch {
       // handled by toast in component
     } finally {
@@ -114,10 +114,10 @@ function useKnowledgePageData() {
       if (!res.ok) throw new Error('加载任务失败');
       const json = (await res.json()) as {
         data: { jobs: Job[] };
-        pagination?: { nextCursor: string | null };
+        meta?: { nextCursor: string | null };
       };
       setJobs(json.data.jobs);
-      setJobsCursor(json.pagination?.nextCursor ?? null);
+      setJobsCursor(json.meta?.nextCursor ?? null);
     } catch {
       // handled by toast in component
     } finally {
@@ -173,10 +173,10 @@ function useKnowledgePageData() {
       if (!res.ok) throw new Error('加载知识条目失败');
       const json = (await res.json()) as {
         data: { items: KnowledgeItem[] };
-        pagination?: { nextCursor: string | null };
+        meta?: { nextCursor: string | null };
       };
       setItems(json.data.items);
-      setItemsCursor(json.pagination?.nextCursor ?? null);
+      setItemsCursor(json.meta?.nextCursor ?? null);
     } catch {
       // handled by toast in component
     } finally {

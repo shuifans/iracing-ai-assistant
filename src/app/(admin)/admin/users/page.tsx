@@ -97,6 +97,7 @@ async function apiCall(url: string, options?: RequestInit): Promise<{ ok: boolea
 function useUsers(activeTab: string, filterValues: Record<string, string>, cursor: string | undefined, refreshTrigger: number) {
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,8 +111,10 @@ function useUsers(activeTab: string, filterValues: Record<string, string>, curso
           if (res.ok) {
             const json = (await res.json()) as { data: { users: UserSummary[] } };
             setUsers(json.data.users);
+            setNextCursor(null);
           } else {
             setUsers([]);
+            setNextCursor(null);
           }
         } else {
           const params = new URLSearchParams();
@@ -126,11 +129,13 @@ function useUsers(activeTab: string, filterValues: Record<string, string>, curso
           if (res.ok) {
             const json = (await res.json()) as {
               data: { users: UserSummary[] };
-              pagination?: { nextCursor: string | null };
+              meta?: { nextCursor: string | null };
             };
             setUsers(json.data.users);
+            setNextCursor(json.meta?.nextCursor ?? null);
           } else {
             setUsers([]);
+            setNextCursor(null);
           }
         }
       } catch {
@@ -146,7 +151,7 @@ function useUsers(activeTab: string, filterValues: Record<string, string>, curso
     };
   }, [activeTab, filterValues, cursor, refreshTrigger]);
 
-  return { users, loading };
+  return { users, loading, nextCursor };
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -155,7 +160,6 @@ export default function AdminUsersPage() {
   const [activeTab, setActiveTab] = useState('pending');
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
   const [cursorStack, setCursorStack] = useState<string[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Modal / dialog state
@@ -164,11 +168,10 @@ export default function AdminUsersPage() {
   const [toast, setToast] = useState<ToastState | null>(null);
 
   const currentCursor = cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
-  const { users, loading } = useUsers(activeTab, filterValues, currentCursor, refreshTrigger);
+  const { users, loading, nextCursor } = useUsers(activeTab, filterValues, currentCursor, refreshTrigger);
 
   function refreshList() {
     setCursorStack([]);
-    setNextCursor(null);
     setRefreshTrigger((t) => t + 1);
   }
 
@@ -196,13 +199,13 @@ export default function AdminUsersPage() {
         : { message: result.error ?? '批准失败', type: 'error' }
       );
     } else if (type === 'disable') {
-      const result = await apiCall(`/api/admin/users/${user.id}/disable`, { method: 'POST' });
+      const result = await apiCall(`/api/admin/users/${user.id}/disable`, { method: 'PATCH' });
       setToast(result.ok
         ? { message: `已禁用用户 ${user.username}`, type: 'success' }
         : { message: result.error ?? '禁用失败', type: 'error' }
       );
     } else if (type === 'enable') {
-      const result = await apiCall(`/api/admin/users/${user.id}/enable`, { method: 'POST' });
+      const result = await apiCall(`/api/admin/users/${user.id}/enable`, { method: 'PATCH' });
       setToast(result.ok
         ? { message: `已启用用户 ${user.username}`, type: 'success' }
         : { message: result.error ?? '启用失败', type: 'error' }
@@ -234,7 +237,7 @@ export default function AdminUsersPage() {
       );
     } else if (currentModal.type === 'changeRole') {
       const result = await apiCall(`/api/admin/users/${currentModal.user.id}/role`, {
-        method: 'PUT',
+        method: 'PATCH',
         body: JSON.stringify({ role: data.role ?? 'user' }),
       });
       setToast(result.ok
