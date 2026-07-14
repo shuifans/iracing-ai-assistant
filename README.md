@@ -1,6 +1,6 @@
 # iRacing AI 助手
 
-面向 iRacing 新手和中等水平玩家的智能问答助手，基于 Markdown Wiki 知识库 + Qoder Agent 架构，帮助用户提升圈速、驾驶稳定性和比赛策略水平。
+面向 iRacing 新手和中等水平玩家的智能问答助手，基于 Markdown Wiki 知识库 + 双后端 LLM 架构（LLM 直连 / Qoder Agent，可随时切换），帮助用户提升圈速、驾驶稳定性和比赛策略水平。
 
 > **中文友好** · **幻觉可控** · **个性化追问** · **专业知识即时获取**
 
@@ -12,7 +12,7 @@ iRacing AI 助手整合官方文档、权威社区、专业教程等知识源，
 
 ### 核心能力
 
-- **智能问答** — 基于本地 Markdown Wiki + 在线权威站点的混合检索，生成精准中文回答
+- **智能问答** — BM25 本地检索 + 流式生成，双后端可切换（LLM 直连[默认 LongCat-2.0，≤30s] / Qoder SDK[Qwen3.7-Plus]），含答案缓存
 - **多轮对话** — 支持上下文追问，逐步细化用户需求
 - **追问引导** — 问题过于宽泛时主动追问，获取赛道/车辆/天气等具体条件
 - **幻觉控制** — 知识库中找不到答案时坦诚告知，引导至社区专家
@@ -69,17 +69,31 @@ PM2 Process Manager (shserver, Ubuntu 24.04)
 | 密码        | bcrypt (cost 12)                      |
 | Token       | jose (JWT HS256)                      |
 | 文档解析    | mammoth / pdf-parse / xlsx            |
+| 本地检索    | minisearch（BM25 + CJK bigram）       |
+| 缓存        | lru-cache（L1）+ SQLite（L2）         |
+| LLM 直连    | LongCat-2.0（OpenAI 兼容流式）        |
 | 测试        | Vitest + Testing Library + Playwright |
 | 部署        | PM2 + Nginx + Let's Encrypt           |
 
-### Agent 架构
+### 对话与 Agent 架构
+
+对话答案生成支持双后端，经 `CHAT_ANSWER_BACKEND` 环境变量切换（改值后重启 PM2 生效）：
 
 ```
-主 Agent（对话管理 + 回答生成）
-├── wiki-search Agent   → Glob/Grep/Read 本地知识检索
-├── web-research Agent  → WebSearch/WebFetch 在线权威站点补充
-└── knowledge-cleaner   → 原始文本 → 候选 Markdown（离线 Worker，可带管理员反馈重洗）
+用户提问
+   │  答案缓存查询 (query+history hash) ── HIT ──► 回放缓存答案
+   │
+   ▼ 缓存未命中
+   ├── [llm-direct，默认] BM25 本地检索(minisearch) → OpenAI 兼容 LLM 直调流式
+   │                        (LongCat-2.0，30s 预算；本地未命中则降级 SDK web-research 60s)
+   └── [qoder-sdk] Qoder Agent SDK 全量循环 (Qwen3.7-Plus，120s 预算)
+          ├── wiki-search Agent   → Glob/Grep/Read 本地知识检索
+          └── web-research Agent  → WebSearch/WebFetch 在线权威站点补充
+
+knowledge-cleaner → 原始文本 → 候选 Markdown（离线 Worker，可带管理员反馈重洗）
 ```
+
+> 默认走 `llm-direct`（LongCat-2.0，均值 ~15s、≤30s）；`qoder-sdk` 为备选（较慢）。换 LLM 厂商只需改 `.env` 的 `LLM_API_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 三项（OpenAI 兼容接口）+ restart。
 
 ---
 
@@ -203,6 +217,8 @@ npm run dev
 | `npm run test:integration` | 运行集成测试     |
 | `npm run db:migrate`   | 执行数据库迁移       |
 | `npm run db:studio`    | Drizzle 数据库管理台 |
+| `npm run build:search-index` | 重建 BM25 搜索索引（data/search-index.json） |
+| `npm run eval:chat`    | 多轮对话 AI 测评（eval-chat.ts） |
 
 ### 知识库脚本
 
@@ -263,6 +279,7 @@ npm run dev
 - [x] PM2 部署配置（ecosystem.config.cjs、Nginx）
 - [x] 运维脚本（备份、恢复、引导管理员）
 - [x] md-wiki 知识库内容初始化（18 篇，覆盖官方指南、驾驶技术、调校理论）
+- [x] 对话双后端（LLM 直连 / Qoder SDK 可切换，默认 LongCat-2.0）+ BM25 本地检索 + 双层缓存
 - [x] E2E 测试完善
 - [x] 生产部署上线与验收（shserver，PM2 + Nginx）
 
