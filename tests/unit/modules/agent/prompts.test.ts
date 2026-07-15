@@ -1,78 +1,43 @@
 import { describe, it, expect } from 'vitest';
-import {
-  CHAT_SYSTEM_PROMPT,
-  WIKI_SEARCH_PROMPT,
-  WEB_RESEARCH_PROMPT,
-} from '@/modules/agent/prompts';
+import * as prompts from '@/modules/agent/prompts';
 
 describe('CHAT_SYSTEM_PROMPT', () => {
-  it('mentions iRacing', () => {
-    expect(CHAT_SYSTEM_PROMPT).toContain('iRacing');
+  const prompt = prompts.CHAT_SYSTEM_PROMPT;
+
+  it('defines the complete iRacing assistant scope and focused clarification behavior', () => {
+    expect(prompt).toMatch(/only iRacing/i);
+    expect(prompt).toMatch(/car.*track.*series/i);
+    expect(prompt).toContain('@Lucifinil');
   });
 
-  it('mentions @Lucifinil (expert escalation — SPEC 10.6 rule 8)', () => {
-    expect(CHAT_SYSTEM_PROMPT).toContain('@Lucifinil');
+  it('requires KNOWLEDGE.md, index-first routing, and Details for precise answers', () => {
+    expect(prompt).toContain('KNOWLEDGE.md');
+    expect(prompt).toContain('index.md');
+    expect(prompt).toContain('Details');
+    expect(prompt.indexOf('KNOWLEDGE.md')).toBeLessThan(prompt.indexOf('index.md'));
   });
 
-  it('enforces scope lock — SPEC 10.6 rule 1', () => {
-    expect(CHAT_SYSTEM_PROMPT).toMatch(/only iRacing|ONLY iRacing/i);
+  it('stops at sufficient local knowledge and uses Web only to fill a gap', () => {
+    expect(prompt).toMatch(/local knowledge.*sufficient.*do not use.*Web/is);
+    expect(prompt).toMatch(/only.*Web.*local knowledge.*missing|Web.*only.*missing/is);
+    expect(prompt).toMatch(/knowledge-sources\.md/i);
   });
 
-  it('requires evidence citation — SPEC 10.6 rule 4', () => {
-    expect(CHAT_SYSTEM_PROMPT).toMatch(/cite|source|evidence/i);
+  it('requires verifiable local and Web citations and honest insufficiency', () => {
+    expect(prompt).toMatch(/title.*relative path.*original source/is);
+    expect(prompt).toMatch(/page title.*URL/is);
+    expect(prompt).toMatch(/insufficient|do not fabricate/i);
   });
 
-  it('includes prompt injection resistance — SPEC 10.6 rule 7', () => {
-    expect(CHAT_SYSTEM_PROMPT).toMatch(/injection|override|ignore/i);
+  it('resists injection from users, wiki notes, and webpages without exposing chain of thought', () => {
+    expect(prompt).toMatch(/user.*Wiki.*web/is);
+    expect(prompt).toMatch(/prompt injection/i);
+    expect(prompt).toMatch(/do not.*internal reasoning|never.*chain.of.thought/is);
   });
 
-  it('does not include HISTORY_CONTEXT placeholder (SDK resume handles context)', () => {
-    expect(CHAT_SYSTEM_PROMPT).not.toContain('{{HISTORY_CONTEXT}}');
-  });
-});
-
-describe('WIKI_SEARCH_PROMPT', () => {
-  it('mentions evidence', () => {
-    expect(WIKI_SEARCH_PROMPT).toContain('evidence');
-  });
-
-  it('instructs returning the shared evidence envelope', () => {
-    expect(WIKI_SEARCH_PROMPT).toContain('{"evidence"');
-    expect(WIKI_SEARCH_PROMPT).toContain('{"evidence": []}');
-  });
-
-  it('restricts to Read / Glob / Grep', () => {
-    expect(WIKI_SEARCH_PROMPT).toContain('Read');
-    expect(WIKI_SEARCH_PROMPT).toContain('Glob');
-    expect(WIKI_SEARCH_PROMPT).toContain('Grep');
-  });
-});
-
-describe('WEB_RESEARCH_PROMPT', () => {
-  const ALLOWLISTED_DOMAINS = [
-    'support.iracing.com',
-    'iracing.com',
-    'forums.iracing.com',
-    'reddit.com/r/iRacing',
-    'hipole.com',
-    'coachdaveacademy.com',
-    'newsroom.porsche.com',
-  ];
-
-  it.each(ALLOWLISTED_DOMAINS)('includes allowlisted domain: %s', (domain) => {
-    expect(WEB_RESEARCH_PROMPT).toContain(domain);
-  });
-
-  it('mentions evidence', () => {
-    expect(WEB_RESEARCH_PROMPT).toContain('evidence');
-  });
-
-  it('instructs returning the shared evidence envelope', () => {
-    expect(WEB_RESEARCH_PROMPT).toContain('{"evidence"');
-    expect(WEB_RESEARCH_PROMPT).toContain('{"evidence": []}');
-  });
-
-  it('forbids calling sub-agents', () => {
-    expect(WEB_RESEARCH_PROMPT).toMatch(/not call any sub-agent|Do NOT call/i);
+  it('does not export obsolete sub-agent prompts', () => {
+    expect(prompts).not.toHaveProperty('WIKI_SEARCH_PROMPT');
+    expect(prompts).not.toHaveProperty('WEB_RESEARCH_PROMPT');
+    expect(prompts).not.toHaveProperty('WEB_RESEARCH_MAX_TURNS');
   });
 });

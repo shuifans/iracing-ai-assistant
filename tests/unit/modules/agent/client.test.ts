@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import type { PostToolUseHookInput } from '@qoder-ai/qoder-agent-sdk';
-import { WEB_ALLOWLIST, DISALLOWED_TOOLS } from '@/modules/agent/client';
-
-// ---------------------------------------------------------------------------
-// Mock the SDK — we only need `query` to return a stub AsyncGenerator
-// ---------------------------------------------------------------------------
+import type { PostToolUseHookInput, PreToolUseHookInput } from '@qoder-ai/qoder-agent-sdk';
+import { CHAT_SYSTEM_PROMPT } from '@/modules/agent/prompts';
+import type { Evidence } from '@/modules/agent/types';
+import type { WebSourceRule } from '@/modules/web-sources/types';
+import { DISALLOWED_TOOLS } from '@/modules/agent/client';
 
 function makeStubGenerator(): AsyncGenerator<any> {
   let done = false;
@@ -26,75 +25,21 @@ function makeStubGenerator(): AsyncGenerator<any> {
   } as unknown as AsyncGenerator<any>;
 }
 
-vi.mock('@qoder-ai/qoder-agent-sdk', async () => {
-  return {
-    query: vi.fn(() => makeStubGenerator()),
-    accessTokenFromEnv: vi.fn(() => ({
-      type: 'accessToken',
-      accessToken: { envVar: 'QODER_PERSONAL_ACCESS_TOKEN' },
-    })),
-  };
-});
+vi.mock('@qoder-ai/qoder-agent-sdk', async () => ({
+  query: vi.fn(() => makeStubGenerator()),
+  accessTokenFromEnv: vi.fn(() => ({
+    type: 'accessToken',
+    accessToken: { envVar: 'QODER_PERSONAL_ACCESS_TOKEN' },
+  })),
+}));
 
-// After mock setup, import the module under test
 const { createChatQuery } = await import('@/modules/agent/client');
 const { query: rawQuery } = await import('@qoder-ai/qoder-agent-sdk');
 const mockQuery = rawQuery as unknown as Mock;
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Returns the first arg of the most recent mockQuery call, typed as `any`. */
 function lastCallArgs(): any {
-  const calls = mockQuery.mock.calls;
-  return calls[calls.length - 1]![0] as any;
+  return mockQuery.mock.calls.at(-1)![0] as any;
 }
-
-describe('WEB_ALLOWLIST', () => {
-  it('contains exactly 7 domains', () => {
-    expect(WEB_ALLOWLIST).toHaveLength(7);
-  });
-
-  it.each([
-    'support.iracing.com',
-    'iracing.com',
-    'forums.iracing.com',
-    'reddit.com/r/iRacing',
-    'hipole.com',
-    'coachdaveacademy.com',
-    'newsroom.porsche.com',
-  ])('includes %s', (domain) => {
-    expect(WEB_ALLOWLIST).toContain(domain);
-  });
-});
-
-describe('DISALLOWED_TOOLS', () => {
-  it('contains Write', () => {
-    expect(DISALLOWED_TOOLS).toContain('Write');
-  });
-
-  it('contains Edit', () => {
-    expect(DISALLOWED_TOOLS).toContain('Edit');
-  });
-
-  it('contains Bash', () => {
-    expect(DISALLOWED_TOOLS).toContain('Bash');
-  });
-
-  it('contains NotebookEdit', () => {
-    expect(DISALLOWED_TOOLS).toContain('NotebookEdit');
-  });
-
-  it('contains EnterWorktree and ExitWorktree', () => {
-    expect(DISALLOWED_TOOLS).toContain('EnterWorktree');
-    expect(DISALLOWED_TOOLS).toContain('ExitWorktree');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// createChatQuery
-// ---------------------------------------------------------------------------
 
 const baseConfig = {
   wikiRoot: '/data/md-wiki',
@@ -103,321 +48,392 @@ const baseConfig = {
   cleanTimeoutMs: 900_000,
 };
 
-const baseOptions = {
-  userMessage: 'How do I trail-brake into Turn 1 at Watkins Glen?',
-  abortController: new AbortController(),
-};
+const rules: WebSourceRule[] = [
+  {
+    id: 'official',
+    name: 'iRacing Support',
+    scopeType: 'domain',
+    url: 'https://support.iracing.com/',
+    hostname: 'support.iracing.com',
+    sourceLevel: 'official',
+  },
+  {
+    id: 'reddit',
+    name: 'iRacing Reddit',
+    scopeType: 'path',
+    url: 'https://reddit.com/r/iRacing',
+    hostname: 'reddit.com',
+    pathPrefix: '/r/iRacing',
+    sourceLevel: 'community',
+  },
+  {
+    id: 'article',
+    name: 'Setup article',
+    scopeType: 'exact_url',
+    url: 'https://coachdaveacademy.com/tutorials/iracing-setup-guide/',
+    hostname: 'coachdaveacademy.com',
+    pathPrefix: '/tutorials/iracing-setup-guide/',
+    sourceLevel: 'community',
+  },
+];
+
+function makeOptions(overrides: Record<string, unknown> = {}) {
+  return {
+    userMessage: 'How do I trail-brake into Turn 1 at Watkins Glen?',
+    abortController: new AbortController(),
+    webSearchEnabled: false,
+    loadWebSourceRules: vi.fn(() => rules),
+    webSourcesSnapshotPath: '/app/notes/knowledge-sources.md',
+    onEvidence: vi.fn<(evidence: Evidence) => void>(),
+    ...overrides,
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
+describe('DISALLOWED_TOOLS', () => {
+  it.each(['Write', 'Edit', 'Bash', 'NotebookEdit', 'EnterWorktree', 'ExitWorktree'])(
+    'contains %s',
+    (tool) => expect(DISALLOWED_TOOLS).toContain(tool),
+  );
+});
+
 describe('createChatQuery', () => {
-  it('returns an AsyncGenerator', () => {
-    const gen = createChatQuery(baseConfig, baseOptions);
-    expect(gen).toBeDefined();
-    expect(typeof gen[Symbol.asyncIterator]).toBe('function');
-    expect(typeof gen.next).toBe('function');
-    expect(typeof gen.return).toBe('function');
-  });
-
-  it('calls SDK query() with correct cwd', async () => {
-    createChatQuery(baseConfig, baseOptions);
-    expect(mockQuery).toHaveBeenCalledOnce();
-    const callArgs = lastCallArgs();
-    expect(callArgs.options.cwd).toBe('/data/md-wiki');
-  });
-
-  it('includes Agent in allowedTools for main agent', async () => {
-    createChatQuery(baseConfig, baseOptions);
-    const callArgs = lastCallArgs();
-    expect(callArgs.options.allowedTools).toContain('Agent');
-  });
-
-  it('passes user message as prompt', async () => {
-    createChatQuery(baseConfig, baseOptions);
-    const callArgs = lastCallArgs();
-    expect(callArgs.prompt).toBe(baseOptions.userMessage);
-  });
-
-  it('passes images as supported base64 image blocks', async () => {
+  it('keeps legacy callers local-only with safe defaults', async () => {
     createChatQuery(baseConfig, {
-      ...baseOptions,
-      imageAttachments: [{ base64: 'aW1hZ2U=', mediaType: 'image/png' }],
+      userMessage: 'How do I brake?',
+      abortController: new AbortController(),
     });
+    const options = lastCallArgs().options;
+    const preToolUse = options.hooks.PreToolUse[0].hooks[0];
 
+    expect(options.tools).toEqual(['Read', 'Glob', 'Grep']);
+    await expect(
+      preToolUse({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'WebFetch',
+        tool_input: { url: 'https://support.iracing.com/article/1' },
+      }),
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'WEB_TOOLS_DISABLED',
+      },
+    });
+  });
+
+  it('uses Qwen3.7-Plus and direct local tools without sub-agents', async () => {
+    createChatQuery(baseConfig, makeOptions());
+    const options = lastCallArgs().options;
+
+    await expect(options.resolveModel({})).resolves.toMatchObject({ model: 'Qwen3.7-Plus' });
+    expect(options.tools).toEqual(['Read', 'Glob', 'Grep']);
+    expect(options.allowedTools).toEqual(['Read', 'Glob', 'Grep']);
+    expect(options.agents).toBeUndefined();
+    expect(options.allowedTools).not.toContain('Agent');
+  });
+
+  it('adds web tools only when the session enables them', () => {
+    createChatQuery(baseConfig, makeOptions({ webSearchEnabled: true }));
+
+    expect(lastCallArgs().options.tools).toEqual(['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch']);
+  });
+
+  it('sends the system prompt only when resume is absent', () => {
+    createChatQuery(baseConfig, makeOptions());
+    expect(lastCallArgs().options.systemPrompt).toBe(CHAT_SYSTEM_PROMPT);
+
+    createChatQuery(baseConfig, makeOptions({ qoderSessionId: 'session-1' }));
+    expect(lastCallArgs().options.systemPrompt).toBeUndefined();
+    expect(lastCallArgs().options.resume).toBe('session-1');
+  });
+
+  it('passes the message, cwd, image blocks, and streaming options to the SDK', async () => {
+    const generator = createChatQuery(
+      baseConfig,
+      makeOptions({ imageAttachments: [{ base64: 'aW1hZ2U=', mediaType: 'image/png' }] }),
+    );
     const prompt = lastCallArgs().prompt as AsyncIterable<any>;
-    const iterator = prompt[Symbol.asyncIterator]();
-    const first = await iterator.next();
 
-    expect(first.value).toEqual({
-      type: 'user',
-      message: {
-        role: 'user',
-        content: [
-          { type: 'text', text: baseOptions.userMessage },
-          {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: 'image/png',
-              data: 'aW1hZ2U=',
-            },
-          },
-        ],
+    expect(typeof generator.next).toBe('function');
+    expect(lastCallArgs().options.cwd).toBe(baseConfig.wikiRoot);
+    expect(lastCallArgs().options.includePartialMessages).toBe(true);
+    await expect(prompt[Symbol.asyncIterator]().next()).resolves.toMatchObject({
+      value: {
+        message: {
+          content: [
+            { type: 'text', text: expect.stringContaining('trail-brake') },
+            { type: 'image', source: { media_type: 'image/png', data: 'aW1hZ2U=' } },
+          ],
+        },
       },
-      parent_tool_use_id: null,
     });
   });
 
-  it('passes resume when qoderSessionId is provided', async () => {
-    createChatQuery(baseConfig, {
-      ...baseOptions,
-      qoderSessionId: 'sess-abc-123',
-    });
-    const callArgs = lastCallArgs();
-    expect(callArgs.options.resume).toBe('sess-abc-123');
-  });
-
-  it('does not set resume when qoderSessionId is absent', async () => {
-    createChatQuery(baseConfig, baseOptions);
-    const callArgs = lastCallArgs();
-    expect(callArgs.options.resume).toBeUndefined();
-  });
-
-  it('registers wiki-search and web-research agents', async () => {
-    createChatQuery(baseConfig, baseOptions);
-    const callArgs = lastCallArgs();
-    const agents = callArgs.options.agents;
-    expect(agents).toHaveProperty('wiki-search');
-    expect(agents).toHaveProperty('web-research');
-  });
-
-  it('sub-agents have Agent in disallowedTools (no nested agents)', async () => {
-    createChatQuery(baseConfig, baseOptions);
-    const callArgs = lastCallArgs();
-    const agents = callArgs.options.agents;
-    expect(agents['wiki-search'].disallowedTools).toContain('Agent');
-    expect(agents['web-research'].disallowedTools).toContain('Agent');
-  });
-
-  it('includes includePartialMessages: true', async () => {
-    createChatQuery(baseConfig, baseOptions);
-    const callArgs = lastCallArgs();
-    expect(callArgs.options.includePartialMessages).toBe(true);
-  });
-
-  it('registers PreToolUse and PostToolUse hooks', async () => {
-    createChatQuery(baseConfig, baseOptions);
-    const callArgs = lastCallArgs();
-    expect(callArgs.options.hooks).toHaveProperty('PreToolUse');
-    expect(callArgs.options.hooks).toHaveProperty('PostToolUse');
-  });
-
-  it('sub-agent wiki-search only exposes Read/Glob/Grep', async () => {
-    createChatQuery(baseConfig, baseOptions);
-    const callArgs = lastCallArgs();
-    const wikiTools = callArgs.options.agents['wiki-search'].tools;
-    expect(wikiTools).toEqual(['Read', 'Glob', 'Grep']);
-  });
-
-  it('sub-agent web-research only exposes WebSearch/WebFetch', async () => {
-    createChatQuery(baseConfig, baseOptions);
-    const callArgs = lastCallArgs();
-    const webTools = callArgs.options.agents['web-research'].tools;
-    expect(webTools).toEqual(['WebSearch', 'WebFetch']);
-  });
-
-  it('uses the same web-research max-turn value in the prompt and agent definition', () => {
-    createChatQuery(baseConfig, baseOptions);
-    const webAgent = lastCallArgs().options.agents['web-research'];
-
-    expect(webAgent.maxTurns).toBe(5);
-    expect(webAgent.prompt).toContain(`Maximum ${webAgent.maxTurns} turns`);
-  });
-
-  describe('PreToolUse boundaries', () => {
-    function getHook(): (input: unknown) => Promise<any> {
-      createChatQuery(baseConfig, baseOptions);
-      return lastCallArgs().options.hooks.PreToolUse[0].hooks[0];
-    }
-
-    it('allows a natural-language WebSearch query', async () => {
-      const result = await getHook()({
-        tool_name: 'WebSearch',
-        tool_input: { query: 'iRacing rain tyre strategy at Spa' },
-        cwd: baseConfig.wikiRoot,
-      });
-
-      expect(result.hookSpecificOutput.permissionDecision).toBe('allow');
-    });
-
-    it.each([
-      { query: 42, label: 'non-string' },
-      { query: '   ', label: 'blank' },
-      { query: 'x'.repeat(501), label: 'too long' },
-      { query: `${' '.repeat(501)}iRacing`, label: 'too long before trimming' },
-    ])('denies a $label WebSearch query', async ({ query }) => {
-      const result = await getHook()({
-        tool_name: 'WebSearch',
-        tool_input: { query },
-        cwd: baseConfig.wikiRoot,
-      });
-
-      expect(result.hookSpecificOutput.permissionDecision).toBe('deny');
-    });
-
-    it('allows an HTTPS WebFetch to an explicit allowlisted hostname', async () => {
-      const result = await getHook()({
-        tool_name: 'WebFetch',
-        tool_input: { url: 'https://support.iracing.com/articles/123' },
-        cwd: baseConfig.wikiRoot,
-      });
-
-      expect(result.hookSpecificOutput.permissionDecision).toBe('allow');
-    });
-
-    it.each([
-      'https://example.com/iracing',
-      'https://old.reddit.com/r/iRacing',
-      'https://reddit.com:444/r/iRacing',
-      'https://reddit.com./r/iRacing',
-      'https://reddit.com/r/simracing',
-      'https://reddit.com/r/iRacingExtra',
-      'https://reddit.com/r/iRacing%2F..%2Fsimracing',
-      'http://support.iracing.com/articles/123',
-    ])('denies a WebFetch outside the explicit hostname/path rules: %s', async (url) => {
-      const result = await getHook()({
-        tool_name: 'WebFetch',
-        tool_input: { url },
-        cwd: baseConfig.wikiRoot,
-      });
-
-      expect(result.hookSpecificOutput.permissionDecision).toBe('deny');
-    });
-
-    it('allows Reddit only at /r/iRacing or below it', async () => {
-      const hook = getHook();
-      const root = await hook({
-        tool_name: 'WebFetch',
-        tool_input: { url: 'https://reddit.com/r/iRacing' },
-        cwd: baseConfig.wikiRoot,
-      });
-      const child = await hook({
-        tool_name: 'WebFetch',
-        tool_input: { url: 'https://reddit.com/r/iRacing/comments/abc' },
-        cwd: baseConfig.wikiRoot,
-      });
-
-      expect(root.hookSpecificOutput.permissionDecision).toBe('allow');
-      expect(child.hookSpecificOutput.permissionDecision).toBe('allow');
-    });
-
-    it.each([
-      { toolName: 'Read', toolInput: { file_path: '../md-wiki-sibling/private.md' } },
-      { toolName: 'Glob', toolInput: { pattern: '../md-wiki-sibling/**/*.md' } },
-      { toolName: 'Grep', toolInput: { pattern: 'secret', path: '../md-wiki-sibling' } },
-    ])(
-      'denies $toolName access to a Wiki prefix sibling or traversal path',
-      async ({ toolName, toolInput }) => {
-        const result = await getHook()({
-          tool_name: toolName,
-          tool_input: toolInput,
-          cwd: baseConfig.wikiRoot,
-        });
-
-        expect(result.hookSpecificOutput.permissionDecision).toBe('deny');
-      },
-    );
-
-    it.each([
-      { toolName: 'Read', toolInput: { file_path: '..notes/private.md' } },
-      { toolName: 'Glob', toolInput: { pattern: '..notes/**/*.md' } },
-      { toolName: 'Grep', toolInput: { pattern: 'braking', path: '..notes' } },
-    ])(
-      'allows $toolName access to a root-contained path whose name starts with dots',
-      async ({ toolName, toolInput }) => {
-        const result = await getHook()({
-          tool_name: toolName,
-          tool_input: toolInput,
-          cwd: baseConfig.wikiRoot,
-        });
-
-        expect(result.hookSpecificOutput.permissionDecision).toBe('allow');
-      },
-    );
-
-    it('denies a malformed non-string Grep path', async () => {
-      const result = await getHook()({
-        tool_name: 'Grep',
-        tool_input: { pattern: 'braking', path: 42 },
-        cwd: baseConfig.wikiRoot,
-      });
-
-      expect(result.hookSpecificOutput.permissionDecision).toBe('deny');
-    });
-  });
-
-  describe('PostToolUse evidence contract', () => {
-    function getHook(): (input: PostToolUseHookInput) => Promise<any> {
-      createChatQuery(baseConfig, baseOptions);
-      return lastCallArgs().options.hooks.PostToolUse[0].hooks[0];
-    }
-
-    function postToolInput(toolResponse: unknown): PostToolUseHookInput {
+  describe('query-local PreToolUse boundaries', () => {
+    function getHook(overrides: Record<string, unknown> = {}) {
+      const options = makeOptions({ webSearchEnabled: true, ...overrides });
+      createChatQuery(baseConfig, options);
       return {
-        session_id: 'qoder-session-1',
-        transcript_path: '/tmp/qoder-session-1.jsonl',
-        cwd: baseConfig.wikiRoot,
-        hook_event_name: 'PostToolUse',
-        tool_name: 'Agent',
-        tool_input: { agent: 'wiki-search', prompt: 'Find trail braking evidence' },
-        tool_response: toolResponse,
-        tool_use_id: 'tool-use-1',
+        hook: lastCallArgs().options.hooks.PreToolUse[0].hooks[0] as (
+          input: PreToolUseHookInput,
+        ) => Promise<any>,
+        options,
       };
     }
 
-    const validEvidence = {
-      evidenceId: 'wiki-1',
-      type: 'wiki',
-      title: 'Trail braking',
-      wikiPath: 'driving/trail-braking.md',
-      excerpt: 'Release brake pressure progressively as steering input increases.',
-      retrievedAt: '2026-07-14T00:00:00.000Z',
-    };
+    function input(toolName: string, toolInput: Record<string, unknown>): PreToolUseHookInput {
+      return {
+        session_id: 'session-1',
+        transcript_path: '/tmp/session-1.jsonl',
+        cwd: '/attacker-controlled-cwd',
+        hook_event_name: 'PreToolUse',
+        tool_name: toolName,
+        tool_input: toolInput,
+        tool_use_id: 'tool-1',
+      } as PreToolUseHookInput;
+    }
 
-    it('normalizes a valid string tool_response envelope for the consumer', async () => {
-      const envelope = { evidence: [validEvidence] };
-      const result = await getHook()(postToolInput(JSON.stringify(envelope)));
+    async function decision(
+      hook: (value: PreToolUseHookInput) => Promise<any>,
+      value: PreToolUseHookInput,
+    ) {
+      return (await hook(value)).hookSpecificOutput;
+    }
 
-      expect(JSON.parse(result.hookSpecificOutput.updatedToolOutput)).toEqual(envelope);
-    });
+    it('allows wiki reads/searches and the exact snapshot Read only', async () => {
+      const { hook } = getHook();
 
-    it('extracts a valid envelope from the Agent tool_response object', async () => {
-      const envelope = { evidence: [validEvidence] };
-      const result = await getHook()(
-        postToolInput({
-          result: JSON.stringify(envelope),
-          agent: 'wiki-search',
-        }),
-      );
-
-      expect(JSON.parse(result.hookSpecificOutput.updatedToolOutput)).toEqual(envelope);
+      await expect(
+        decision(hook, input('Read', { file_path: 'cars/gt3.md' })),
+      ).resolves.toMatchObject({ permissionDecision: 'allow' });
+      await expect(decision(hook, input('Glob', { pattern: '**/*.md' }))).resolves.toMatchObject({
+        permissionDecision: 'allow',
+      });
+      await expect(
+        decision(hook, input('Grep', { pattern: 'trail braking' })),
+      ).resolves.toMatchObject({ permissionDecision: 'allow' });
+      await expect(
+        decision(hook, input('Read', { file_path: '/app/notes/knowledge-sources.md' })),
+      ).resolves.toMatchObject({ permissionDecision: 'allow' });
     });
 
     it.each([
-      { evidence: [{ ...validEvidence, retrievedAt: undefined }] },
-      { evidence: [{ ...validEvidence, excerpt: 'x'.repeat(601) }] },
-      {
-        evidence: Array.from({ length: 11 }, (_, index) => ({
-          ...validEvidence,
-          evidenceId: `wiki-${index}`,
-        })),
-      },
-    ])('rejects malformed or oversized evidence', async (envelope) => {
-      const result = await getHook()(postToolInput({ result: JSON.stringify(envelope) }));
+      ['Read', { file_path: '../private.md' }],
+      ['Read', { file_path: '/app/notes/other.md' }],
+      ['Glob', { pattern: '/app/notes/**/*.md' }],
+      ['Grep', { pattern: 'secret', path: '/app/notes' }],
+      ['Grep', { pattern: 'secret', path: 42 }],
+    ])('denies %s outside the configured file boundary', async (toolName, toolInput) => {
+      const { hook } = getHook();
+      await expect(decision(hook, input(toolName, toolInput))).resolves.toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
+    it('requires authorized site restrictions and path semantics for WebSearch', async () => {
+      const { hook } = getHook();
+
+      await expect(
+        decision(
+          hook,
+          input('WebSearch', { query: '(site:example.com) site:support.iracing.com rain' }),
+        ),
+      ).resolves.toMatchObject({
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'WEB_SEARCH_SOURCE_NOT_ALLOWED',
+      });
+      await expect(
+        decision(hook, input('WebSearch', { query: 'rain tyres site:support.iracing.com' })),
+      ).resolves.toMatchObject({ permissionDecision: 'allow' });
+      await expect(
+        decision(hook, input('WebSearch', { query: 'rain tyres' })),
+      ).resolves.toMatchObject({ permissionDecision: 'deny' });
+      await expect(
+        decision(hook, input('WebSearch', { query: 'site:example.com iRacing' })),
+      ).resolves.toMatchObject({ permissionDecision: 'deny' });
+      await expect(
+        decision(hook, input('WebSearch', { query: 'site:reddit.com iRacing rain' })),
+      ).resolves.toMatchObject({ permissionDecision: 'deny' });
+    });
+
+    it('allows a path-scoped site restriction only with its configured path', async () => {
+      const { hook } = getHook();
+      await expect(
+        decision(hook, input('WebSearch', { query: 'site:reddit.com/r/iRacing rain' })),
+      ).resolves.toMatchObject({ permissionDecision: 'allow' });
+    });
+
+    it('reloads enabled rules for every web call', async () => {
+      const loadWebSourceRules = vi
+        .fn<() => WebSourceRule[]>()
+        .mockReturnValueOnce(rules)
+        .mockReturnValueOnce([]);
+      const { hook } = getHook({ loadWebSourceRules });
+
+      await expect(
+        decision(hook, input('WebFetch', { url: 'https://support.iracing.com/article/1' })),
+      ).resolves.toMatchObject({ permissionDecision: 'allow' });
+      await expect(
+        decision(hook, input('WebFetch', { url: 'https://support.iracing.com/article/2' })),
+      ).resolves.toMatchObject({ permissionDecision: 'deny' });
+      expect(loadWebSourceRules).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      ['https://support.iracing.com/article/1', 'allow'],
+      ['https://reddit.com/r/iRacing', 'allow'],
+      ['https://reddit.com/r/iRacing/comments/1', 'allow'],
+      ['https://reddit.com/r/simracing', 'deny'],
+      ['https://coachdaveacademy.com/tutorials/iracing-setup-guide/', 'allow'],
+      ['https://coachdaveacademy.com/tutorials/iracing-setup-guide/child', 'deny'],
+      ['https://sub.support.iracing.com/article/1', 'deny'],
+      ['http://support.iracing.com/article/1', 'deny'],
+      ['https://reddit.com/r/iRacing%2F..%2Fsimracing', 'deny'],
+    ])('validates dynamic WebFetch rule for %s', async (url, expected) => {
+      const { hook } = getHook();
+      await expect(decision(hook, input('WebFetch', { url }))).resolves.toMatchObject({
+        permissionDecision: expected,
+      });
+    });
+
+    it('does not let invalid calls consume the WebSearch budget', async () => {
+      const { hook } = getHook();
+      const valid = input('WebSearch', { query: 'rain site:support.iracing.com' });
+
+      await expect(decision(hook, input('WebSearch', { query: 'rain' }))).resolves.toMatchObject({
+        permissionDecision: 'deny',
+      });
+      await expect(decision(hook, valid)).resolves.toMatchObject({ permissionDecision: 'allow' });
+      await expect(decision(hook, valid)).resolves.toMatchObject({
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'WEB_TOOL_BUDGET_EXHAUSTED',
+      });
+    });
+
+    it('allows two valid WebFetch calls and denies the third per query', async () => {
+      const { hook } = getHook();
+      const fetch = (suffix: string) =>
+        input('WebFetch', { url: `https://support.iracing.com/${suffix}` });
+
+      await expect(decision(hook, fetch('one'))).resolves.toMatchObject({
+        permissionDecision: 'allow',
+      });
+      await expect(decision(hook, fetch('two'))).resolves.toMatchObject({
+        permissionDecision: 'allow',
+      });
+      await expect(decision(hook, fetch('three'))).resolves.toMatchObject({
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'WEB_TOOL_BUDGET_EXHAUSTED',
+      });
+    });
+  });
+
+  describe('direct-tool PostToolUse evidence', () => {
+    function getHook() {
+      const options = makeOptions({ webSearchEnabled: true });
+      createChatQuery(baseConfig, options);
+      return {
+        hook: lastCallArgs().options.hooks.PostToolUse[0].hooks[0] as (
+          input: PostToolUseHookInput,
+        ) => Promise<any>,
+        onEvidence: options.onEvidence,
+      };
+    }
+
+    function input(
+      toolName: string,
+      toolInput: Record<string, unknown>,
+      toolResponse: unknown,
+    ): PostToolUseHookInput {
+      return {
+        session_id: 'session-1',
+        transcript_path: '/tmp/session-1.jsonl',
+        cwd: baseConfig.wikiRoot,
+        hook_event_name: 'PostToolUse',
+        tool_name: toolName,
+        tool_input: toolInput,
+        tool_response: toolResponse,
+        tool_use_id: 'tool-1',
+      } as PostToolUseHookInput;
+    }
+
+    it('records Read evidence without replacing the model-visible tool output', async () => {
+      const { hook, onEvidence } = getHook();
+      const text = 'Trail braking details '.repeat(50);
+
+      const result = await hook(input('Read', { file_path: 'driving/trail-braking.md' }, text));
 
       expect(result).toEqual({});
+      expect(onEvidence).toHaveBeenCalledOnce();
+      expect(onEvidence).toHaveBeenCalledWith(
+        expect.objectContaining({
+          evidenceId: expect.any(String),
+          type: 'wiki',
+          title: 'trail-braking.md',
+          wikiPath: 'driving/trail-braking.md',
+          excerpt: text.slice(0, 600),
+          retrievedAt: expect.any(String),
+        }),
+      );
+    });
+
+    it('records canonical WebFetch evidence from an object response', async () => {
+      const { hook, onEvidence } = getHook();
+      const url = 'https://support.iracing.com/article/123?b=2&a=1';
+
+      const result = await hook(input('WebFetch', { url }, { content: 'Official article body' }));
+
+      expect(result).toEqual({});
+      expect(onEvidence).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'web',
+          title: 'support.iracing.com',
+          url,
+          excerpt: 'Official article body',
+        }),
+      );
+    });
+
+    it('rejects evidence when WebFetch redirects outside the current rules', async () => {
+      const { hook, onEvidence } = getHook();
+
+      const result = await hook(
+        input(
+          'WebFetch',
+          { url: 'https://support.iracing.com/article/123' },
+          { content: 'Untrusted redirect body', finalUrl: 'https://example.com/copied' },
+        ),
+      );
+
+      expect(result).toEqual({});
+      expect(onEvidence).not.toHaveBeenCalled();
+    });
+
+    it('records an authorized WebFetch final URL after a redirect', async () => {
+      const { hook, onEvidence } = getHook();
+      const finalUrl = 'https://support.iracing.com/article/canonical';
+
+      await hook(
+        input(
+          'WebFetch',
+          { url: 'https://support.iracing.com/article/123' },
+          { content: 'Canonical body', final_url: finalUrl },
+        ),
+      );
+
+      expect(onEvidence).toHaveBeenCalledWith(expect.objectContaining({ url: finalUrl }));
+    });
+
+    it('does not record the source snapshot or unrelated tools as answer evidence', async () => {
+      const { hook, onEvidence } = getHook();
+
+      await hook(input('Read', { file_path: '/app/notes/knowledge-sources.md' }, 'rules'));
+      await hook(input('Grep', { pattern: 'trail' }, 'matches'));
+
+      expect(onEvidence).not.toHaveBeenCalled();
     });
   });
 });

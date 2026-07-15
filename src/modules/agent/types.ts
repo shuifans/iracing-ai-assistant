@@ -5,9 +5,10 @@
  */
 
 import { z } from 'zod';
+import type { WebSourceRule } from '@/modules/web-sources/types';
 
 // ---------------------------------------------------------------------------
-// Evidence — returned by wiki-search / web-research sub-agents
+// Evidence — captured from direct Read / WebFetch tool results
 // ---------------------------------------------------------------------------
 
 export const MAX_EVIDENCE_ITEMS = 10;
@@ -102,6 +103,14 @@ export interface ChatQueryOptions {
   imageAttachments?: Array<{ base64: string; mediaType: string }>;
   /** Caller-owned AbortController for cancellation */
   abortController: AbortController;
+  /** Query snapshot of the business session's Web-search capability. */
+  webSearchEnabled?: boolean;
+  /** Loads the currently enabled runtime authorization rules for each Web call. */
+  loadWebSourceRules?: () => WebSourceRule[];
+  /** The one non-Wiki file the agent may Read before using Web tools. */
+  webSourcesSnapshotPath?: string;
+  /** Receives evidence captured from direct Read and WebFetch results. */
+  onEvidence?: (evidence: Evidence) => void | Promise<void>;
 }
 
 export interface ChatQueryResult {
