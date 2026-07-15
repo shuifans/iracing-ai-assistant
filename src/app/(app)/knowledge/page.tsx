@@ -9,6 +9,7 @@ import { SourceUploadForm } from '@/components/knowledge/SourceUploadForm';
 import { JobStatusBadge, SourceStatusBadge } from '@/components/knowledge/JobStatusBadge';
 import { ItemTable } from '@/components/knowledge/ItemTable';
 import { ItemContentModal } from '@/components/knowledge/ItemContentModal';
+import { WebSourceManager } from '@/components/knowledge/WebSourceManager';
 import type { JobStatus } from '@/config/constants';
 import {
   JOB_STATUSES,
@@ -943,6 +944,7 @@ export default function KnowledgePage() {
           tabs={[
             { id: 'overview', label: '概览' },
             { id: 'sources', label: '来源管理' },
+            { id: 'web-sources', label: '联网知识源' },
             { id: 'jobs', label: '任务列表' },
             { id: 'drafts', label: '候选稿' },
             { id: 'items', label: '知识条目' },
@@ -1048,6 +1050,9 @@ export default function KnowledgePage() {
             />
           </div>
         )}
+
+        {/* ── Web sources tab ─────────────────────────────────────────── */}
+        {activeTab === 'web-sources' && <WebSourceManager />}
 
         {/* ── Jobs tab ────────────────────────────────────────────────── */}
         {activeTab === 'jobs' && (
