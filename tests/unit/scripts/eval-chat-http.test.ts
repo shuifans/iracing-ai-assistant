@@ -15,6 +15,19 @@ const enabledSource = {
   enabled: true,
 };
 
+function sseResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    }),
+    { status: 200, headers: { 'content-type': 'text/event-stream' } },
+  );
+}
+
 describe('HTTP chat eval support', () => {
   it('exposes testable authentication, fixture and network failure helpers', () => {
     expect(support).toMatchObject({
@@ -23,6 +36,7 @@ describe('HTTP chat eval support', () => {
       isNetworkUnavailableError: expect.any(Function),
       isHttpEvalRequired: expect.any(Function),
       shouldSkipHttpEvalFailure: expect.any(Function),
+      consumeChatEvalSse: expect.any(Function),
     });
   });
 
@@ -159,5 +173,77 @@ describe('HTTP chat eval support', () => {
     await expect(
       support.ensureHttpWebKnowledgeFixture('https://eval.example', 'admin-token', invalidMutation),
     ).rejects.toThrow('fixture');
+  });
+
+  it('consumes chunked SSE only after a real done/complete event', async () => {
+    const metric = { text: '', status: '' };
+    await support.consumeChatEvalSse(
+      sseResponse([
+        ': keepalive\n\nevent: delta\ndata: {"text":"hel',
+        'lo","complete":"ordinary-field"}\n\nevent: done\nda',
+        'ta: {"status":"complete","grounding":"grounded"}\n\n',
+      ]),
+      (eventType, data) => {
+        const value = data as Record<string, unknown>;
+        if (eventType === 'delta') metric.text += String(value.text ?? '');
+        if (eventType === 'done') metric.status = String(value.status ?? '');
+      },
+    );
+    expect(metric).toEqual({ text: 'hello', status: 'complete' });
+  });
+
+  it('throws a sanitized error immediately for an SSE error event', async () => {
+    const secret = 'secret-token-and-payload';
+    const failure = support.consumeChatEvalSse(
+      sseResponse([`event: error\ndata: {"message":"${secret}","code":"INTERNAL"}\n\n`]),
+      vi.fn(),
+    );
+    await expect(failure).rejects.toThrow('chat SSE reported an error');
+    await expect(failure).rejects.not.toThrow(secret);
+  });
+
+  it('rejects EOF when the stream never emitted done/complete', async () => {
+    await expect(
+      support.consumeChatEvalSse(
+        sseResponse(['event: delta\ndata: {"text":"partial"}\n\n']),
+        vi.fn(),
+      ),
+    ).rejects.toThrow('done/complete');
+  });
+
+  it('rejects truncated JSON and residual unparsed SSE data', async () => {
+    await expect(
+      support.consumeChatEvalSse(
+        sseResponse(['event: done\ndata: {"status":"complete"\n\n']),
+        vi.fn(),
+      ),
+    ).rejects.toThrow('malformed JSON');
+
+    await expect(
+      support.consumeChatEvalSse(
+        sseResponse([
+          'event: done\ndata: {"status":"complete"}\n\nevent: delta\ndata: {"text":"late"}',
+        ]),
+        vi.fn(),
+      ),
+    ).rejects.toThrow('trailing');
+  });
+
+  it('rejects non-complete done events and data after a complete terminal event', async () => {
+    await expect(
+      support.consumeChatEvalSse(
+        sseResponse(['event: done\ndata: {"status":"failed"}\n\n']),
+        vi.fn(),
+      ),
+    ).rejects.toThrow('done/complete');
+
+    await expect(
+      support.consumeChatEvalSse(
+        sseResponse([
+          'event: done\ndata: {"status":"complete"}\n\nevent: delta\ndata: {"text":"late"}\n\n',
+        ]),
+        vi.fn(),
+      ),
+    ).rejects.toThrow('after done/complete');
   });
 });

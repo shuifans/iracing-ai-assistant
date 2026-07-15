@@ -71,6 +71,7 @@ import { streamChatMessage } from '@/modules/chat/service';
 import type { AuthenticatedUser } from '@/modules/auth/types';
 import type { SSEEvent } from '@/modules/chat/sse-events';
 import {
+  consumeChatEvalSse,
   ensureEvalWebKnowledgeFixture,
   ensureHttpWebKnowledgeFixture,
   isHttpEvalRequired,
@@ -286,30 +287,11 @@ async function runHttp(
         body: JSON.stringify({ sessionId: sid, content: turn.question }),
       });
       if (!res.ok) throw new Error(`chat message HTTP ${res.status}`);
-      if (!res.body) throw new Error('chat message response has no SSE body');
-      {
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '', curType = '', firstByte = false;
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (!firstByte) { m.clientFirstByteMs = Math.round(performance.now() - t0); firstByte = true; }
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop() ?? '';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) curType = line.slice(7).trim();
-            else if (line.startsWith('data: ')) {
-              try {
-                collectFromEvent(curType, JSON.parse(line.slice(6)), m);
-              } catch {
-                throw new Error('chat SSE returned malformed JSON');
-              }
-            }
-          }
-        }
-      }
+      await consumeChatEvalSse(
+        res,
+        (eventType, data) => collectFromEvent(eventType, data, m),
+        () => { m.clientFirstByteMs = Math.round(performance.now() - t0); },
+      );
     } catch (err) {
       throw new Error(`HTTP eval turn ${turn.id} failed: ${(err as Error).message}`, { cause: err });
     }
