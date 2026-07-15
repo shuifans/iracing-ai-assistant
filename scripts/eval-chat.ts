@@ -6,7 +6,7 @@
  *   npx tsx scripts/eval-chat.ts --mode direct --env-file /tmp/eval-creds.env
  *
  *   # HTTP 模式 (需先起 npm run dev，跑 N 轮子集测网络开销)
- *   npx tsx scripts/eval-chat.ts --mode http --http-url http://localhost:3000
+ *   EVAL_ADMIN_TOKEN=... npx tsx scripts/eval-chat.ts --mode http --http-url http://localhost:3000
  *
  *   # 两者都跑对比 (默认)
  *   npx tsx scripts/eval-chat.ts --mode both --env-file /tmp/eval-creds.env --http-url http://localhost:3000
@@ -66,15 +66,17 @@ import { getDb, closeDb } from '@/db/client';
 import { users } from '@/db/schema/users';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
-import { createAccessToken } from '@/modules/auth/token-service';
 import { createSession } from '@/modules/chat/repository';
 import { streamChatMessage } from '@/modules/chat/service';
 import type { AuthenticatedUser } from '@/modules/auth/types';
 import type { SSEEvent } from '@/modules/chat/sse-events';
 import {
-  EVAL_OFFICIAL_WEB_SOURCE,
   ensureEvalWebKnowledgeFixture,
+  ensureHttpWebKnowledgeFixture,
+  isHttpEvalRequired,
+  requireEvalAdminToken,
   setEvalSessionWebState,
+  shouldSkipHttpEvalFailure,
 } from './eval-chat-support';
 
 // ── 类型 ────────────────────────────────────────────────────────────────
@@ -229,7 +231,7 @@ function eventTypeOf(ev: SSEEvent): string {
 
 // ── HTTP 模式: 调 /api/chat/messages SSE ───────────────────────────────
 async function runHttp(
-  scenarios: EvalScenario[], user: AuthenticatedUser, token: string, baseUrl: string, subsetN: number,
+  scenarios: EvalScenario[], token: string, baseUrl: string, subsetN: number,
 ): Promise<TurnMetrics[]> {
   const out: TurnMetrics[] = [];
   // 取每个场景第 1 轮，凑够 subsetN 轮 (跨场景测网络)
@@ -247,10 +249,14 @@ async function runHttp(
       // 每轮新会话 (HTTP 子集只测网络开销，不测多轮 resume)
       const sres = await fetch(`${baseUrl}/api/chat/sessions`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, Origin: new URL(baseUrl).origin },
       });
-      const sjson = await sres.json() as { data: { id: string } };
-      const sid = sjson.data.id;
+      if (!sres.ok) throw new Error(`session create HTTP ${sres.status}`);
+      const sjson = (await sres.json()) as { data?: { id?: unknown } };
+      const sid = sjson.data?.id;
+      if (typeof sid !== 'string' || sid.length === 0) {
+        throw new Error('session create returned malformed JSON');
+      }
 
       const webSearchEnabled = turn.category === 'A2';
       const patchRes = await fetch(`${baseUrl}/api/chat/sessions/${sid}`, {
@@ -263,15 +269,25 @@ async function runHttp(
         body: JSON.stringify({ webSearchEnabled }),
       });
       if (!patchRes.ok) throw new Error(`session Web toggle HTTP ${patchRes.status}`);
+      const patchJson = (await patchRes.json()) as {
+        data?: { id?: unknown; webSearchEnabled?: unknown };
+      };
+      if (patchJson.data?.id !== sid || patchJson.data.webSearchEnabled !== webSearchEnabled) {
+        throw new Error('session Web toggle returned malformed JSON');
+      }
 
       const res = await fetch(`${baseUrl}/api/chat/messages`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Origin: new URL(baseUrl).origin,
+        },
         body: JSON.stringify({ sessionId: sid, content: turn.question }),
       });
-      if (!res.ok || !res.body) {
-        m.error = `HTTP ${res.status}`;
-      } else {
+      if (!res.ok) throw new Error(`chat message HTTP ${res.status}`);
+      if (!res.body) throw new Error('chat message response has no SSE body');
+      {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = '', curType = '', firstByte = false;
@@ -285,13 +301,17 @@ async function runHttp(
           for (const line of lines) {
             if (line.startsWith('event: ')) curType = line.slice(7).trim();
             else if (line.startsWith('data: ')) {
-              try { collectFromEvent(curType, JSON.parse(line.slice(6)), m); } catch { /* skip */ }
+              try {
+                collectFromEvent(curType, JSON.parse(line.slice(6)), m);
+              } catch {
+                throw new Error('chat SSE returned malformed JSON');
+              }
             }
           }
         }
       }
     } catch (err) {
-      m.error = (err as Error).message;
+      throw new Error(`HTTP eval turn ${turn.id} failed: ${(err as Error).message}`, { cause: err });
     }
     m.clientTotalMs = Math.round(performance.now() - t0);
     finalize(m);
@@ -299,37 +319,6 @@ async function runHttp(
     console.log(`${m.success ? '✓' : '✗'} cTotal=${m.clientTotalMs}ms sTotal=${m.totalMs ?? '-'}ms Δ=${m.clientTotalMs && m.totalMs ? m.clientTotalMs - m.totalMs : '-'}ms`);
   }
   return out;
-}
-
-async function ensureHttpWebKnowledgeFixture(baseUrl: string, token: string): Promise<void> {
-  const origin = new URL(baseUrl).origin;
-  const headers = { Authorization: `Bearer ${token}`, Origin: origin };
-  const listResponse = await fetch(`${baseUrl}/api/knowledge/web-sources`, { headers });
-  if (!listResponse.ok) throw new Error(`Web source list HTTP ${listResponse.status}`);
-  const payload = (await listResponse.json()) as {
-    data?: { sources?: Array<{ id: string; url: string; scopeType: string; enabled: boolean }> };
-  };
-  const existing = (payload.data?.sources ?? []).find(
-    (source) =>
-      source.url === EVAL_OFFICIAL_WEB_SOURCE.url &&
-      source.scopeType === EVAL_OFFICIAL_WEB_SOURCE.scopeType,
-  );
-  if (existing) {
-    if (existing.enabled) return;
-    const response = await fetch(`${baseUrl}/api/knowledge/web-sources/${existing.id}`, {
-      method: 'PATCH',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: true }),
-    });
-    if (!response.ok) throw new Error(`Web source enable HTTP ${response.status}`);
-    return;
-  }
-  const createResponse = await fetch(`${baseUrl}/api/knowledge/web-sources`, {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify(EVAL_OFFICIAL_WEB_SOURCE),
-  });
-  if (!createResponse.ok) throw new Error(`Web source create HTTP ${createResponse.status}`);
 }
 
 // ── 聚合 ────────────────────────────────────────────────────────────────
@@ -461,13 +450,11 @@ function genReport(direct: TurnMetrics[] | null, http: TurnMetrics[] | null): st
 
 // ── 主流程 ──────────────────────────────────────────────────────────────
 async function main() {
-  // 校验凭据
-  if (!process.env.QODER_PERSONAL_ACCESS_TOKEN) {
+  const usesDirect = MODE === 'direct' || MODE === 'both';
+  const usesHttp = MODE === 'http' || MODE === 'both';
+  const httpRequired = isHttpEvalRequired(argv, MODE);
+  if (usesDirect && !process.env.QODER_PERSONAL_ACCESS_TOKEN) {
     console.error('[eval] ✗ 缺少 QODER_PERSONAL_ACCESS_TOKEN (用 --env-file 指向凭据文件)');
-    process.exit(1);
-  }
-  if (!process.env.JWT_ACCESS_SECRET) {
-    console.error('[eval] ✗ 缺少 JWT_ACCESS_SECRET');
     process.exit(1);
   }
 
@@ -476,34 +463,28 @@ async function main() {
   console.log(`[eval] 用例集: ${cases.scenarios.length} 场景, 共 ${cases.scenarios.reduce((a, s) => a + s.turns.length, 0)} 轮`);
   console.log(`[eval] 模式: ${MODE} | HTTP_URL: ${HTTP_URL} | HTTP子集: ${HTTP_SUBSET}`);
 
-  // 初始化 DB
-  console.log(`[eval] 初始化 DB: ${process.env.DATABASE_PATH}`);
-  runMigrations(process.env.DATABASE_PATH!);
-  const db = getDb();
-
-  // 建用户 + mint token (幂等: 已存在则复用, 便于 HTTP 模式与 dev server 共享 DB)
-  let userId = generateId();
-  const now = utcNow();
-  const existing = db.select().from(users).all().find((u) => u.username === 'eval-runner');
-  if (existing) {
-    userId = existing.id;
-    console.log(`[eval] 复用已有用户: ${userId.slice(0, 8)}`);
-  } else {
-    await db.insert(users).values({
-      id: userId, username: 'eval-runner', passwordHash: '$2b$12$fakehashfortestingonly',
-      role: 'admin', status: 'active', createdAt: now, updatedAt: now, approvedAt: now,
-    });
-    console.log(`[eval] 新建用户: ${userId.slice(0, 8)}`);
-  }
-  const user: AuthenticatedUser = { id: userId, username: 'eval-runner', role: 'admin', status: 'active' };
-  const token = await createAccessToken(user);
-  console.log(`[eval] 用户: ${userId.slice(0, 8)} | token 已 mint (30m)`);
-
   let direct: TurnMetrics[] | null = null;
   let http: TurnMetrics[] | null = null;
 
   // Direct 模式
-  if (MODE === 'direct' || MODE === 'both') {
+  if (usesDirect) {
+    console.log(`[eval] 初始化隔离 DB: ${process.env.DATABASE_PATH}`);
+    runMigrations(process.env.DATABASE_PATH!);
+    const db = getDb();
+    let userId = generateId();
+    const now = utcNow();
+    const existing = db.select().from(users).all().find((u) => u.username === 'eval-runner');
+    if (existing) {
+      userId = existing.id;
+    } else {
+      await db.insert(users).values({
+        id: userId, username: 'eval-runner', passwordHash: '$2b$12$fakehashfortestingonly',
+        role: 'admin', status: 'active', createdAt: now, updatedAt: now, approvedAt: now,
+      });
+    }
+    const user: AuthenticatedUser = {
+      id: userId, username: 'eval-runner', role: 'admin', status: 'active',
+    };
     console.log('\n========== Direct 模式 ==========');
     const fixture = ensureEvalWebKnowledgeFixture(user.id);
     console.log(`[eval] Web fixture: ${fixture.rules[0]!.url} | snapshot: ${fixture.snapshotPath}`);
@@ -511,16 +492,22 @@ async function main() {
   }
 
   // HTTP 模式
-  if (MODE === 'http' || MODE === 'both') {
+  if (usesHttp) {
     console.log('\n========== HTTP 模式 ==========');
+    let token = httpRequired ? requireEvalAdminToken(process.env) : undefined;
     try {
       const ping = await fetch(`${HTTP_URL}/api/health/live`);
       if (!ping.ok) throw new Error(`health ${ping.status}`);
+      token ??= requireEvalAdminToken(process.env);
       await ensureHttpWebKnowledgeFixture(HTTP_URL, token);
-      http = await runHttp(cases.scenarios, user, token, HTTP_URL, HTTP_SUBSET);
+      http = await runHttp(cases.scenarios, token, HTTP_URL, HTTP_SUBSET);
     } catch (err) {
-      console.warn(`[eval] HTTP 模式跳过: 服务未启动 (${(err as Error).message})。用 PAT=... JWT_ACCESS_SECRET=... npm run dev 起服务后重试。`);
-      http = null;
+      if (shouldSkipHttpEvalFailure(err, httpRequired)) {
+        console.warn(`[eval] HTTP 模式跳过: 默认服务不可达 (${(err as Error).message})`);
+        http = null;
+      } else {
+        throw err;
+      }
     }
   }
 
@@ -531,7 +518,7 @@ async function main() {
   writeFileSync(OUT_MD, genReport(direct, http));
   console.log(`\n[eval] ✓ 完成: ${OUT_JSON} + ${OUT_MD}`);
 
-  closeDb();
+  if (usesDirect) closeDb();
 }
 
 main().catch((err) => {

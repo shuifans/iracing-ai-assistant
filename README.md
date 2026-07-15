@@ -234,6 +234,8 @@ npm run dev
 | `npm run build:search-index` | 重建 BM25 搜索索引（data/search-index.json） |
 | `npm run eval:chat`          | 多轮对话 AI 测评（eval-chat.ts）             |
 
+HTTP 测评必须通过 `EVAL_ADMIN_TOKEN` 提供目标服务签发的真实知识管理员 Token；脚本不会使用本地评测数据库伪造目标服务身份，也不会记录该 Token。显式指定 HTTP 模式或 `--http-url` 后，认证、业务响应或 fixture 错误都会让命令失败；只有默认可选探测遇到真实网络不可达时才跳过 HTTP 部分。
+
 ### 知识库脚本
 
 | 命令                                     | 说明                          |
