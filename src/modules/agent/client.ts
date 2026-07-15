@@ -15,7 +15,7 @@ import {
 import { utcNow } from '@/lib/datetime';
 import type { WebSourceRule } from '@/modules/web-sources/types';
 import { CHAT_SYSTEM_PROMPT } from './prompts';
-import type { AgentConfig, ChatQueryOptions, Evidence } from './types';
+import type { AgentConfig, AllowedToolUse, ChatQueryOptions, Evidence } from './types';
 
 type RuntimeChatQueryOptions = ChatQueryOptions & {
   webSearchEnabled: boolean;
@@ -238,6 +238,32 @@ function authorizedSearchSite(site: string, rules: WebSourceRule[]): boolean {
   });
 }
 
+function matchingSearchRules(query: string, rules: WebSourceRule[]): WebSourceRule[] {
+  const sites = [...query.matchAll(/\bsite:([^\s]+)/gi)].map((match) => match[1]!);
+  return rules.filter((rule) =>
+    sites.some((site) => {
+      const normalized = site.toLowerCase().replace(/\/$/, '');
+      if (rule.scopeType === 'exact_url') return false;
+      if (rule.scopeType === 'domain') return normalized === rule.hostname.toLowerCase();
+      const prefix = rule.pathPrefix?.replace(/\/$/, '') ?? '';
+      return normalized === `${rule.hostname}${prefix}`.toLowerCase();
+    }),
+  );
+}
+
+async function reportAllowedTool(
+  options: RuntimeChatQueryOptions,
+  input: { tool_use_id?: string; tool_name: string },
+  extras: Omit<AllowedToolUse, 'toolUseId' | 'name'> = {},
+): Promise<void> {
+  if (!options.onAllowedToolUse) return;
+  await options.onAllowedToolUse({
+    toolUseId: input.tool_use_id ?? randomUUID(),
+    name: input.tool_name,
+    ...extras,
+  });
+}
+
 function isWebSearchAllowed(query: unknown, rules: WebSourceRule[]): boolean {
   if (
     typeof query !== 'string' ||
@@ -293,9 +319,11 @@ function createPreToolUseHook(config: AgentConfig, options: RuntimeChatQueryOpti
     const toolInput = (input.tool_input ?? {}) as Record<string, unknown>;
 
     if (toolName === 'Read' || toolName === 'Glob' || toolName === 'Grep') {
-      return isFileToolAllowed(toolName, toolInput, wikiRoot, snapshotPath)
-        ? allow()
-        : deny('FILE_TOOL_PATH_NOT_ALLOWED');
+      if (!isFileToolAllowed(toolName, toolInput, wikiRoot, snapshotPath)) {
+        return deny('FILE_TOOL_PATH_NOT_ALLOWED');
+      }
+      await reportAllowedTool(options, input, {});
+      return allow();
     }
 
     if (toolName === 'WebSearch') {
@@ -304,15 +332,30 @@ function createPreToolUseHook(config: AgentConfig, options: RuntimeChatQueryOpti
       if (!isWebSearchAllowed(toolInput.query, rules)) return deny('WEB_SEARCH_SOURCE_NOT_ALLOWED');
       if (budget.webSearch >= WEB_SEARCH_BUDGET) return deny('WEB_TOOL_BUDGET_EXHAUSTED');
       budget.webSearch += 1;
+      const sourceName = matchingSearchRules(toolInput.query as string, rules)
+        .map((rule) => rule.name)
+        .filter((name, index, names) => names.indexOf(name) === index)
+        .join('、');
+      await reportAllowedTool(options, input, {
+        current: budget.webSearch,
+        limit: WEB_SEARCH_BUDGET,
+        ...(sourceName ? { sourceName } : {}),
+      });
       return allow();
     }
 
     if (toolName === 'WebFetch') {
       if (!options.webSearchEnabled) return deny('WEB_TOOLS_DISABLED');
       const rules = options.loadWebSourceRules();
-      if (!matchingWebFetchRule(toolInput.url, rules)) return deny('WEB_FETCH_SOURCE_NOT_ALLOWED');
+      const matchingRule = matchingWebFetchRule(toolInput.url, rules);
+      if (!matchingRule) return deny('WEB_FETCH_SOURCE_NOT_ALLOWED');
       if (budget.webFetch >= WEB_FETCH_BUDGET) return deny('WEB_TOOL_BUDGET_EXHAUSTED');
       budget.webFetch += 1;
+      await reportAllowedTool(options, input, {
+        current: budget.webFetch,
+        limit: WEB_FETCH_BUDGET,
+        sourceName: matchingRule.name,
+      });
       return allow();
     }
 

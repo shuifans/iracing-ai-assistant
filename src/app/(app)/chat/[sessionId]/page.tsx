@@ -52,8 +52,18 @@ interface SSEDoneEvent extends SSEEventBase {
 }
 
 interface SSEStatusEvent extends SSEEventBase {
-  stage: 'cache_check' | 'local_search' | 'generating' | 'web_fallback' | 'complete';
+  stage:
+    | 'understanding'
+    | 'local_search'
+    | 'local_read'
+    | 'web_search'
+    | 'web_fetch'
+    | 'synthesizing'
+    | 'complete';
   message: string;
+  current?: number;
+  limit?: number;
+  sourceName?: string;
 }
 
 interface SSEErrorEvent extends SSEEventBase {
@@ -343,6 +353,7 @@ export default function SessionPage() {
                 );
               } else if (currentEventType === 'delta') {
                 const deltaEvent = event as SSEDeltaEvent;
+                setStatusStage(null);
                 accumulatedText += deltaEvent.text;
                 assistantMessageId = event.messageId || assistantMessageId;
                 setMessages((prev) =>
@@ -437,6 +448,7 @@ export default function SessionPage() {
         );
       }
     } finally {
+      setStatusStage(null);
       setIsStreaming(false);
       abortControllerRef.current = null;
       streamMessageIdRef.current = null;
@@ -520,6 +532,7 @@ export default function SessionPage() {
                 );
               } else if (currentEventType === 'delta') {
                 const deltaEvent = event as SSEDeltaEvent;
+                setStatusStage(null);
                 accumulatedText += deltaEvent.text;
                 newMessageId = event.messageId || newMessageId;
                 setMessages((prev) =>
@@ -539,8 +552,16 @@ export default function SessionPage() {
                   url: sourceEvent.source.url,
                   wikiPath: sourceEvent.source.wikiPath,
                 });
+              } else if (currentEventType === 'status') {
+                const statusEvent = event as SSEStatusEvent;
+                setStatusStage(
+                  statusEvent.stage === 'complete'
+                    ? null
+                    : { stage: statusEvent.stage, message: statusEvent.message },
+                );
               } else if (currentEventType === 'done') {
                 const doneEvent = event as SSEDoneEvent;
+                setStatusStage(null);
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === newMessageId
@@ -556,6 +577,7 @@ export default function SessionPage() {
               } else if (currentEventType === 'error') {
                 const errorEvent = event as SSEErrorEvent;
                 setError(errorEvent.message);
+                setStatusStage(null);
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === (newMessageId || retryPlaceholder.id)
@@ -578,6 +600,7 @@ export default function SessionPage() {
         );
       }
     } finally {
+      setStatusStage(null);
       setIsStreaming(false);
       abortControllerRef.current = null;
     }
@@ -609,14 +632,11 @@ export default function SessionPage() {
             <MessageBubble key={msg.id} message={msg} />
           ))}
 
-          {/* 实时阶段状态条 (cache_check / local_search / generating / web_fallback) */}
+          {/* 服务端映射的 Qoder 工具阶段；不在前端推测 Agent 思考。 */}
           {statusStage && isStreaming && (
             <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
               <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
               <span>{statusStage.message}</span>
-              {statusStage.stage === 'web_fallback' && (
-                <span className="ml-1 text-amber-600">(联网检索,预计较久)</span>
-              )}
             </div>
           )}
 

@@ -73,20 +73,28 @@ export interface SSEToolEvent extends SSEEventBase {
   toolUseId: string;
   /** Tool name: Read/Glob/Grep/WebSearch/WebFetch/Agent */
   name: string;
-  /** true when name === 'Agent' (sub-agent invocation) */
+  /** Always false for the direct-tool chat Agent. */
   isSubAgent: boolean;
   /** Sub-agent name when isSubAgent (wiki-search/web-research) */
   agentName?: string;
-  /** Truncated input preview (≤200 chars) for observability */
+  /** Authorized source display name only; raw tool input is never exposed. */
   inputPreview?: string;
 }
 
 /** event: status — live pipeline stage indicator for frontend display */
 export interface SSEStatusEvent extends SSEEventBase {
-  stage: 'cache_check' | 'local_search' | 'generating' | 'web_fallback' | 'complete';
+  stage:
+    | 'understanding'
+    | 'local_search'
+    | 'local_read'
+    | 'web_search'
+    | 'web_fetch'
+    | 'synthesizing'
+    | 'complete';
   message: string;
-  /** Optional 0..1 progress hint */
-  progress?: number;
+  current?: number;
+  limit?: number;
+  sourceName?: string;
 }
 
 /** Per-model usage breakdown (camelCase, from SDK ModelUsage) */

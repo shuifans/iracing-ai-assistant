@@ -111,6 +111,17 @@ export interface ChatQueryOptions {
   webSourcesSnapshotPath?: string;
   /** Receives evidence captured from direct Read and WebFetch results. */
   onEvidence?: (evidence: Evidence) => void | Promise<void>;
+  /** Receives only tool calls that passed the query-local permission hook. */
+  onAllowedToolUse?: (tool: AllowedToolUse) => void | Promise<void>;
+}
+
+export interface AllowedToolUse {
+  toolUseId: string;
+  name: string;
+  current?: number;
+  limit?: number;
+  /** Administrator-maintained display name; never a raw query or URL. */
+  sourceName?: string;
 }
 
 export interface ChatQueryResult {

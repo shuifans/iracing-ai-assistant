@@ -323,6 +323,167 @@ describe('streamChatMessage', () => {
     expect((doneEvent as any).status).toBe('complete');
   });
 
+  it.each([
+    ['Grep', 'local_search', '正在检索本地知识库…'],
+    ['Glob', 'local_search', '正在检索本地知识库…'],
+    ['Read', 'local_read', '正在阅读相关知识笔记…'],
+    ['WebSearch', 'web_search', '本地资料不足，正在搜索已授权网站（1/1）…'],
+    ['WebFetch', 'web_fetch', '正在读取网页资料（1/2）…'],
+  ])(
+    'maps an allowed %s call to %s before its sanitized tool event',
+    async (tool, stage, message) => {
+      mockGetSession.mockReturnValue({ ...mockSession, webSearchEnabled: true });
+      mockCreateChatQuery.mockImplementation((_config, options) => {
+        void options.onAllowedToolUse?.({
+          toolUseId: 'tool-1',
+          name: tool,
+          ...(tool.startsWith('Web')
+            ? { current: 1, limit: tool === 'WebSearch' ? 1 : 2, sourceName: 'iRacing Support' }
+            : {}),
+        });
+        return createMockSDKStream([
+          {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'tool-1',
+                  name: tool,
+                  input: {
+                    query: 'secret user query site:support.iracing.com',
+                    url: 'https://support.iracing.com/private?token=secret',
+                    file_path: '/data/md-wiki/private.md',
+                  },
+                },
+              ],
+            },
+          },
+          {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'qoder-sess-001',
+            usage: { input_tokens: 10, output_tokens: 5 },
+            total_cost_usd: 0,
+            duration_ms: 10,
+          },
+        ]) as any;
+      });
+
+      const events = [];
+      for await (const event of streamChatMessage(mockUser, 'sess-001', 'secret user query')) {
+        events.push(event);
+      }
+
+      expect(events[1]).toEqual(expect.objectContaining({ stage: 'understanding' }));
+      const statusIndex = events.findIndex((event) => 'stage' in event && event.stage === stage);
+      const toolIndex = events.findIndex((event) => 'toolUseId' in event);
+      expect(statusIndex).toBeGreaterThan(0);
+      expect(statusIndex).toBeLessThan(toolIndex);
+      expect(events[statusIndex]).toEqual(
+        expect.objectContaining({
+          stage,
+          message,
+          ...(tool.startsWith('Web')
+            ? { current: 1, limit: tool === 'WebSearch' ? 1 : 2, sourceName: 'iRacing Support' }
+            : {}),
+        }),
+      );
+      expect(events[toolIndex]).toEqual(
+        expect.objectContaining({
+          name: tool,
+          ...(tool.startsWith('Web') ? { inputPreview: 'iRacing Support' } : {}),
+        }),
+      );
+      expect(JSON.stringify(events)).not.toContain('secret user query');
+      expect(JSON.stringify(events)).not.toContain('token=secret');
+      expect(JSON.stringify(events)).not.toContain('/data/md-wiki/private.md');
+    },
+  );
+
+  it('emits synthesizing once before the first text delta after a tool call', async () => {
+    mockCreateChatQuery.mockImplementation((_config, options) => {
+      void options.onAllowedToolUse?.({ toolUseId: 'tool-1', name: 'Grep' });
+      return createMockSDKStream([
+        {
+          type: 'assistant',
+          message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Grep', input: {} }] },
+        },
+        {
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'answer' } },
+        },
+        {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'qoder-sess-001',
+          usage: { input_tokens: 10, output_tokens: 5 },
+          total_cost_usd: 0,
+          duration_ms: 10,
+        },
+      ]) as any;
+    });
+
+    const events = [];
+    for await (const event of streamChatMessage(mockUser, 'sess-001', 'question'))
+      events.push(event);
+    const synthesizing = events.filter(
+      (event) => 'stage' in event && event.stage === 'synthesizing',
+    );
+    const firstDeltaIndex = events.findIndex((event) => 'seq' in event);
+
+    expect(synthesizing).toHaveLength(1);
+    expect(events.indexOf(synthesizing[0]!)).toBe(firstDeltaIndex - 1);
+  });
+
+  it('emits a slow Web notice at 100 seconds without aborting the query', async () => {
+    vi.useFakeTimers();
+    mockGetSession.mockReturnValue({ ...mockSession, webSearchEnabled: true });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockCreateChatQuery.mockReturnValue(
+      (async function* () {
+        await gate;
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'qoder-sess-001',
+          usage: { input_tokens: 10, output_tokens: 5 },
+          total_cost_usd: 0,
+          duration_ms: 100_001,
+        };
+      })() as any,
+    );
+
+    const generator = streamChatMessage(mockUser, 'sess-001', 'question');
+    await generator.next(); // start
+    await generator.next(); // understanding
+    let slowResult: IteratorResult<any> | undefined;
+    const pending = generator.next().then((result) => {
+      slowResult = result;
+      return result;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(100_000);
+      await Promise.resolve();
+      expect(slowResult?.value).toEqual(
+        expect.objectContaining({
+          stage: 'synthesizing',
+          message: '联网资料响应较慢，正在使用已获得的内容完成回答…',
+        }),
+      );
+      expect(mockCreateChatQuery.mock.calls[0]?.[1].abortController.signal.aborted).toBe(false);
+    } finally {
+      release();
+      await pending;
+      await generator.return(undefined);
+      vi.useRealTimers();
+    }
+  });
+
   it('updates message to complete status after successful stream', async () => {
     const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
     const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');

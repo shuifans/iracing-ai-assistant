@@ -17,6 +17,7 @@ import type {
   SSEErrorEvent,
   SSEDoneEvent,
   SSEUsageEvent,
+  SSEStatusEvent,
 } from '@/modules/chat/sse-events';
 
 // ---------------------------------------------------------------------------
@@ -34,6 +35,23 @@ vi.mock('@/lib/datetime', () => ({
 const REQUEST_ID = 'req-001';
 const SESSION_ID = 'sess-001';
 const MESSAGE_ID = 'msg-001';
+
+it('supports only the Qoder agent progress stages and optional budget metadata', () => {
+  const status: SSEStatusEvent = {
+    requestId: REQUEST_ID,
+    sessionId: SESSION_ID,
+    messageId: MESSAGE_ID,
+    timestamp: '2026-07-12T00:00:00.000Z',
+    stage: 'web_fetch',
+    message: '正在读取网页资料（2/2）…',
+    current: 2,
+    limit: 2,
+    sourceName: 'iRacing Support',
+  };
+
+  expect(status).toMatchObject({ stage: 'web_fetch', current: 2, limit: 2 });
+  expect(JSON.stringify(status)).not.toContain('https://');
+});
 
 function createMapper(): SSEEventMapper {
   return new SSEEventMapper(REQUEST_ID, SESSION_ID, MESSAGE_ID);

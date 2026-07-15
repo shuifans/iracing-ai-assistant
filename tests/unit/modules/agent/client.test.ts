@@ -88,9 +88,53 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
     loadWebSourceRules: vi.fn(() => rules),
     webSourcesSnapshotPath: '/app/notes/knowledge-sources.md',
     onEvidence: vi.fn<(evidence: Evidence) => void>(),
+    onAllowedToolUse: vi.fn(),
     ...overrides,
   };
 }
+
+describe('allowed tool progress callback', () => {
+  it('reports only legal calls and increments Web budget after validation', async () => {
+    const onAllowedToolUse = vi.fn();
+    createChatQuery(baseConfig, makeOptions({ webSearchEnabled: true, onAllowedToolUse }));
+    const preToolUse = lastCallArgs().options.hooks.PreToolUse[0].hooks[0];
+
+    await preToolUse({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'WebFetch',
+      tool_use_id: 'invalid',
+      tool_input: { url: 'https://evil.example/private' },
+    });
+    await preToolUse({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'WebFetch',
+      tool_use_id: 'valid',
+      tool_input: { url: 'https://support.iracing.com/article/1' },
+    });
+    await preToolUse({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'WebFetch',
+      tool_use_id: 'valid-2',
+      tool_input: { url: 'https://support.iracing.com/article/2' },
+    });
+
+    expect(onAllowedToolUse).toHaveBeenCalledTimes(2);
+    expect(onAllowedToolUse).toHaveBeenNthCalledWith(1, {
+      toolUseId: 'valid',
+      name: 'WebFetch',
+      current: 1,
+      limit: 2,
+      sourceName: 'iRacing Support',
+    });
+    expect(onAllowedToolUse).toHaveBeenNthCalledWith(2, {
+      toolUseId: 'valid-2',
+      name: 'WebFetch',
+      current: 2,
+      limit: 2,
+      sourceName: 'iRacing Support',
+    });
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

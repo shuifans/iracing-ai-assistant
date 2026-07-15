@@ -21,7 +21,11 @@
 import { join } from 'node:path';
 import type { AuthenticatedUser } from '@/modules/auth/types';
 import type { SDKMessage } from '@qoder-ai/qoder-agent-sdk';
-import { parseEvidenceEnvelope, type AgentConfig } from '@/modules/agent/types';
+import {
+  parseEvidenceEnvelope,
+  type AgentConfig,
+  type AllowedToolUse,
+} from '@/modules/agent/types';
 import { createChatQuery } from '@/modules/agent/client';
 import { listEnabledWebSourceRules } from '@/modules/web-sources/service';
 import { getDb } from '@/db/client';
@@ -161,8 +165,34 @@ function makeStatusEvent(
   messageId: string,
   stage: SSEStatusEvent['stage'],
   message: string,
+  details: Pick<SSEStatusEvent, 'current' | 'limit' | 'sourceName'> = {},
 ): SSEStatusEvent {
-  return { requestId, sessionId, messageId, timestamp: utcNow(), stage, message };
+  return { requestId, sessionId, messageId, timestamp: utcNow(), stage, message, ...details };
+}
+
+function statusForAllowedTool(tool: AllowedToolUse): {
+  stage: SSEStatusEvent['stage'];
+  message: string;
+} | null {
+  if (tool.name === 'Grep' || tool.name === 'Glob') {
+    return { stage: 'local_search', message: '正在检索本地知识库…' };
+  }
+  if (tool.name === 'Read') {
+    return { stage: 'local_read', message: '正在阅读相关知识笔记…' };
+  }
+  if (tool.name === 'WebSearch') {
+    return {
+      stage: 'web_search',
+      message: `本地资料不足，正在搜索已授权网站（${tool.current ?? 1}/${tool.limit ?? 1}）…`,
+    };
+  }
+  if (tool.name === 'WebFetch') {
+    return {
+      stage: 'web_fetch',
+      message: `正在读取网页资料（${tool.current ?? 1}/${tool.limit ?? 2}）…`,
+    };
+  }
+  return null;
 }
 
 interface UsageExtras {
@@ -370,6 +400,12 @@ export async function* streamChatMessage(
   let grounding: 'grounded' | 'inferred' | 'insufficient' = 'inferred';
   let completed = false;
   const startTime = Date.now();
+  const allowedTools = new Map<string, AllowedToolUse>();
+  let usedTool = false;
+  let synthesizingSent = false;
+  let slowWebNoticeSent = false;
+  let webSearchCount = 0;
+  let webFetchCount = 0;
 
   // Set up abort controller
   const abortController = new AbortController();
@@ -385,7 +421,7 @@ export async function* streamChatMessage(
     // 4. Start one direct Qoder Agent query for the current turn only.
     const config = getAgentConfig();
     modelUsed = 'Qwen3.7-Plus';
-    yield makeStatusEvent(requestId, sessionId, assistantMsgId, 'generating', '生成回答中…');
+    yield makeStatusEvent(requestId, sessionId, assistantMsgId, 'understanding', '正在理解问题…');
     budgetTimeout = setTimeout(() => abortController.abort(), 120_000);
     let resumeSessionId = session.qoderSessionId ?? undefined;
     t4 = performance.now();
@@ -410,18 +446,104 @@ export async function* streamChatMessage(
               evidenceList.push(evidence);
             }
           },
+          onAllowedToolUse: (tool) => {
+            allowedTools.set(tool.toolUseId, tool);
+          },
         });
         console.log(
           `[ChatTiming] req=${requestId} QODER_SDK budget=120000ms web=${session.webSearchEnabled}`,
         );
 
-        // 5. Iterate SDK message stream.
-        for await (const sdkMsg of query) {
+        // 5. Iterate SDK messages while independently surfacing the 100s Web notice.
+        const iterator = query[Symbol.asyncIterator]();
+        while (true) {
+          const nextMessage = iterator.next();
+          let next: IteratorResult<SDKMessage>;
+          const slowNoticeRemaining = 100_000 - (Date.now() - startTime);
+          if (session.webSearchEnabled && !slowWebNoticeSent && slowNoticeRemaining > 0) {
+            let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+            const raced = await Promise.race([
+              nextMessage.then((result) => ({ kind: 'message' as const, result })),
+              new Promise<{ kind: 'slow' }>((resolve) => {
+                noticeTimer = setTimeout(() => resolve({ kind: 'slow' }), slowNoticeRemaining);
+              }),
+            ]);
+            if (noticeTimer) clearTimeout(noticeTimer);
+            if (raced.kind === 'slow') {
+              slowWebNoticeSent = true;
+              yield makeStatusEvent(
+                requestId,
+                sessionId,
+                assistantMsgId,
+                'synthesizing',
+                '联网资料响应较慢，正在使用已获得的内容完成回答…',
+              );
+              next = await nextMessage;
+            } else {
+              next = raced.result;
+            }
+          } else {
+            if (session.webSearchEnabled && !slowWebNoticeSent && slowNoticeRemaining <= 0) {
+              slowWebNoticeSent = true;
+              yield makeStatusEvent(
+                requestId,
+                sessionId,
+                assistantMsgId,
+                'synthesizing',
+                '联网资料响应较慢，正在使用已获得的内容完成回答…',
+              );
+            }
+            next = await nextMessage;
+          }
+          if (next.done) break;
+          const sdkMsg = next.value;
           if (!firstDeltaLogged) {
             timing.agentFirstByteMs = Math.round(performance.now() - t4);
             firstDeltaLogged = true;
             console.log(
               `[ChatTiming] req=${requestId} agentFirstByte=${timing.agentFirstByteMs}ms`,
+            );
+          }
+
+          // Permission hooks are the source of truth: only calls that have already
+          // passed validation and budget checks are surfaced. Depending on SDK
+          // ordering, the callback can occur while awaiting this SDK message.
+          for (const allowed of allowedTools.values()) {
+            const status = statusForAllowedTool(allowed);
+            if (!status) continue;
+            usedTool = true;
+            workflow.toolCallCount++;
+            if (allowed.name === 'WebSearch') webSearchCount = allowed.current ?? 0;
+            if (allowed.name === 'WebFetch') webFetchCount = allowed.current ?? 0;
+            yield makeStatusEvent(
+              requestId,
+              sessionId,
+              assistantMsgId,
+              status.stage,
+              status.message,
+              {
+                current: allowed.current,
+                limit: allowed.limit,
+                sourceName: allowed.sourceName,
+              },
+            );
+            yield makeToolEvent(requestId, sessionId, assistantMsgId, {
+              toolUseId: allowed.toolUseId,
+              name: allowed.name,
+              isSubAgent: false,
+              inputPreview: allowed.sourceName,
+            });
+            visibleOutputCommitted = true;
+          }
+          allowedTools.clear();
+          if (!slowWebNoticeSent && webSearchCount >= 1 && webFetchCount >= 2) {
+            slowWebNoticeSent = true;
+            yield makeStatusEvent(
+              requestId,
+              sessionId,
+              assistantMsgId,
+              'synthesizing',
+              '联网资料响应较慢，正在使用已获得的内容完成回答…',
             );
           }
 
@@ -434,6 +556,16 @@ export async function* streamChatMessage(
             if (event.type === 'content_block_delta') {
               const delta = event.delta as { type?: string; text?: string } | undefined;
               if (delta?.type === 'text_delta' && delta.text) {
+                if (usedTool && !synthesizingSent) {
+                  synthesizingSent = true;
+                  yield makeStatusEvent(
+                    requestId,
+                    sessionId,
+                    assistantMsgId,
+                    'synthesizing',
+                    '正在整理已获得的资料…',
+                  );
+                }
                 accumulatedContent += delta.text;
                 seq++;
                 const deltaEvent = makeDeltaEvent(
@@ -487,40 +619,6 @@ export async function* streamChatMessage(
                       }
                     }
                   }
-                }
-              }
-            }
-            // Extract tool_use blocks → yield tool events + accumulate workflow
-            // (parent_tool_use_id non-null => this assistant msg is a sub-agent reply)
-            const isSubAgentReply =
-              (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id != null;
-            for (const block of assistantMsg.content) {
-              if (block.type === 'tool_use') {
-                const tu = block as {
-                  id?: string;
-                  name?: string;
-                  input?: { agent?: string; prompt?: string; [k: string]: unknown };
-                };
-                const toolName = tu.name ?? 'unknown';
-                const isAgent = toolName === 'Agent';
-                const agentName = isAgent ? tu.input?.agent : undefined;
-                workflow.toolCallCount++;
-                if (isAgent && agentName && !workflow.subAgents.includes(agentName)) {
-                  workflow.subAgents.push(agentName);
-                }
-                // Don't emit tool events for sub-agent-internal turns (too noisy);
-                // only surface top-level tool calls the main agent makes.
-                if (!isSubAgentReply) {
-                  const inputPreview = JSON.stringify(tu.input ?? {}).slice(0, 200);
-                  const toolEvent = makeToolEvent(requestId, sessionId, assistantMsgId, {
-                    toolUseId: tu.id ?? generateId(),
-                    name: toolName,
-                    isSubAgent: isAgent,
-                    agentName,
-                    inputPreview,
-                  });
-                  visibleOutputCommitted = true;
-                  yield toolEvent;
                 }
               }
             }
@@ -651,6 +749,12 @@ export async function* streamChatMessage(
         accumulatedContent = '';
         seq = 0;
         evidenceList.length = 0;
+        allowedTools.clear();
+        usedTool = false;
+        synthesizingSent = false;
+        slowWebNoticeSent = false;
+        webSearchCount = 0;
+        webFetchCount = 0;
         workflow.subAgents = [];
         workflow.toolCallCount = 0;
         workflow.compacted = false;
@@ -760,6 +864,7 @@ export async function* streamChatMessage(
       );
 
       // Yield done event (with workflow summary)
+      yield makeStatusEvent(requestId, sessionId, assistantMsgId, 'complete', '回答已完成');
       yield makeDoneEvent(
         requestId,
         sessionId,

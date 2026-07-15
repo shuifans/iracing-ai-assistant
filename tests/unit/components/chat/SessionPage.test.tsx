@@ -42,15 +42,64 @@ function sessionResponse(id: string, webSearchEnabled: boolean) {
 }
 
 describe('SessionPage persistent web search mode', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     currentSessionId = 'session-1';
     replace.mockReset();
     vi.mocked(authFetch).mockReset();
     sessionStorage.clear();
     Element.prototype.scrollIntoView = vi.fn();
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    cleanup();
+  });
+
+  it('shows the server status verbatim and clears it when text output starts', async () => {
+    vi.mocked(authFetch).mockResolvedValueOnce(sessionResponse('session-1', false));
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+    fetchSpy.mockResolvedValueOnce(new Response(body, { status: 200 }));
+    const encoder = new TextEncoder();
+
+    render(<SessionPage />);
+    await screen.findByRole('switch', { name: '联网搜索' });
+    fireEvent.change(screen.getByRole('textbox', { name: '消息输入' }), {
+      target: { value: '怎样刹车？' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+
+    streamController.enqueue(
+      encoder.encode(
+        'event: start\ndata: {"requestId":"r","sessionId":"session-1","messageId":"m","timestamp":"t"}\n\n' +
+          'event: status\ndata: {"requestId":"r","sessionId":"session-1","messageId":"m","timestamp":"t","stage":"web_fetch","message":"正在读取网页资料（1/2）…","current":1,"limit":2,"sourceName":"iRacing Support"}\n\n',
+      ),
+    );
+    expect(await screen.findByText('正在读取网页资料（1/2）…')).toBeTruthy();
+
+    streamController.enqueue(
+      encoder.encode(
+        'event: delta\ndata: {"requestId":"r","sessionId":"session-1","messageId":"m","timestamp":"t","seq":1,"text":"答案"}\n\n',
+      ),
+    );
+    await waitFor(() => {
+      expect(screen.queryByText('正在读取网页资料（1/2）…')).toBeNull();
+    });
+
+    streamController.enqueue(
+      encoder.encode(
+        'event: done\ndata: {"requestId":"r","sessionId":"session-1","messageId":"m","timestamp":"t","status":"complete","grounding":"inferred"}\n\n',
+      ),
+    );
+    streamController.close();
+  });
 
   it('initializes from GET and persists a change while locking the switch', async () => {
     const patchResult = deferred<Response>();
