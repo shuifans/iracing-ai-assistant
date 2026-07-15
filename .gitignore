@@ -53,6 +53,9 @@ qa-report/
 # Qoder
 .qoder
 
+# Local git worktrees
+.worktrees/
+
 # Misc
 *.tsbuildinfo
 next-env.d.ts
