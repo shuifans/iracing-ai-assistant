@@ -2,7 +2,7 @@
 
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import {
   query,
   accessTokenFromEnv,
@@ -58,6 +58,45 @@ function isPathContained(root: string, target: string): boolean {
   return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
+function realpathOfExistingAncestor(target: string): string | null {
+  let candidate = target;
+
+  while (true) {
+    try {
+      return realpathSync(candidate);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return null;
+
+      try {
+        if (lstatSync(candidate).isSymbolicLink()) return null;
+      } catch {
+        // The candidate does not exist; its nearest existing parent decides.
+      }
+
+      const parent = path.dirname(candidate);
+      if (parent === candidate) return null;
+      candidate = parent;
+    }
+  }
+}
+
+function isRealPathContained(root: string, target: string): boolean {
+  if (!isPathContained(root, target)) return false;
+
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(root);
+  } catch {
+    // Transitional/test callers may point at a Wiki not created yet. Lexical
+    // containment is the only available boundary until the root exists.
+    return true;
+  }
+
+  const realTargetOrParent = realpathOfExistingAncestor(target);
+  return Boolean(realTargetOrParent && isPathContained(realRoot, realTargetOrParent));
+}
+
 function deny(reason: string) {
   return {
     hookSpecificOutput: {
@@ -83,19 +122,38 @@ function isFileToolAllowed(
   wikiRoot: string,
   snapshotPath: string,
 ): boolean {
-  const candidate =
-    toolName === 'Read'
-      ? toolInput.file_path
-      : toolName === 'Glob'
-        ? toolInput.pattern
-        : toolInput.path;
+  if (toolName === 'Read') {
+    const candidate = toolInput.file_path;
+    if (typeof candidate !== 'string' || candidate.length === 0) return false;
+    const resolved = path.resolve(wikiRoot, candidate);
+    return resolved === snapshotPath || isRealPathContained(wikiRoot, resolved);
+  }
 
-  if (toolName === 'Grep' && candidate === undefined) return true;
-  if (typeof candidate !== 'string' || candidate.length === 0) return false;
+  if (toolName === 'Grep') {
+    const candidate = toolInput.path;
+    if (candidate === undefined) return true;
+    if (typeof candidate !== 'string' || candidate.length === 0) return false;
+    return isRealPathContained(wikiRoot, path.resolve(wikiRoot, candidate));
+  }
 
-  const resolved = path.resolve(wikiRoot, candidate);
-  if (isPathContained(wikiRoot, resolved)) return true;
-  return toolName === 'Read' && resolved === snapshotPath;
+  const pattern = toolInput.pattern;
+  const baseInput = toolInput.path;
+  if (
+    typeof pattern !== 'string' ||
+    pattern.length === 0 ||
+    (baseInput !== undefined && (typeof baseInput !== 'string' || baseInput.length === 0)) ||
+    pattern.split(/[\\/]/).includes('..')
+  ) {
+    return false;
+  }
+
+  const basePath = path.resolve(wikiRoot, (baseInput as string | undefined) ?? '.');
+  if (!isRealPathContained(wikiRoot, basePath)) return false;
+
+  const firstGlobCharacter = pattern.search(/[*?[{(]/);
+  const staticPrefix = firstGlobCharacter === -1 ? pattern : pattern.slice(0, firstGlobCharacter);
+  const patternAnchor = path.resolve(basePath, staticPrefix || '.');
+  return isRealPathContained(wikiRoot, patternAnchor);
 }
 
 function containsUnsafeUrlSyntax(raw: string): boolean {
@@ -204,7 +262,7 @@ function extractToolText(response: unknown): string {
 function finalWebFetchUrl(response: unknown): unknown {
   if (!response || typeof response !== 'object' || Array.isArray(response)) return undefined;
   const value = response as Record<string, unknown>;
-  return value.finalUrl ?? value.final_url ?? value.url;
+  return value.redirectUrl ?? value.url;
 }
 
 function createPreToolUseHook(config: AgentConfig, options: RuntimeChatQueryOptions): HookCallback {
@@ -260,7 +318,7 @@ function createPostToolUseHook(
 
     if (input.tool_name === 'Read' && typeof toolInput.file_path === 'string') {
       const absolutePath = path.resolve(wikiRoot, toolInput.file_path);
-      if (absolutePath !== snapshotPath && isPathContained(wikiRoot, absolutePath)) {
+      if (absolutePath !== snapshotPath && isRealPathContained(wikiRoot, absolutePath)) {
         const wikiPath = path.relative(wikiRoot, absolutePath).split(path.sep).join('/');
         evidence = {
           evidenceId: randomUUID(),
@@ -293,9 +351,9 @@ function createPostToolUseHook(
   };
 }
 
-function createModelPolicy(model?: string): ModelPolicyProvider {
+function createModelPolicy(): ModelPolicyProvider {
   return async () => ({
-    model: model || 'Qwen3.7-Plus',
+    model: 'Qwen3.7-Plus',
     parameters: { reasoningEffort: 'high' },
   });
 }
@@ -321,11 +379,15 @@ export function createChatQuery(
   const queryOptions: Options = {
     auth: accessTokenFromEnv(),
     cwd: config.wikiRoot,
-    model: config.model,
+    model: 'Qwen3.7-Plus',
     maxTurns: 6,
     ...(cliPath ? { pathToQoderCLIExecutable: cliPath } : {}),
-    resolveModel: createModelPolicy(config.model),
-    ...(!options.qoderSessionId ? { systemPrompt: CHAT_SYSTEM_PROMPT } : {}),
+    resolveModel: createModelPolicy(),
+    ...(!options.qoderSessionId
+      ? {
+          systemPrompt: `${CHAT_SYSTEM_PROMPT}\n\nRead the Web source snapshot only at this exact path: ${runtimeOptions.webSourcesSnapshotPath}`,
+        }
+      : {}),
     tools,
     allowedTools: tools,
     disallowedTools: DISALLOWED_TOOLS,

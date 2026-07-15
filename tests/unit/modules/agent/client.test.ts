@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { PostToolUseHookInput, PreToolUseHookInput } from '@qoder-ai/qoder-agent-sdk';
 import { CHAT_SYSTEM_PROMPT } from '@/modules/agent/prompts';
 import type { Evidence } from '@/modules/agent/types';
@@ -135,6 +138,15 @@ describe('createChatQuery', () => {
     expect(options.allowedTools).not.toContain('Agent');
   });
 
+  it('does not let config.model override the fixed Qwen3.7-Plus model', async () => {
+    createChatQuery({ ...baseConfig, model: 'performance' }, makeOptions());
+
+    expect(lastCallArgs().options.model).toBe('Qwen3.7-Plus');
+    await expect(lastCallArgs().options.resolveModel({})).resolves.toMatchObject({
+      model: 'Qwen3.7-Plus',
+    });
+  });
+
   it('adds web tools only when the session enables them', () => {
     createChatQuery(baseConfig, makeOptions({ webSearchEnabled: true }));
 
@@ -143,7 +155,10 @@ describe('createChatQuery', () => {
 
   it('sends the system prompt only when resume is absent', () => {
     createChatQuery(baseConfig, makeOptions());
-    expect(lastCallArgs().options.systemPrompt).toBe(CHAT_SYSTEM_PROMPT);
+    expect(lastCallArgs().options.systemPrompt).toContain(CHAT_SYSTEM_PROMPT);
+    expect(lastCallArgs().options.systemPrompt).toContain(
+      'Read the Web source snapshot only at this exact path: /app/notes/knowledge-sources.md',
+    );
 
     createChatQuery(baseConfig, makeOptions({ qoderSessionId: 'session-1' }));
     expect(lastCallArgs().options.systemPrompt).toBeUndefined();
@@ -173,9 +188,12 @@ describe('createChatQuery', () => {
   });
 
   describe('query-local PreToolUse boundaries', () => {
-    function getHook(overrides: Record<string, unknown> = {}) {
+    function getHook(
+      overrides: Record<string, unknown> = {},
+      config: typeof baseConfig = baseConfig,
+    ) {
       const options = makeOptions({ webSearchEnabled: true, ...overrides });
-      createChatQuery(baseConfig, options);
+      createChatQuery(config, options);
       return {
         hook: lastCallArgs().options.hooks.PreToolUse[0].hooks[0] as (
           input: PreToolUseHookInput,
@@ -231,6 +249,65 @@ describe('createChatQuery', () => {
       await expect(decision(hook, input(toolName, toolInput))).resolves.toMatchObject({
         permissionDecision: 'deny',
       });
+    });
+
+    it('validates Glob path as well as its pattern', async () => {
+      const { hook } = getHook();
+
+      await expect(
+        decision(hook, input('Glob', { pattern: '**/*.md', path: '/app/notes' })),
+      ).resolves.toMatchObject({
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'FILE_TOOL_PATH_NOT_ALLOWED',
+      });
+    });
+
+    it.each([
+      ['Read', (link: string) => ({ file_path: `${link}/secret.md` })],
+      ['Glob', (link: string) => ({ pattern: '**/*.md', path: link })],
+      ['Glob', (link: string) => ({ pattern: `${link}/**/*.md` })],
+      ['Grep', (link: string) => ({ pattern: 'secret', path: link })],
+    ])(
+      'denies %s access through a Wiki symlink that resolves outside',
+      async (toolName, toolInput) => {
+        const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'qoder-file-boundary-'));
+        const wikiRoot = path.join(tempRoot, 'wiki');
+        const outsideRoot = path.join(tempRoot, 'outside');
+        mkdirSync(wikiRoot);
+        mkdirSync(outsideRoot);
+        symlinkSync(outsideRoot, path.join(wikiRoot, 'escape'));
+
+        try {
+          const config = { ...baseConfig, wikiRoot };
+          const { hook } = getHook({}, config);
+          await expect(decision(hook, input(toolName, toolInput('escape')))).resolves.toMatchObject(
+            {
+              permissionDecision: 'deny',
+              permissionDecisionReason: 'FILE_TOOL_PATH_NOT_ALLOWED',
+            },
+          );
+        } finally {
+          rmSync(tempRoot, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it('allows a nonexistent candidate whose nearest real parent remains in the Wiki', async () => {
+      const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'qoder-file-boundary-'));
+      const wikiRoot = path.join(tempRoot, 'wiki');
+      mkdirSync(wikiRoot);
+
+      try {
+        const { hook } = getHook({}, { ...baseConfig, wikiRoot });
+        await expect(
+          decision(hook, input('Read', { file_path: 'future/note.md' })),
+        ).resolves.toMatchObject({ permissionDecision: 'allow' });
+        await expect(
+          decision(hook, input('Glob', { pattern: 'future/**/*.md' })),
+        ).resolves.toMatchObject({ permissionDecision: 'allow' });
+      } finally {
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
     });
 
     it('requires authorized site restrictions and path semantics for WebSearch', async () => {
@@ -397,14 +474,18 @@ describe('createChatQuery', () => {
       );
     });
 
-    it('rejects evidence when WebFetch redirects outside the current rules', async () => {
+    it('rejects evidence when WebFetch redirectUrl is outside the current rules', async () => {
       const { hook, onEvidence } = getHook();
 
       const result = await hook(
         input(
           'WebFetch',
           { url: 'https://support.iracing.com/article/123' },
-          { content: 'Untrusted redirect body', finalUrl: 'https://example.com/copied' },
+          {
+            content: 'Untrusted redirect body',
+            url: 'https://support.iracing.com/article/123',
+            redirectUrl: 'https://example.com/copied',
+          },
         ),
       );
 
@@ -412,7 +493,7 @@ describe('createChatQuery', () => {
       expect(onEvidence).not.toHaveBeenCalled();
     });
 
-    it('records an authorized WebFetch final URL after a redirect', async () => {
+    it('records an authorized WebFetch redirectUrl after a redirect', async () => {
       const { hook, onEvidence } = getHook();
       const finalUrl = 'https://support.iracing.com/article/canonical';
 
@@ -420,7 +501,11 @@ describe('createChatQuery', () => {
         input(
           'WebFetch',
           { url: 'https://support.iracing.com/article/123' },
-          { content: 'Canonical body', final_url: finalUrl },
+          {
+            content: 'Canonical body',
+            url: 'https://support.iracing.com/article/123',
+            redirectUrl: finalUrl,
+          },
         ),
       );
 
