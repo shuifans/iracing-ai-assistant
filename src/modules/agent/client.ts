@@ -312,16 +312,29 @@ function createPreToolUseHook(config: AgentConfig, options: RuntimeChatQueryOpti
   const wikiRoot = path.resolve(config.wikiRoot);
   const snapshotPath = path.resolve(options.webSourcesSnapshotPath);
   const budget = { webSearch: 0, webFetch: 0 };
+  const allowedToolUseIds = new Map<string, string>();
 
   return async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {};
     const toolName = input.tool_name;
     const toolInput = (input.tool_input ?? {}) as Record<string, unknown>;
+    const toolUseId = input.tool_use_id;
+    const fingerprint = JSON.stringify([toolName, toolInput]);
+    if (toolUseId && allowedToolUseIds.has(toolUseId)) {
+      return allowedToolUseIds.get(toolUseId) === fingerprint
+        ? allow()
+        : deny('TOOL_USE_ID_INPUT_MISMATCH');
+    }
+
+    const markAllowed = () => {
+      if (toolUseId) allowedToolUseIds.set(toolUseId, fingerprint);
+    };
 
     if (toolName === 'Read' || toolName === 'Glob' || toolName === 'Grep') {
       if (!isFileToolAllowed(toolName, toolInput, wikiRoot, snapshotPath)) {
         return deny('FILE_TOOL_PATH_NOT_ALLOWED');
       }
+      markAllowed();
       await reportAllowedTool(options, input, {});
       return allow();
     }
@@ -336,6 +349,7 @@ function createPreToolUseHook(config: AgentConfig, options: RuntimeChatQueryOpti
         .map((rule) => rule.name)
         .filter((name, index, names) => names.indexOf(name) === index)
         .join('、');
+      markAllowed();
       await reportAllowedTool(options, input, {
         current: budget.webSearch,
         limit: WEB_SEARCH_BUDGET,
@@ -351,6 +365,7 @@ function createPreToolUseHook(config: AgentConfig, options: RuntimeChatQueryOpti
       if (!matchingRule) return deny('WEB_FETCH_SOURCE_NOT_ALLOWED');
       if (budget.webFetch >= WEB_FETCH_BUDGET) return deny('WEB_TOOL_BUDGET_EXHAUSTED');
       budget.webFetch += 1;
+      markAllowed();
       await reportAllowedTool(options, input, {
         current: budget.webFetch,
         limit: WEB_FETCH_BUDGET,

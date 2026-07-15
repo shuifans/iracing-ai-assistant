@@ -401,7 +401,9 @@ export async function* streamChatMessage(
   let completed = false;
   const startTime = Date.now();
   const allowedTools = new Map<string, AllowedToolUse>();
+  const displayedToolUseIds = new Set<string>();
   let usedTool = false;
+  let usedWebTool = false;
   let synthesizingSent = false;
   let slowWebNoticeSent = false;
   let webSearchCount = 0;
@@ -447,7 +449,9 @@ export async function* streamChatMessage(
             }
           },
           onAllowedToolUse: (tool) => {
-            allowedTools.set(tool.toolUseId, tool);
+            if (!displayedToolUseIds.has(tool.toolUseId)) {
+              allowedTools.set(tool.toolUseId, tool);
+            }
           },
         });
         console.log(
@@ -460,7 +464,7 @@ export async function* streamChatMessage(
           const nextMessage = iterator.next();
           let next: IteratorResult<SDKMessage>;
           const slowNoticeRemaining = 100_000 - (Date.now() - startTime);
-          if (session.webSearchEnabled && !slowWebNoticeSent && slowNoticeRemaining > 0) {
+          if (usedWebTool && !synthesizingSent && !slowWebNoticeSent && slowNoticeRemaining > 0) {
             let noticeTimer: ReturnType<typeof setTimeout> | undefined;
             const raced = await Promise.race([
               nextMessage.then((result) => ({ kind: 'message' as const, result })),
@@ -471,6 +475,7 @@ export async function* streamChatMessage(
             if (noticeTimer) clearTimeout(noticeTimer);
             if (raced.kind === 'slow') {
               slowWebNoticeSent = true;
+              synthesizingSent = true;
               yield makeStatusEvent(
                 requestId,
                 sessionId,
@@ -483,8 +488,14 @@ export async function* streamChatMessage(
               next = raced.result;
             }
           } else {
-            if (session.webSearchEnabled && !slowWebNoticeSent && slowNoticeRemaining <= 0) {
+            if (
+              usedWebTool &&
+              !synthesizingSent &&
+              !slowWebNoticeSent &&
+              slowNoticeRemaining <= 0
+            ) {
               slowWebNoticeSent = true;
+              synthesizingSent = true;
               yield makeStatusEvent(
                 requestId,
                 sessionId,
@@ -512,6 +523,7 @@ export async function* streamChatMessage(
             const status = statusForAllowedTool(allowed);
             if (!status) continue;
             usedTool = true;
+            if (allowed.name === 'WebSearch' || allowed.name === 'WebFetch') usedWebTool = true;
             workflow.toolCallCount++;
             if (allowed.name === 'WebSearch') webSearchCount = allowed.current ?? 0;
             if (allowed.name === 'WebFetch') webFetchCount = allowed.current ?? 0;
@@ -533,11 +545,18 @@ export async function* streamChatMessage(
               isSubAgent: false,
               inputPreview: allowed.sourceName,
             });
+            displayedToolUseIds.add(allowed.toolUseId);
             visibleOutputCommitted = true;
           }
           allowedTools.clear();
-          if (!slowWebNoticeSent && webSearchCount >= 1 && webFetchCount >= 2) {
+          if (
+            !synthesizingSent &&
+            !slowWebNoticeSent &&
+            ((webSearchCount >= 1 && webFetchCount >= 2) ||
+              (usedWebTool && Date.now() - startTime >= 100_000))
+          ) {
             slowWebNoticeSent = true;
+            synthesizingSent = true;
             yield makeStatusEvent(
               requestId,
               sessionId,
@@ -750,7 +769,9 @@ export async function* streamChatMessage(
         seq = 0;
         evidenceList.length = 0;
         allowedTools.clear();
+        displayedToolUseIds.clear();
         usedTool = false;
+        usedWebTool = false;
         synthesizingSent = false;
         slowWebNoticeSent = false;
         webSearchCount = 0;

@@ -436,7 +436,159 @@ describe('streamChatMessage', () => {
     expect(events.indexOf(synthesizing[0]!)).toBe(firstDeltaIndex - 1);
   });
 
-  it('emits a slow Web notice at 100 seconds without aborting the query', async () => {
+  it('deduplicates the same approved tool id both before and after an SSE flush', async () => {
+    mockCreateChatQuery.mockImplementation(
+      (_config, options) =>
+        (async function* () {
+          void options.onAllowedToolUse?.({ toolUseId: 'grep-1', name: 'Grep' });
+          void options.onAllowedToolUse?.({ toolUseId: 'grep-1', name: 'Grep' });
+          yield { type: 'assistant', message: { content: [] } };
+          void options.onAllowedToolUse?.({ toolUseId: 'grep-1', name: 'Grep' });
+          yield { type: 'assistant', message: { content: [] } };
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'qoder-sess-001',
+            usage: { input_tokens: 10, output_tokens: 5 },
+            total_cost_usd: 0,
+            duration_ms: 10,
+          };
+        })() as any,
+    );
+
+    const events = [];
+    for await (const event of streamChatMessage(mockUser, 'sess-001', 'question'))
+      events.push(event);
+
+    expect(events.filter((event) => 'toolUseId' in event)).toHaveLength(1);
+    expect(
+      events.filter((event) => 'stage' in event && event.stage === 'local_search'),
+    ).toHaveLength(1);
+  });
+
+  it('does not repeat synthesizing when a complete Web budget notice precedes the first delta', async () => {
+    mockGetSession.mockReturnValue({ ...mockSession, webSearchEnabled: true });
+    mockCreateChatQuery.mockImplementation((_config, options) => {
+      void options.onAllowedToolUse?.({
+        toolUseId: 'search-1',
+        name: 'WebSearch',
+        current: 1,
+        limit: 1,
+        sourceName: 'Official',
+      });
+      void options.onAllowedToolUse?.({
+        toolUseId: 'fetch-1',
+        name: 'WebFetch',
+        current: 1,
+        limit: 2,
+        sourceName: 'Official',
+      });
+      void options.onAllowedToolUse?.({
+        toolUseId: 'fetch-2',
+        name: 'WebFetch',
+        current: 2,
+        limit: 2,
+        sourceName: 'Official',
+      });
+      return createMockSDKStream([
+        {
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'answer' } },
+        },
+        {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'qoder-sess-001',
+          usage: { input_tokens: 10, output_tokens: 5 },
+          total_cost_usd: 0,
+          duration_ms: 10,
+        },
+      ]) as any;
+    });
+
+    const events = [];
+    for await (const event of streamChatMessage(mockUser, 'sess-001', 'question'))
+      events.push(event);
+
+    expect(events.filter((event) => 'stage' in event && event.stage === 'synthesizing')).toEqual([
+      expect.objectContaining({
+        message: '联网资料响应较慢，正在使用已获得的内容完成回答…',
+      }),
+    ]);
+  });
+
+  it('emits a slow Web notice at 100 seconds after a real allowed Web call without aborting', async () => {
+    vi.useFakeTimers();
+    mockGetSession.mockReturnValue({ ...mockSession, webSearchEnabled: true });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockCreateChatQuery.mockImplementation(
+      (_config, options) =>
+        (async function* () {
+          void options.onAllowedToolUse?.({
+            toolUseId: 'fetch-1',
+            name: 'WebFetch',
+            current: 1,
+            limit: 2,
+            sourceName: 'Official',
+          });
+          yield { type: 'assistant', message: { content: [] } };
+          await gate;
+          yield {
+            type: 'stream_event',
+            event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'answer' } },
+          };
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'qoder-sess-001',
+            usage: { input_tokens: 10, output_tokens: 5 },
+            total_cost_usd: 0,
+            duration_ms: 100_001,
+          };
+        })() as any,
+    );
+
+    const generator = streamChatMessage(mockUser, 'sess-001', 'question');
+    await generator.next(); // start
+    await generator.next(); // understanding
+    await generator.next(); // web status
+    await generator.next(); // sanitized tool
+    let slowResult: IteratorResult<any> | undefined;
+    const pending = generator.next().then((result) => {
+      slowResult = result;
+      return result;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(100_000);
+      await Promise.resolve();
+      expect(slowResult?.value).toEqual(
+        expect.objectContaining({
+          stage: 'synthesizing',
+          message: '联网资料响应较慢，正在使用已获得的内容完成回答…',
+        }),
+      );
+      expect(mockCreateChatQuery.mock.calls[0]?.[1].abortController.signal.aborted).toBe(false);
+      release();
+      const firstText = await generator.next();
+      expect(firstText.value).toEqual(expect.objectContaining({ seq: 1, text: 'answer' }));
+      const remaining = [];
+      for await (const event of generator) remaining.push(event);
+      expect(
+        remaining.filter((event) => 'stage' in event && event.stage === 'synthesizing'),
+      ).toHaveLength(0);
+    } finally {
+      release();
+      await pending;
+      await generator.return(undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not emit the 100-second Web notice when enabled but no approved Web tool ran', async () => {
     vi.useFakeTimers();
     mockGetSession.mockReturnValue({ ...mockSession, webSearchEnabled: true });
     let release!: () => void;
@@ -458,24 +610,63 @@ describe('streamChatMessage', () => {
     );
 
     const generator = streamChatMessage(mockUser, 'sess-001', 'question');
-    await generator.next(); // start
-    await generator.next(); // understanding
-    let slowResult: IteratorResult<any> | undefined;
+    await generator.next();
+    await generator.next();
+    let settled: IteratorResult<any> | undefined;
     const pending = generator.next().then((result) => {
-      slowResult = result;
+      settled = result;
       return result;
     });
-
     try {
       await vi.advanceTimersByTimeAsync(100_000);
       await Promise.resolve();
-      expect(slowResult?.value).toEqual(
-        expect.objectContaining({
-          stage: 'synthesizing',
-          message: '联网资料响应较慢，正在使用已获得的内容完成回答…',
-        }),
-      );
-      expect(mockCreateChatQuery.mock.calls[0]?.[1].abortController.signal.aborted).toBe(false);
+      expect(settled).toBeUndefined();
+    } finally {
+      release();
+      await pending;
+      await generator.return(undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not emit the 100-second Web notice when only an approved local tool ran', async () => {
+    vi.useFakeTimers();
+    mockGetSession.mockReturnValue({ ...mockSession, webSearchEnabled: true });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockCreateChatQuery.mockImplementation(
+      (_config, options) =>
+        (async function* () {
+          void options.onAllowedToolUse?.({ toolUseId: 'grep-1', name: 'Grep' });
+          yield { type: 'assistant', message: { content: [] } };
+          await gate;
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'qoder-sess-001',
+            usage: { input_tokens: 10, output_tokens: 5 },
+            total_cost_usd: 0,
+            duration_ms: 100_001,
+          };
+        })() as any,
+    );
+
+    const generator = streamChatMessage(mockUser, 'sess-001', 'question');
+    await generator.next();
+    await generator.next();
+    await generator.next(); // local status
+    await generator.next(); // sanitized local tool
+    let settled: IteratorResult<any> | undefined;
+    const pending = generator.next().then((result) => {
+      settled = result;
+      return result;
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(100_000);
+      await Promise.resolve();
+      expect(settled).toBeUndefined();
     } finally {
       release();
       await pending;

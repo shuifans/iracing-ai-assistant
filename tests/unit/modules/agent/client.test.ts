@@ -134,6 +134,91 @@ describe('allowed tool progress callback', () => {
       sourceName: 'iRacing Support',
     });
   });
+
+  it('is idempotent for a successful non-empty tool_use_id without consuming Web budget twice', async () => {
+    const onAllowedToolUse = vi.fn();
+    createChatQuery(baseConfig, makeOptions({ webSearchEnabled: true, onAllowedToolUse }));
+    const preToolUse = lastCallArgs().options.hooks.PreToolUse[0].hooks[0];
+    const webFetch = (id: string, url: string) => ({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'WebFetch',
+      tool_use_id: id,
+      tool_input: { url },
+    });
+
+    await preToolUse(webFetch('same-id', 'https://evil.example/private'));
+    await preToolUse(webFetch('same-id', 'https://support.iracing.com/article/1'));
+    await preToolUse(webFetch('same-id', 'https://support.iracing.com/article/1'));
+    const second = await preToolUse(webFetch('second-id', 'https://support.iracing.com/article/2'));
+    const exhausted = await preToolUse(
+      webFetch('third-id', 'https://support.iracing.com/article/3'),
+    );
+
+    expect(onAllowedToolUse).toHaveBeenCalledTimes(2);
+    expect(onAllowedToolUse.mock.calls.map(([tool]) => tool)).toEqual([
+      expect.objectContaining({ toolUseId: 'same-id', current: 1 }),
+      expect.objectContaining({ toolUseId: 'second-id', current: 2 }),
+    ]);
+    expect(second).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+    expect(exhausted).toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'WEB_TOOL_BUDGET_EXHAUSTED',
+      },
+    });
+  });
+
+  it('deduplicates local tools with an id but treats missing ids as independent calls', async () => {
+    const onAllowedToolUse = vi.fn();
+    createChatQuery(baseConfig, makeOptions({ onAllowedToolUse }));
+    const preToolUse = lastCallArgs().options.hooks.PreToolUse[0].hooks[0];
+    const grep = (toolUseId?: string) => ({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Grep',
+      ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+      tool_input: { path: '.', pattern: 'brake' },
+    });
+
+    await preToolUse(grep('grep-1'));
+    await preToolUse(grep('grep-1'));
+    await preToolUse(grep());
+    await preToolUse(grep());
+
+    expect(onAllowedToolUse).toHaveBeenCalledTimes(3);
+    expect(onAllowedToolUse.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ toolUseId: 'grep-1', name: 'Grep' }),
+    );
+    expect(onAllowedToolUse.mock.calls[1]?.[0].toolUseId).not.toBe(
+      onAllowedToolUse.mock.calls[2]?.[0].toolUseId,
+    );
+  });
+
+  it('does not consume WebSearch budget twice for the same successful id', async () => {
+    const onAllowedToolUse = vi.fn();
+    createChatQuery(baseConfig, makeOptions({ webSearchEnabled: true, onAllowedToolUse }));
+    const preToolUse = lastCallArgs().options.hooks.PreToolUse[0].hooks[0];
+    const search = (id: string) => ({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'WebSearch',
+      tool_use_id: id,
+      tool_input: { query: 'rain site:support.iracing.com' },
+    });
+
+    await preToolUse(search('search-1'));
+    await preToolUse(search('search-1'));
+    const exhausted = await preToolUse(search('search-2'));
+
+    expect(onAllowedToolUse).toHaveBeenCalledOnce();
+    expect(onAllowedToolUse).toHaveBeenCalledWith(
+      expect.objectContaining({ toolUseId: 'search-1', current: 1, limit: 1 }),
+    );
+    expect(exhausted).toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'WEB_TOOL_BUDGET_EXHAUSTED',
+      },
+    });
+  });
 });
 
 beforeEach(() => {
@@ -232,6 +317,7 @@ describe('createChatQuery', () => {
   });
 
   describe('query-local PreToolUse boundaries', () => {
+    let toolUseSequence = 0;
     function getHook(
       overrides: Record<string, unknown> = {},
       config: typeof baseConfig = baseConfig,
@@ -254,7 +340,7 @@ describe('createChatQuery', () => {
         hook_event_name: 'PreToolUse',
         tool_name: toolName,
         tool_input: toolInput,
-        tool_use_id: 'tool-1',
+        tool_use_id: `tool-${++toolUseSequence}`,
       } as PreToolUseHookInput;
     }
 
@@ -445,13 +531,15 @@ describe('createChatQuery', () => {
 
     it('does not let invalid calls consume the WebSearch budget', async () => {
       const { hook } = getHook();
-      const valid = input('WebSearch', { query: 'rain site:support.iracing.com' });
-
       await expect(decision(hook, input('WebSearch', { query: 'rain' }))).resolves.toMatchObject({
         permissionDecision: 'deny',
       });
-      await expect(decision(hook, valid)).resolves.toMatchObject({ permissionDecision: 'allow' });
-      await expect(decision(hook, valid)).resolves.toMatchObject({
+      await expect(
+        decision(hook, input('WebSearch', { query: 'rain site:support.iracing.com' })),
+      ).resolves.toMatchObject({ permissionDecision: 'allow' });
+      await expect(
+        decision(hook, input('WebSearch', { query: 'rain site:support.iracing.com' })),
+      ).resolves.toMatchObject({
         permissionDecision: 'deny',
         permissionDecisionReason: 'WEB_TOOL_BUDGET_EXHAUSTED',
       });
