@@ -87,13 +87,21 @@ function resolveWebSourcesSnapshotPath(): string {
   );
 }
 
-function isResumeSessionFailure(error: unknown): boolean {
+function isRecoverableResumeError(error: unknown, signal: AbortSignal): boolean {
+  if (signal.aborted) return false;
   const record = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
   const errors = Array.isArray(record.errors) ? record.errors.join(' ') : '';
   const text = [record.subtype, record.name, record.message, errors, String(error)]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
+  if (
+    /auth|unauthorized|forbidden|credential|api[ _-]?key/.test(text) ||
+    /model/.test(text) ||
+    /timeout|timed[ _-]?out|abort|cancel/.test(text)
+  ) {
+    return false;
+  }
   return /(?:resume|session)/.test(text) && /(?:not found|invalid|expired)/.test(text);
 }
 
@@ -379,11 +387,13 @@ export async function* streamChatMessage(
     yield makeStatusEvent(requestId, sessionId, assistantMsgId, 'generating', '生成回答中…');
     budgetTimeout = setTimeout(() => abortController.abort(), 120_000);
     let resumeSessionId = session.qoderSessionId ?? undefined;
-    let firstDeltaLogged = false;
     t4 = performance.now();
 
     queryAttempts: for (let attempt = 0; attempt < 2; attempt++) {
       let retryWithoutResume = false;
+      let firstDeltaLogged = false;
+      const bufferAttemptEvents = attempt === 0 && Boolean(resumeSessionId);
+      const bufferedEvents: SSEEvent[] = [];
       let query: AsyncGenerator<SDKMessage>;
       try {
         query = createChatQuery(config, {
@@ -426,9 +436,17 @@ export async function* streamChatMessage(
               if (delta?.type === 'text_delta' && delta.text) {
                 accumulatedContent += delta.text;
                 seq++;
-                yield makeDeltaEvent(requestId, sessionId, assistantMsgId, seq, delta.text);
+                const deltaEvent = makeDeltaEvent(
+                  requestId,
+                  sessionId,
+                  assistantMsgId,
+                  seq,
+                  delta.text,
+                );
+                if (bufferAttemptEvents) bufferedEvents.push(deltaEvent);
+                else yield deltaEvent;
                 // Update streaming status periodically
-                if (seq === 1) {
+                if (seq === 1 && !bufferAttemptEvents) {
                   updateMessage(assistantMsgId, {
                     status: 'streaming',
                     content: accumulatedContent,
@@ -494,13 +512,15 @@ export async function* streamChatMessage(
                 // only surface top-level tool calls the main agent makes.
                 if (!isSubAgentReply) {
                   const inputPreview = JSON.stringify(tu.input ?? {}).slice(0, 200);
-                  yield makeToolEvent(requestId, sessionId, assistantMsgId, {
+                  const toolEvent = makeToolEvent(requestId, sessionId, assistantMsgId, {
                     toolUseId: tu.id ?? generateId(),
                     name: toolName,
                     isSubAgent: isAgent,
                     agentName,
                     inputPreview,
                   });
+                  if (bufferAttemptEvents) bufferedEvents.push(toolEvent);
+                  else yield toolEvent;
                 }
               }
             }
@@ -576,12 +596,17 @@ export async function* streamChatMessage(
             } else {
               const errorMsg =
                 'errors' in msg ? (msg.errors?.join('; ') ?? 'Query failed') : 'Query failed';
-              if (attempt === 0 && resumeSessionId && isResumeSessionFailure(msg)) {
+              if (
+                attempt === 0 &&
+                resumeSessionId &&
+                isRecoverableResumeError(msg, abortController.signal)
+              ) {
                 retryWithoutResume = true;
                 break;
               }
 
               // Non-resume SDK errors fail normally and are never retried as a new session.
+              for (const event of bufferedEvents) yield event;
               updateMessage(assistantMsgId, {
                 status: 'failed',
                 content: accumulatedContent || '',
@@ -610,20 +635,40 @@ export async function* streamChatMessage(
           }
         }
       } catch (error) {
-        if (attempt === 0 && resumeSessionId && isResumeSessionFailure(error)) {
+        if (
+          attempt === 0 &&
+          resumeSessionId &&
+          isRecoverableResumeError(error, abortController.signal)
+        ) {
           retryWithoutResume = true;
         } else {
+          for (const event of bufferedEvents) yield event;
           throw error;
         }
       }
 
       if (retryWithoutResume) {
+        accumulatedContent = '';
+        seq = 0;
+        evidenceList.length = 0;
+        workflow.subAgents = [];
+        workflow.toolCallCount = 0;
+        workflow.compacted = false;
+        workflow.retries = 0;
+        workflow.compactMetadata = undefined;
+        cacheUsage = null;
+        resultTelemetry = {};
+        qoderSessionId = undefined;
+        usageData = null;
+        grounding = 'inferred';
+        completed = false;
+        timing.agentFirstByteMs = undefined;
         updateQoderSessionId(sessionId, null);
         resumeSessionId = undefined;
-        qoderSessionId = undefined;
         workflow.retries++;
         continue queryAttempts;
       }
+      for (const event of bufferedEvents) yield event;
       break;
     }
     if (budgetTimeout) {

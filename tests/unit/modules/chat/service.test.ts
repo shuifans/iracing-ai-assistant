@@ -487,6 +487,173 @@ describe('streamChatMessage', () => {
     expect(mockUpdateQoderSessionId).not.toHaveBeenCalledWith('sess-001', null);
   });
 
+  it.each([
+    'authentication failed: session expired',
+    'unauthorized credential: resume session invalid',
+    'model unavailable: session invalid',
+    'session invalid after timeout',
+    'resume session expired because request was aborted',
+  ])('fails closed instead of recovering for unsafe cross-signal error: %s', async (errorText) => {
+    mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'active-session' });
+    mockCreateChatQuery.mockReturnValue(
+      createMockSDKStream([
+        {
+          type: 'result',
+          subtype: 'error_during_execution',
+          session_id: 'active-session',
+          errors: [errorText],
+        },
+      ]) as any,
+    );
+
+    for await (const _ of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+      // drain
+    }
+
+    expect(mockCreateChatQuery).toHaveBeenCalledTimes(1);
+    expect(mockUpdateQoderSessionId).not.toHaveBeenCalledWith('sess-001', null);
+  });
+
+  it('does not recover a resume error after the request abort signal fires', async () => {
+    mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'active-session' });
+    mockCreateChatQuery.mockImplementation((_config, options) => {
+      options.abortController.abort();
+      return createMockSDKStream([
+        {
+          type: 'result',
+          subtype: 'error_during_execution',
+          session_id: 'active-session',
+          errors: ['resume session expired'],
+        },
+      ]) as any;
+    });
+
+    for await (const _ of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+      // drain
+    }
+
+    expect(mockCreateChatQuery).toHaveBeenCalledTimes(1);
+    expect(mockUpdateQoderSessionId).not.toHaveBeenCalledWith('sess-001', null);
+  });
+
+  it.each(['authentication_error', 'model_error', 'request_timeout'])(
+    'fails closed when an unsafe marker appears in the SDK subtype: %s',
+    async (subtype) => {
+      mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'active-session' });
+      mockCreateChatQuery.mockReturnValue(
+        createMockSDKStream([
+          {
+            type: 'result',
+            subtype,
+            session_id: 'active-session',
+            errors: ['resume session invalid'],
+          },
+        ]) as any,
+      );
+
+      for await (const _ of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+        // drain
+      }
+
+      expect(mockCreateChatQuery).toHaveBeenCalledTimes(1);
+      expect(mockUpdateQoderSessionId).not.toHaveBeenCalledWith('sess-001', null);
+    },
+  );
+
+  it('discards partial output, evidence, usage, and workflow from a failed resume attempt', async () => {
+    mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'expired-session' });
+    mockCreateChatQuery.mockImplementation((_config, options) => {
+      const attempt = mockCreateChatQuery.mock.calls.length;
+      if (attempt === 1) {
+        void options.onEvidence?.({
+          evidenceId: 'stale-evidence',
+          type: 'wiki',
+          title: 'Stale evidence',
+          wikiPath: 'stale.md',
+          excerpt: 'stale',
+          retrievedAt: '2026-07-15T00:00:00.000Z',
+        });
+        return createMockSDKStream([
+          {
+            type: 'stream_event',
+            event: {
+              type: 'content_block_delta',
+              delta: { type: 'text_delta', text: 'stale partial' },
+            },
+          },
+          {
+            type: 'assistant',
+            message: {
+              content: [{ type: 'tool_use', id: 'stale-tool', name: 'Read', input: {} }],
+            },
+          },
+          { type: 'system', subtype: 'api_retry' },
+          {
+            type: 'result',
+            subtype: 'error_during_execution',
+            session_id: 'expired-session',
+            errors: ['resume session expired'],
+          },
+        ]) as any;
+      }
+
+      void options.onEvidence?.({
+        evidenceId: 'fresh-evidence',
+        type: 'wiki',
+        title: 'Fresh evidence',
+        wikiPath: 'fresh.md',
+        excerpt: 'fresh',
+        retrievedAt: '2026-07-15T00:00:01.000Z',
+      });
+      return createMockSDKStream([
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'fresh answer' },
+          },
+        },
+        {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'fresh-session',
+          usage: { input_tokens: 20, output_tokens: 10 },
+          total_cost_usd: 0.002,
+          duration_ms: 20,
+          num_turns: 1,
+        },
+      ]) as any;
+    });
+
+    const events = [];
+    for await (const event of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => 'seq' in event)).toEqual([
+      expect.objectContaining({ seq: 1, text: 'fresh answer' }),
+    ]);
+    expect(events.filter((event) => 'toolUseId' in event)).toEqual([]);
+    expect(events.find((event) => 'inputTokens' in event)).toEqual(
+      expect.objectContaining({ inputTokens: 20, outputTokens: 10, numTurns: 1 }),
+    );
+    expect(events.find((event) => 'workflow' in event)).toEqual(
+      expect.objectContaining({
+        workflow: expect.objectContaining({ toolCallCount: 0, retries: 1 }),
+      }),
+    );
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ status: 'complete', content: 'fresh answer' }),
+    );
+    expect(mockCreateMessageSource).toHaveBeenCalledTimes(1);
+    expect(mockCreateMessageSource).toHaveBeenCalledWith(
+      expect.any(String),
+      0,
+      expect.objectContaining({ title: 'Fresh evidence', wikiPath: 'fresh.md' }),
+    );
+  });
+
   it('persists evidence delivered directly by the Qoder query callback', async () => {
     mockCreateChatQuery.mockImplementation((_config, options) => {
       void options.onEvidence?.({
