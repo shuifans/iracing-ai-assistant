@@ -25,10 +25,7 @@ import { utcNow } from '@/lib/datetime';
 import { AppError } from '@/lib/errors';
 import { users } from '@/db/schema/users';
 import type { AttachmentData, SourceData } from './types';
-import {
-  MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
-} from './attachment-input';
+import { MAX_CHAT_ATTACHMENTS, MAX_CHAT_ATTACHMENT_TOTAL_BYTES } from './attachment-input';
 
 // ---------------------------------------------------------------------------
 // Session CRUD
@@ -172,10 +169,7 @@ export function adminListSessions(opts: {
     })
     .from(chatSessions)
     .leftJoin(users, eq(chatSessions.userId, users.id))
-    .leftJoin(
-      messageCountSubquery,
-      eq(chatSessions.id, messageCountSubquery.sessionId),
-    )
+    .leftJoin(messageCountSubquery, eq(chatSessions.id, messageCountSubquery.sessionId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(chatSessions.lastMessageAt))
     .limit(limit + 1)
@@ -259,7 +253,7 @@ export function deleteSession(sessionId: string, userId: string): void {
 /**
  * Update the qoder_session_id for a session.
  */
-export function updateQoderSessionId(sessionId: string, qoderSessionId: string): void {
+export function updateQoderSessionId(sessionId: string, qoderSessionId: string | null): void {
   const db = getDb();
   const now = utcNow();
   db.update(chatSessions)
@@ -452,14 +446,13 @@ export function createUserMessageWithAttachments(
 
   return db.transaction(() => {
     const attachments = uniqueIds.length
-      ? db
-          .select()
-          .from(messageAttachments)
-          .where(inArray(messageAttachments.id, uniqueIds))
-          .all()
+      ? db.select().from(messageAttachments).where(inArray(messageAttachments.id, uniqueIds)).all()
       : [];
 
-    if (attachments.length !== uniqueIds.length || attachments.some((a) => a.uploadedBy !== userId)) {
+    if (
+      attachments.length !== uniqueIds.length ||
+      attachments.some((a) => a.uploadedBy !== userId)
+    ) {
       throw new AppError('NOT_FOUND', '附件不存在或无权使用');
     }
     if (attachments.some((a) => a.messageId !== null)) {

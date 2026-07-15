@@ -5,7 +5,7 @@
  * 1. Validate user active, session ownership, message length
  * 2. Short transaction: write user message + pending assistant message
  * 3. Return SSE start within 500ms
- * 4. Load history context, start Qoder Query
+ * 4. Start one Qoder Query with only the current user turn
  * 5. Stream: text_delta → delta, evidence → source
  * 6. On success: write final content + sources + usage + complete
  * 7. On failure: preserve user message, mark assistant failed/interrupted
@@ -18,22 +18,12 @@
  * @module chat/service
  */
 
+import { join } from 'node:path';
 import type { AuthenticatedUser } from '@/modules/auth/types';
 import type { SDKMessage } from '@qoder-ai/qoder-agent-sdk';
 import { parseEvidenceEnvelope, type AgentConfig } from '@/modules/agent/types';
 import { createChatQuery } from '@/modules/agent/client';
-import { streamLlmDirect, isLlmDirectConfigured, type LlmChatMessage } from '@/modules/agent/llm-client';
-import { CHAT_ANSWER_BACKENDS, type ChatAnswerBackend } from '@/config/constants';
-import { CHAT_SYSTEM_PROMPT } from '@/modules/agent/prompts';
-import { searchWiki } from '@/modules/knowledge/search-index';
-import {
-  getCachedAnswer,
-  setCachedAnswer,
-  getCachedRetrieval,
-  setCachedRetrieval,
-  makeCacheKey,
-  type RetrievalPayload,
-} from '@/modules/chat/cache';
+import { listEnabledWebSourceRules } from '@/modules/web-sources/service';
 import { getDb } from '@/db/client';
 import { usageEvents } from '@/db/schema/admin';
 import { AppError } from '@/lib/errors';
@@ -52,11 +42,8 @@ import {
   createUserMessageWithAttachments,
   getAttachmentsByMessage,
 } from './repository';
-import {
-  assertAttachmentBackendSupported,
-  loadAttachmentImages,
-} from './attachment-input';
-import { loadHistoryContext, generateSessionTitle } from './session-context';
+import { assertAttachmentBackendSupported, loadAttachmentImages } from './attachment-input';
+import { generateSessionTitle } from './session-context';
 import type {
   SSEEvent,
   SSEStartEvent,
@@ -93,17 +80,21 @@ function getAgentConfig(): AgentConfig {
   };
 }
 
-/**
- * Resolve the chat answer backend (SPEC §11.1):
- * - 'llm-direct' (default): BM25 本地检索 + OpenAI 兼容 LLM 直调 (当前 LongCat-2.0)
- * - 'qoder-sdk'           : Qoder Agent SDK 全量循环 (Qwen3.7-Plus, wiki-search + web-research 子 Agent)
- * 经 `CHAT_ANSWER_BACKEND` 切换;改值后重启生效。
- */
-function getChatAnswerBackend(): ChatAnswerBackend {
-  const raw = process.env.CHAT_ANSWER_BACKEND;
-  return CHAT_ANSWER_BACKENDS.includes(raw as ChatAnswerBackend)
-    ? (raw as ChatAnswerBackend)
-    : 'llm-direct';
+function resolveWebSourcesSnapshotPath(): string {
+  return (
+    process.env.WEB_KNOWLEDGE_SOURCES_SNAPSHOT_PATH ??
+    join(process.cwd(), 'notes/knowledge-sources.md')
+  );
+}
+
+function isResumeSessionFailure(error: unknown): boolean {
+  const record = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
+  const errors = Array.isArray(record.errors) ? record.errors.join(' ') : '';
+  const text = [record.subtype, record.name, record.message, errors, String(error)]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return /(?:resume|session)/.test(text) && /(?:not found|invalid|expired)/.test(text);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +199,16 @@ function makeDoneEvent(
   timing?: PipelineTiming,
   workflow?: SSEWorkflow,
 ): SSEDoneEvent {
-  return { requestId, sessionId, messageId, timestamp: utcNow(), status, grounding, timing, workflow };
+  return {
+    requestId,
+    sessionId,
+    messageId,
+    timestamp: utcNow(),
+    status,
+    grounding,
+    timing,
+    workflow,
+  };
 }
 
 function makeErrorEvent(
@@ -309,8 +309,7 @@ export async function* streamChatMessage(
     throw new AppError('NOT_FOUND', 'Session not found or access denied');
   }
 
-  const backend = getChatAnswerBackend();
-  assertAttachmentBackendSupported(backend, Boolean(attachmentIds?.length));
+  assertAttachmentBackendSupported('qoder-sdk', Boolean(attachmentIds?.length));
 
   checkRateLimit(user.id, user.role);
   timing.authMs = Math.round(performance.now() - t0);
@@ -369,382 +368,268 @@ export async function* streamChatMessage(
 
   // Timing markers — hoisted so catch block can reference them
   let t4 = performance.now();
-  // Budget timeout (30s local / 60s web) — hoisted so finally can clear
+  // Fixed 120s Agent budget — hoisted so finally can clear.
   let budgetTimeout: ReturnType<typeof setTimeout> | undefined;
   let modelUsed = 'Qwen3.7-Plus';
 
   try {
-    // 4. Config + cache key
+    // 4. Start one direct Qoder Agent query for the current turn only.
     const config = getAgentConfig();
-    modelUsed = config.model ?? 'Qwen3.7-Plus';
-
-    // 4a. Answer cache check (skip LLM entirely on hit)
-    yield makeStatusEvent(requestId, sessionId, assistantMsgId, 'cache_check', '检查缓存…');
-    const recentMsgIds = getMessagesBySession(sessionId)
-      .filter((m) => (m.role === 'user' && m.id !== userMessage.id) || (m.role === 'assistant' && m.status === 'complete'))
-      .slice(-3)
-      .map((m) => m.id);
-    const cacheKey = makeCacheKey(content, recentMsgIds);
-    const cached = imageAttachments.length > 0 ? null : getCachedAnswer(cacheKey);
-
-    if (cached) {
-      // === CACHE HIT: replay as SSE deltas (streaming-compatible) ===
-      timing.agentFirstByteMs = Math.round(performance.now() - t0);
-      const chunks = cached.content.match(/[\s\S]{1,48}/g) ?? [cached.content];
-      for (const c of chunks) {
-        accumulatedContent += c;
-        seq++;
-        yield makeDeltaEvent(requestId, sessionId, assistantMsgId, seq, c);
-      }
-      for (const s of cached.sources) {
-        evidenceList.push({
-          evidenceId: generateId(),
-          type: s.sourceType as Evidence['type'],
-          title: s.title,
-          url: s.url ?? undefined,
-          wikiPath: s.wikiPath ?? undefined,
-          excerpt: s.excerpt ?? '',
-          season: s.season ?? undefined,
-          retrievedAt: utcNow(),
-        });
-      }
-      grounding = cached.grounding;
-      usageData = { inputTokens: 0, outputTokens: 0, costMicrousd: 0, durationMs: Math.round(performance.now() - t0) };
-      workflow.subAgents = ['cache'];
-      cacheUsage = { cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
-      completed = true;
-      console.log(`[ChatTiming] req=${requestId} CACHE HIT`);
-    } else {
-      // === cache MISS: dispatch by answer backend ===
-      // 'llm-direct' (默认): BM25 本地检索 + LLM 直调, 未命中降级 SDK
-      // 'qoder-sdk'         : Qoder SDK 全量循环 (wiki-search + web-research 子 Agent)
-      const LOCAL_THRESHOLD = Number(process.env.LOCAL_SEARCH_THRESHOLD ?? 0.5);
-      let searchResults: Array<{
-        evidenceId: string; title: string; wikiPath?: string;
-        excerpt: string; season?: string; score: number; retrievedAt?: string;
-      }> = [];
-      let topScore = 0;
-      let retrievalKey = '';
-      let cachedRetrieval: RetrievalPayload | null | undefined;
-      if (backend === 'llm-direct') {
-        // 5. Local BM25 search (no LLM — instant)
-        yield makeStatusEvent(requestId, sessionId, assistantMsgId, 'local_search', '检索本地知识库…');
-        // Prefix the retrieval key so it never collides with the answer-cache key.
-        // The answer key is makeCacheKey(content, recentMsgIds); on a session's first
-        // turn recentMsgIds=[] and the two keys would be identical — letting the answer
-        // write ({content,sources,grounding}) clobber the retrieval {chunks} payload,
-        // after which a later read of that row crashes on `cachedRetrieval.chunks.map`.
-        retrievalKey = makeCacheKey('retrieval:' + content, []);
-        const t2 = performance.now();
-        cachedRetrieval = imageAttachments.length > 0 ? null : getCachedRetrieval(retrievalKey);
-        // Defensive: a stale/malformed retrieval entry lacking an Array `.chunks`
-        // falls back to a fresh BM25 search instead of crashing.
-        searchResults = (cachedRetrieval && Array.isArray(cachedRetrieval.chunks))
-          ? cachedRetrieval.chunks.map((c) => ({ ...c, retrievedAt: utcNow() }))
-          : searchWiki(content, 5).map((r) => ({ ...r }));
-        timing.loadAgentContextMs = Math.round(performance.now() - t2);
-        topScore = searchResults[0]?.score ?? 0;
-        console.log(
-          `[ChatTiming] req=${requestId} session=${sessionId} ` +
-          `auth=${timing.authMs}ms search=${timing.loadAgentContextMs}ms ` +
-          `topScore=${topScore} hits=${searchResults.length}`,
-        );
-      } else {
-        console.log(`[ChatTiming] req=${requestId} QODER_SDK backend budget=${config.chatTimeoutMs}ms`);
-      }
-
-      if (backend === 'llm-direct' && searchResults.length > 0 && topScore >= LOCAL_THRESHOLD && isLlmDirectConfigured()) {
-        // === LOCAL PATH: LLM direct (30s budget) ===
-        for (const r of searchResults) {
-          evidenceList.push({
-            evidenceId: r.evidenceId,
-            type: 'wiki',
-            title: r.title,
-            wikiPath: r.wikiPath,
-            excerpt: r.excerpt,
-            season: r.season,
-            retrievedAt: r.retrievedAt ?? utcNow(),
-          });
-        }
-        if (!cachedRetrieval && imageAttachments.length === 0) {
-          setCachedRetrieval(retrievalKey, content, {
-            chunks: searchResults.map((r) => ({
-              evidenceId: r.evidenceId, title: r.title, wikiPath: r.wikiPath ?? '',
-              excerpt: r.excerpt, season: r.season, score: r.score,
-            })),
-          });
-        }
-        yield makeStatusEvent(requestId, sessionId, assistantMsgId, 'generating', '生成回答中…');
-        modelUsed = process.env.LLM_MODEL ?? process.env.LONGCAT_MODEL ?? 'LongCat-2.0';
-        budgetTimeout = setTimeout(() => abortController.abort(), 30_000);
-        t4 = performance.now();
-        let firstByte = false;
-        try {
-          const histMsgs: LlmChatMessage[] = getMessagesBySession(sessionId)
-            .filter((m) => (m.role === 'user' && m.id !== userMessage.id) || (m.role === 'assistant' && m.status === 'complete'))
-            .slice(-6)
-            .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content || '' }));
-          for await (const chunk of streamLlmDirect({
-            systemPrompt: CHAT_SYSTEM_PROMPT,
-            evidence: evidenceList,
-            history: histMsgs,
-            userMessage: content,
-            imageAttachments,
-            signal: abortController.signal,
-          })) {
-            if (chunk.text) {
-              if (!firstByte) {
-                timing.agentFirstByteMs = Math.round(performance.now() - t4);
-                firstByte = true;
-              }
-              accumulatedContent += chunk.text;
-              seq++;
-              if (seq === 1) updateMessage(assistantMsgId, { status: 'streaming', content: accumulatedContent });
-              yield makeDeltaEvent(requestId, sessionId, assistantMsgId, seq, chunk.text);
-            }
-            if (chunk.usage) {
-              usageData = {
-                inputTokens: chunk.usage.inputTokens,
-                outputTokens: chunk.usage.outputTokens,
-                costMicrousd: 0,
-                durationMs: Math.round(performance.now() - t4),
-              };
-              resultTelemetry = {
-                numTurns: 1,
-                durationApiMs: Math.round(performance.now() - t4),
-                stopReason: 'end_turn',
-              };
-            }
-          }
-          grounding = evidenceList.length > 0 ? 'grounded' : 'inferred';
-          if (!usageData) {
-            usageData = { inputTokens: 0, outputTokens: 0, costMicrousd: 0, durationMs: Math.round(performance.now() - t4) };
-          }
-          completed = true;
-        } catch (err) {
-          // 30s budget abort — return partial content as a complete answer (better than ✗)
-          if (abortController.signal.aborted || (err as Error).name === 'AbortError') {
-            grounding = evidenceList.length > 0 ? 'grounded' : 'inferred';
-            usageData = usageData ?? { inputTokens: 0, outputTokens: 0, costMicrousd: 0, durationMs: 30_000 };
-            completed = accumulatedContent.length > 0;
-            console.log(`[ChatTiming] req=${requestId} LOCAL ABORT (30s budget) partial=${accumulatedContent.length}chars`);
-          } else {
-            throw err;
-          }
-        } finally {
-          if (budgetTimeout) { clearTimeout(budgetTimeout); budgetTimeout = undefined; }
-        }
-      } else {
-        // === QODER SDK (qoder-sdk 主路径 OR llm-direct 本地未命中降级) ===
-        const sdkBudget = backend === 'qoder-sdk' ? config.chatTimeoutMs : 60_000;
-        const sdkStage: SSEStatusEvent['stage'] = backend === 'qoder-sdk' ? 'generating' : 'web_fallback';
-        const sdkStatusMsg = backend === 'qoder-sdk' ? '生成回答中…' : '本地未命中,联网检索中(预计较久)…';
-        yield makeStatusEvent(requestId, sessionId, assistantMsgId, sdkStage, sdkStatusMsg);
-        budgetTimeout = setTimeout(() => abortController.abort(), sdkBudget);
-        const query = createChatQuery(config, {
-          userMessage: content,
-          sessionId,
-          qoderSessionId: session.qoderSessionId ?? undefined,
-          imageAttachments,
-          abortController,
-        });
-        console.log(`[ChatTiming] req=${requestId} SDK backend budget=${sdkBudget}ms stage=${sdkStage} topScore=${topScore}`);
-
-    // 6. Iterate SDK message stream
+    modelUsed = 'Qwen3.7-Plus';
+    yield makeStatusEvent(requestId, sessionId, assistantMsgId, 'generating', '生成回答中…');
+    budgetTimeout = setTimeout(() => abortController.abort(), 120_000);
+    let resumeSessionId = session.qoderSessionId ?? undefined;
     let firstDeltaLogged = false;
     t4 = performance.now();
-    for await (const sdkMsg of query) {
-      if (!firstDeltaLogged) {
-        timing.agentFirstByteMs = Math.round(performance.now() - t4);
-        firstDeltaLogged = true;
+
+    queryAttempts: for (let attempt = 0; attempt < 2; attempt++) {
+      let retryWithoutResume = false;
+      let query: AsyncGenerator<SDKMessage>;
+      try {
+        query = createChatQuery(config, {
+          userMessage: content,
+          sessionId,
+          qoderSessionId: resumeSessionId,
+          webSearchEnabled: session.webSearchEnabled,
+          imageAttachments,
+          abortController,
+          webSourcesSnapshotPath: resolveWebSourcesSnapshotPath(),
+          loadWebSourceRules: listEnabledWebSourceRules,
+          onEvidence: (evidence) => {
+            if (!evidenceList.some((item) => item.evidenceId === evidence.evidenceId)) {
+              evidenceList.push(evidence);
+            }
+          },
+        });
         console.log(
-          `[ChatTiming] req=${requestId} agentFirstByte=${timing.agentFirstByteMs}ms`,
+          `[ChatTiming] req=${requestId} QODER_SDK budget=120000ms web=${session.webSearchEnabled}`,
         );
-      }
 
-      const msg = sdkMsg as SDKMessage;
+        // 5. Iterate SDK message stream.
+        for await (const sdkMsg of query) {
+          if (!firstDeltaLogged) {
+            timing.agentFirstByteMs = Math.round(performance.now() - t4);
+            firstDeltaLogged = true;
+            console.log(
+              `[ChatTiming] req=${requestId} agentFirstByte=${timing.agentFirstByteMs}ms`,
+            );
+          }
 
-      // Handle stream_event (partial assistant content)
-      if (msg.type === 'stream_event') {
-        const event = msg.event;
-        // Content block delta — text increment
-        if (event.type === 'content_block_delta') {
-          const delta = event.delta as { type?: string; text?: string } | undefined;
-          if (delta?.type === 'text_delta' && delta.text) {
-            accumulatedContent += delta.text;
-            seq++;
-            yield makeDeltaEvent(requestId, sessionId, assistantMsgId, seq, delta.text);
-            // Update streaming status periodically
-            if (seq === 1) {
-              updateMessage(assistantMsgId, { status: 'streaming', content: accumulatedContent });
+          const msg = sdkMsg as SDKMessage;
+
+          // Handle stream_event (partial assistant content)
+          if (msg.type === 'stream_event') {
+            const event = msg.event;
+            // Content block delta — text increment
+            if (event.type === 'content_block_delta') {
+              const delta = event.delta as { type?: string; text?: string } | undefined;
+              if (delta?.type === 'text_delta' && delta.text) {
+                accumulatedContent += delta.text;
+                seq++;
+                yield makeDeltaEvent(requestId, sessionId, assistantMsgId, seq, delta.text);
+                // Update streaming status periodically
+                if (seq === 1) {
+                  updateMessage(assistantMsgId, {
+                    status: 'streaming',
+                    content: accumulatedContent,
+                  });
+                }
+              }
             }
           }
-        }
-      }
 
-      // Handle assistant message (full message, contains evidence from hooks)
-      if (msg.type === 'assistant') {
-        const assistantMsg = msg.message;
-        // Extract text content blocks
-        for (const block of assistantMsg.content) {
-          if (block.type === 'text' && 'text' in block) {
-            const blockText = (block as { text: string }).text;
-            if (blockText && !accumulatedContent.includes(blockText)) {
-              accumulatedContent = blockText;
+          // Handle assistant message (full message, contains evidence from hooks)
+          if (msg.type === 'assistant') {
+            const assistantMsg = msg.message;
+            // Extract text content blocks
+            for (const block of assistantMsg.content) {
+              if (block.type === 'text' && 'text' in block) {
+                const blockText = (block as { text: string }).text;
+                if (blockText && !accumulatedContent.includes(blockText)) {
+                  accumulatedContent = blockText;
+                }
+              }
             }
-          }
-        }
-        // Extract evidence from tool_result blocks (from PostToolUse hook)
-        for (const block of assistantMsg.content) {
-          if (block.type === 'tool_result') {
-            const resultBlock = block as {
-              content?: string | Array<{ type: string; text?: string }>;
-            };
-            const rawContent =
-              typeof resultBlock.content === 'string'
-                ? resultBlock.content
-                : resultBlock.content?.map((c) => c.text ?? '').join('');
-            if (rawContent) {
-              const envelope = parseEvidenceEnvelope(rawContent);
-              if (envelope) {
-                for (const evidence of envelope.evidence) {
-                  if (!evidenceList.some((item) => item.evidenceId === evidence.evidenceId)) {
-                    evidenceList.push(evidence);
+            // Extract evidence from tool_result blocks (from PostToolUse hook)
+            for (const block of assistantMsg.content) {
+              if (block.type === 'tool_result') {
+                const resultBlock = block as {
+                  content?: string | Array<{ type: string; text?: string }>;
+                };
+                const rawContent =
+                  typeof resultBlock.content === 'string'
+                    ? resultBlock.content
+                    : resultBlock.content?.map((c) => c.text ?? '').join('');
+                if (rawContent) {
+                  const envelope = parseEvidenceEnvelope(rawContent);
+                  if (envelope) {
+                    for (const evidence of envelope.evidence) {
+                      if (!evidenceList.some((item) => item.evidenceId === evidence.evidenceId)) {
+                        evidenceList.push(evidence);
+                      }
+                    }
                   }
                 }
               }
             }
-          }
-        }
-        // Extract tool_use blocks → yield tool events + accumulate workflow
-        // (parent_tool_use_id non-null => this assistant msg is a sub-agent reply)
-        const isSubAgentReply = (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id != null;
-        for (const block of assistantMsg.content) {
-          if (block.type === 'tool_use') {
-            const tu = block as {
-              id?: string;
-              name?: string;
-              input?: { agent?: string; prompt?: string; [k: string]: unknown };
-            };
-            const toolName = tu.name ?? 'unknown';
-            const isAgent = toolName === 'Agent';
-            const agentName = isAgent ? tu.input?.agent : undefined;
-            workflow.toolCallCount++;
-            if (isAgent && agentName && !workflow.subAgents.includes(agentName)) {
-              workflow.subAgents.push(agentName);
-            }
-            // Don't emit tool events for sub-agent-internal turns (too noisy);
-            // only surface top-level tool calls the main agent makes.
-            if (!isSubAgentReply) {
-              const inputPreview = JSON.stringify(tu.input ?? {}).slice(0, 200);
-              yield makeToolEvent(requestId, sessionId, assistantMsgId, {
-                toolUseId: tu.id ?? generateId(),
-                name: toolName,
-                isSubAgent: isAgent,
-                agentName,
-                inputPreview,
-              });
-            }
-          }
-        }
-      }
-
-      // Handle system messages: compaction, retries, task lifecycle
-      if (msg.type === 'system') {
-        const sysMsg = msg as {
-          subtype?: string;
-          status?: string | null;
-          compact_metadata?: {
-            pre_tokens?: number;
-            post_tokens?: number;
-            messages_summarized?: number;
-          };
-          attempt?: number;
-        };
-        if (sysMsg.subtype === 'compact_boundary' || sysMsg.status === 'compacting') {
-          workflow.compacted = true;
-          if (sysMsg.compact_metadata) {
-            workflow.compactMetadata = {
-              preTokens: sysMsg.compact_metadata.pre_tokens,
-              postTokens: sysMsg.compact_metadata.post_tokens,
-              messagesSummarized: sysMsg.compact_metadata.messages_summarized,
-            };
-          }
-        } else if (sysMsg.subtype === 'api_retry') {
-          workflow.retries++;
-        }
-      }
-
-      // Handle result (final message with usage)
-      if (msg.type === 'result') {
-        qoderSessionId = msg.session_id;
-        if (msg.subtype === 'success') {
-          const usage = msg.usage;
-          usageData = {
-            inputTokens: usage.input_tokens,
-            outputTokens: usage.output_tokens,
-            costMicrousd: Math.round((msg.total_cost_usd ?? 0) * 1_000_000),
-            durationMs: msg.duration_ms ?? Date.now() - startTime,
-          };
-          // Capture cache telemetry (NonNullableUsage — fields guaranteed present)
-          cacheUsage = {
-            cacheCreationInputTokens: usage.cache_creation_input_tokens ?? 0,
-            cacheReadInputTokens: usage.cache_read_input_tokens ?? 0,
-            contextUsageRatio:
-              typeof (usage as { context_usage_ratio?: number }).context_usage_ratio === 'number'
-                ? (usage as { context_usage_ratio?: number }).context_usage_ratio
-                : undefined,
-          };
-          // Capture result telemetry
-          const serverToolUse = (usage as { server_tool_use?: { web_fetch_requests?: number; web_search_requests?: number } }).server_tool_use;
-          resultTelemetry = {
-            numTurns: msg.num_turns,
-            durationApiMs: msg.duration_api_ms,
-            stopReason: msg.stop_reason,
-            serverToolUse: serverToolUse
-              ? {
-                  webFetchRequests: serverToolUse.web_fetch_requests ?? 0,
-                  webSearchRequests: serverToolUse.web_search_requests ?? 0,
+            // Extract tool_use blocks → yield tool events + accumulate workflow
+            // (parent_tool_use_id non-null => this assistant msg is a sub-agent reply)
+            const isSubAgentReply =
+              (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id != null;
+            for (const block of assistantMsg.content) {
+              if (block.type === 'tool_use') {
+                const tu = block as {
+                  id?: string;
+                  name?: string;
+                  input?: { agent?: string; prompt?: string; [k: string]: unknown };
+                };
+                const toolName = tu.name ?? 'unknown';
+                const isAgent = toolName === 'Agent';
+                const agentName = isAgent ? tu.input?.agent : undefined;
+                workflow.toolCallCount++;
+                if (isAgent && agentName && !workflow.subAgents.includes(agentName)) {
+                  workflow.subAgents.push(agentName);
                 }
-              : undefined,
-            modelUsage: buildModelUsage(msg.modelUsage),
-          };
-          grounding = evidenceList.length > 0 ? 'grounded' : 'inferred';
-          completed = true;
-        } else {
-          // Error result — mark as failed
-          const errorMsg =
-            'errors' in msg ? (msg.errors?.join('; ') ?? 'Query failed') : 'Query failed';
-          updateMessage(assistantMsgId, {
-            status: 'failed',
-            content: accumulatedContent || '',
-            errorCode: msg.subtype,
-          });
-          // Record usage event (error from SDK)
-          recordUsageEvent({
-            userId: user.id,
-            sessionId,
-            eventType: 'chat',
-            model: config.model,
-            durationMs: Date.now() - startTime,
-            result: 'error',
-          });
+                // Don't emit tool events for sub-agent-internal turns (too noisy);
+                // only surface top-level tool calls the main agent makes.
+                if (!isSubAgentReply) {
+                  const inputPreview = JSON.stringify(tu.input ?? {}).slice(0, 200);
+                  yield makeToolEvent(requestId, sessionId, assistantMsgId, {
+                    toolUseId: tu.id ?? generateId(),
+                    name: toolName,
+                    isSubAgent: isAgent,
+                    agentName,
+                    inputPreview,
+                  });
+                }
+              }
+            }
+          }
 
-          yield makeErrorEvent(
-            requestId,
-            sessionId,
-            assistantMsgId,
-            'AGENT_UNAVAILABLE',
-            errorMsg,
-            true,
-          );
-          return;
+          // Handle system messages: compaction, retries, task lifecycle
+          if (msg.type === 'system') {
+            const sysMsg = msg as {
+              subtype?: string;
+              status?: string | null;
+              compact_metadata?: {
+                pre_tokens?: number;
+                post_tokens?: number;
+                messages_summarized?: number;
+              };
+              attempt?: number;
+            };
+            if (sysMsg.subtype === 'compact_boundary' || sysMsg.status === 'compacting') {
+              workflow.compacted = true;
+              if (sysMsg.compact_metadata) {
+                workflow.compactMetadata = {
+                  preTokens: sysMsg.compact_metadata.pre_tokens,
+                  postTokens: sysMsg.compact_metadata.post_tokens,
+                  messagesSummarized: sysMsg.compact_metadata.messages_summarized,
+                };
+              }
+            } else if (sysMsg.subtype === 'api_retry') {
+              workflow.retries++;
+            }
+          }
+
+          // Handle result (final message with usage)
+          if (msg.type === 'result') {
+            qoderSessionId = msg.session_id;
+            if (msg.subtype === 'success') {
+              const usage = msg.usage;
+              usageData = {
+                inputTokens: usage.input_tokens,
+                outputTokens: usage.output_tokens,
+                costMicrousd: Math.round((msg.total_cost_usd ?? 0) * 1_000_000),
+                durationMs: msg.duration_ms ?? Date.now() - startTime,
+              };
+              // Capture cache telemetry (NonNullableUsage — fields guaranteed present)
+              cacheUsage = {
+                cacheCreationInputTokens: usage.cache_creation_input_tokens ?? 0,
+                cacheReadInputTokens: usage.cache_read_input_tokens ?? 0,
+                contextUsageRatio:
+                  typeof (usage as { context_usage_ratio?: number }).context_usage_ratio ===
+                  'number'
+                    ? (usage as { context_usage_ratio?: number }).context_usage_ratio
+                    : undefined,
+              };
+              // Capture result telemetry
+              const serverToolUse = (
+                usage as {
+                  server_tool_use?: { web_fetch_requests?: number; web_search_requests?: number };
+                }
+              ).server_tool_use;
+              resultTelemetry = {
+                numTurns: msg.num_turns,
+                durationApiMs: msg.duration_api_ms,
+                stopReason: msg.stop_reason,
+                serverToolUse: serverToolUse
+                  ? {
+                      webFetchRequests: serverToolUse.web_fetch_requests ?? 0,
+                      webSearchRequests: serverToolUse.web_search_requests ?? 0,
+                    }
+                  : undefined,
+                modelUsage: buildModelUsage(msg.modelUsage),
+              };
+              grounding = evidenceList.length > 0 ? 'grounded' : 'inferred';
+              completed = true;
+            } else {
+              const errorMsg =
+                'errors' in msg ? (msg.errors?.join('; ') ?? 'Query failed') : 'Query failed';
+              if (attempt === 0 && resumeSessionId && isResumeSessionFailure(msg)) {
+                retryWithoutResume = true;
+                break;
+              }
+
+              // Non-resume SDK errors fail normally and are never retried as a new session.
+              updateMessage(assistantMsgId, {
+                status: 'failed',
+                content: accumulatedContent || '',
+                errorCode: msg.subtype,
+              });
+              // Record usage event (error from SDK)
+              recordUsageEvent({
+                userId: user.id,
+                sessionId,
+                eventType: 'chat',
+                model: 'Qwen3.7-Plus',
+                durationMs: Date.now() - startTime,
+                result: 'error',
+              });
+
+              yield makeErrorEvent(
+                requestId,
+                sessionId,
+                assistantMsgId,
+                'AGENT_UNAVAILABLE',
+                errorMsg,
+                true,
+              );
+              return;
+            }
+          }
+        }
+      } catch (error) {
+        if (attempt === 0 && resumeSessionId && isResumeSessionFailure(error)) {
+          retryWithoutResume = true;
+        } else {
+          throw error;
         }
       }
+
+      if (retryWithoutResume) {
+        updateQoderSessionId(sessionId, null);
+        resumeSessionId = undefined;
+        qoderSessionId = undefined;
+        workflow.retries++;
+        continue queryAttempts;
+      }
+      break;
     }
-        if (budgetTimeout) { clearTimeout(budgetTimeout); budgetTimeout = undefined; }
-      } // end web-fallback else
-    } // end search-else
+    if (budgetTimeout) {
+      clearTimeout(budgetTimeout);
+      budgetTimeout = undefined;
+    }
 
     // 7. On success: persist final content + sources + usage
     if (completed && usageData) {
@@ -801,10 +686,10 @@ export async function* streamChatMessage(
 
       console.log(
         `[ChatTiming] req=${requestId} DONE ` +
-        `firstByte=${finalTiming.agentFirstByteMs}ms ` +
-        `stream=${finalTiming.agentStreamMs}ms ` +
-        `save=${finalTiming.saveMessageMs}ms ` +
-        `total=${finalTiming.totalMs}ms`,
+          `firstByte=${finalTiming.agentFirstByteMs}ms ` +
+          `stream=${finalTiming.agentStreamMs}ms ` +
+          `save=${finalTiming.saveMessageMs}ms ` +
+          `total=${finalTiming.totalMs}ms`,
       );
 
       // Yield usage event (with cache + workflow telemetry)
@@ -839,23 +724,6 @@ export async function* streamChatMessage(
         finalTiming,
         workflow,
       );
-
-      // Quality-gate answer caching (skip if this was itself a cache hit)
-      if (
-        imageAttachments.length === 0 &&
-        workflow.subAgents[0] !== 'cache' &&
-        (grounding === 'grounded' || accumulatedContent.length > 200)
-      ) {
-        const cachedSources = evidenceList.map((e) => ({
-          sourceType: e.type,
-          title: e.title,
-          url: e.url ?? null,
-          wikiPath: e.wikiPath ?? null,
-          excerpt: e.excerpt ?? null,
-          season: e.season ?? null,
-        }));
-        setCachedAnswer(cacheKey, content, { content: accumulatedContent, sources: cachedSources, grounding });
-      }
 
       // Store qoder_session_id for resume
       if (qoderSessionId) {
@@ -898,8 +766,8 @@ export async function* streamChatMessage(
 
     console.log(
       `[ChatTiming] req=${requestId} ${isAbort ? 'ABORTED' : 'FAILED'} ` +
-      `total=${timing.totalMs}ms firstByte=${timing.agentFirstByteMs ?? 'N/A'}ms ` +
-      `error=${err instanceof Error ? err.message : String(err)}`,
+        `total=${timing.totalMs}ms firstByte=${timing.agentFirstByteMs ?? 'N/A'}ms ` +
+        `error=${err instanceof Error ? err.message : String(err)}`,
     );
 
     updateMessage(assistantMsgId, {

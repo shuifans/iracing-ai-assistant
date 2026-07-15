@@ -18,17 +18,7 @@ vi.mock('@/modules/chat/repository', () => ({
 }));
 
 vi.mock('@/modules/chat/attachment-input', () => ({
-  assertAttachmentBackendSupported: vi.fn((backend, hasAttachments) => {
-    if (
-      hasAttachments &&
-      backend === 'llm-direct' &&
-      process.env.LLM_IMAGE_INPUT_SUPPORTED === 'false'
-    ) {
-      throw Object.assign(new Error('当前模型后端不支持图片输入'), {
-        code: 'VALIDATION_ERROR',
-      });
-    }
-  }),
+  assertAttachmentBackendSupported: vi.fn(),
   loadAttachmentImages: vi.fn(async () => [{ base64: 'aW1hZ2U=', mediaType: 'image/png' }]),
 }));
 
@@ -44,21 +34,8 @@ vi.mock('@/modules/agent/client', () => ({
   createChatQuery: vi.fn(),
 }));
 
-vi.mock('@/modules/agent/llm-client', () => ({
-  streamLlmDirect: vi.fn(),
-  isLlmDirectConfigured: vi.fn(() => false),
-}));
-
-vi.mock('@/modules/knowledge/search-index', () => ({
-  searchWiki: vi.fn(() => []),
-}));
-
-vi.mock('@/modules/chat/cache', () => ({
-  getCachedAnswer: vi.fn(() => null),
-  setCachedAnswer: vi.fn(),
-  getCachedRetrieval: vi.fn(() => null),
-  setCachedRetrieval: vi.fn(),
-  makeCacheKey: vi.fn((content: string) => `key:${content}`),
+vi.mock('@/modules/web-sources/service', () => ({
+  listEnabledWebSourceRules: vi.fn(() => []),
 }));
 
 vi.mock('@/lib/uuid', () => ({
@@ -96,17 +73,11 @@ import {
   getAttachment,
   createUserMessageWithAttachments,
   getAttachmentsByMessage,
+  updateQoderSessionId,
 } from '@/modules/chat/repository';
 import { createChatQuery } from '@/modules/agent/client';
-import { streamLlmDirect, isLlmDirectConfigured } from '@/modules/agent/llm-client';
-import { searchWiki } from '@/modules/knowledge/search-index';
 import { checkRateLimit } from '@/modules/rate-limit/service';
-import {
-  getCachedAnswer,
-  setCachedAnswer,
-  getCachedRetrieval,
-  setCachedRetrieval,
-} from '@/modules/chat/cache';
+import { listEnabledWebSourceRules } from '@/modules/web-sources/service';
 import { streamChatMessage, stopMessage } from '@/modules/chat/service';
 import { getDb } from '@/db/client';
 import { AppError } from '@/lib/errors';
@@ -119,19 +90,14 @@ const mockGetMessageForUser = vi.mocked(getMessageForUser);
 const mockGetMessagesBySession = vi.mocked(getMessagesBySession);
 const mockCreateMessageSource = vi.mocked(createMessageSource);
 const mockUpdateSessionTitle = vi.mocked(updateSessionTitle);
+const mockUpdateQoderSessionId = vi.mocked(updateQoderSessionId);
 const mockCreateChatQuery = vi.mocked(createChatQuery);
-const mockStreamLlmDirect = vi.mocked(streamLlmDirect);
-const mockIsLlmDirectConfigured = vi.mocked(isLlmDirectConfigured);
-const mockSearchWiki = vi.mocked(searchWiki);
+const mockListEnabledWebSourceRules = vi.mocked(listEnabledWebSourceRules);
 const mockGetAttachment = vi.mocked(getAttachment);
 const mockCreateUserMessageWithAttachments = vi.mocked(createUserMessageWithAttachments);
 const mockGetAttachmentsByMessage = vi.mocked(getAttachmentsByMessage);
 const mockGetDb = vi.mocked(getDb);
 const mockCheckRateLimit = vi.mocked(checkRateLimit);
-const mockGetCachedAnswer = vi.mocked(getCachedAnswer);
-const mockSetCachedAnswer = vi.mocked(setCachedAnswer);
-const mockGetCachedRetrieval = vi.mocked(getCachedRetrieval);
-const mockSetCachedRetrieval = vi.mocked(setCachedRetrieval);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -192,8 +158,7 @@ function createMockSDKStream(events: Array<{ type: string; [key: string]: unknow
 describe('streamChatMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    delete process.env.LLM_IMAGE_INPUT_SUPPORTED;
-    delete process.env.CHAT_ANSWER_BACKEND;
+    delete process.env.WEB_KNOWLEDGE_SOURCES_SNAPSHOT_PATH;
     mockCheckRateLimit.mockReset();
     mockInsertValues.mockReturnValue({ run: mockInsertRun });
     mockGetSession.mockReturnValue(mockSession);
@@ -201,9 +166,7 @@ describe('streamChatMessage', () => {
       makeMockMessage(role, (status ?? 'pending') as MessageStatus),
     );
     mockGetMessagesBySession.mockReturnValue([]);
-    mockIsLlmDirectConfigured.mockReturnValue(false);
-    mockSearchWiki.mockReturnValue([]);
-    mockGetCachedAnswer.mockReturnValue(null);
+    mockListEnabledWebSourceRules.mockReturnValue([]);
   });
 
   it('throws NOT_FOUND when session does not exist', async () => {
@@ -227,11 +190,46 @@ describe('streamChatMessage', () => {
     expect(mockCheckRateLimit).toHaveBeenCalledWith('user-001', 'user');
     expect(mockCreateMessage).not.toHaveBeenCalled();
     expect(mockCreateChatQuery).not.toHaveBeenCalled();
-    expect(mockStreamLlmDirect).not.toHaveBeenCalled();
+  });
+
+  it('always creates one Qoder query with only the current turn and the session Web flag', async () => {
+    mockGetSession.mockReturnValue({
+      ...mockSession,
+      qoderSessionId: 'qoder-existing',
+      webSearchEnabled: true,
+    });
+    mockCreateChatQuery.mockReturnValue(
+      createMockSDKStream([
+        {
+          type: 'result',
+          subtype: 'error_during_execution',
+          session_id: 'qoder-existing',
+          errors: ['model unavailable'],
+        },
+      ]) as any,
+    );
+
+    for await (const _ of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+      // drain
+    }
+
+    expect(mockCreateChatQuery).toHaveBeenCalledTimes(1);
+    expect(mockCreateChatQuery).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userMessage: 'current question',
+        sessionId: 'sess-001',
+        qoderSessionId: 'qoder-existing',
+        webSearchEnabled: true,
+        loadWebSourceRules: mockListEnabledWebSourceRules,
+        webSourcesSnapshotPath: expect.stringMatching(/notes\/knowledge-sources\.md$/),
+        onEvidence: expect.any(Function),
+      }),
+    );
+    expect(mockGetMessagesBySession).not.toHaveBeenCalled();
   });
 
   it('passes bound images to the Qoder model request', async () => {
-    process.env.CHAT_ANSWER_BACKEND = 'qoder-sdk';
     const userMsg = makeMockMessage('user', 'complete', 'msg-user-image');
     const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-image');
     mockCreateUserMessageWithAttachments.mockReturnValue(userMsg);
@@ -266,134 +264,6 @@ describe('streamChatMessage', () => {
         imageAttachments: [{ base64: 'aW1hZ2U=', mediaType: 'image/png' }],
       }),
     );
-  });
-
-  it('never reads or writes the shared answer cache for an image turn', async () => {
-    process.env.CHAT_ANSWER_BACKEND = 'qoder-sdk';
-    const userMsg = makeMockMessage('user', 'complete', 'msg-user-image-cache');
-    const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-image-cache');
-    mockCreateUserMessageWithAttachments.mockReturnValue(userMsg);
-    mockGetAttachmentsByMessage.mockReturnValue([{ relativePath: 'chat/image.png' } as any]);
-    mockCreateMessage.mockReturnValue(assistantMsg);
-    mockCreateChatQuery.mockReturnValue(
-      createMockSDKStream([
-        {
-          type: 'assistant',
-          message: { content: [{ type: 'text', text: 'x'.repeat(250) }] },
-        },
-        {
-          type: 'result',
-          subtype: 'success',
-          session_id: 'qoder-image-cache-session',
-          usage: { input_tokens: 10, output_tokens: 5 },
-          total_cost_usd: 0,
-          duration_ms: 10,
-        },
-      ]) as any,
-    );
-
-    for await (const _ of streamChatMessage(mockUser, 'sess-001', 'same text', ['attachment-1'])) {
-      // drain
-    }
-
-    expect(mockGetCachedAnswer).not.toHaveBeenCalled();
-    expect(mockSetCachedAnswer).not.toHaveBeenCalled();
-  });
-
-  it('does not let an image answer poison a later same-text plain turn', async () => {
-    process.env.CHAT_ANSWER_BACKEND = 'qoder-sdk';
-    mockCreateUserMessageWithAttachments.mockReturnValue(
-      makeMockMessage('user', 'complete', 'msg-user-image-first'),
-    );
-    mockGetAttachmentsByMessage.mockReturnValue([{ relativePath: 'chat/image.png' } as any]);
-    mockCreateMessage.mockImplementation((_sessionId, role, _content, status) =>
-      makeMockMessage(role, (status ?? 'pending') as MessageStatus),
-    );
-    const result = {
-      type: 'result',
-      subtype: 'success',
-      session_id: 'qoder-cache-isolation',
-      usage: { input_tokens: 10, output_tokens: 5 },
-      total_cost_usd: 0,
-      duration_ms: 10,
-    };
-    mockCreateChatQuery
-      .mockReturnValueOnce(
-        createMockSDKStream([
-          { type: 'assistant', message: { content: [{ type: 'text', text: 'image answer '.repeat(30) }] } },
-          result,
-        ]) as any,
-      )
-      .mockReturnValueOnce(createMockSDKStream([result]) as any);
-    mockGetCachedAnswer.mockImplementation(() =>
-      mockSetCachedAnswer.mock.calls.length
-        ? { content: 'poisoned image answer', sources: [], grounding: 'inferred' }
-        : null,
-    );
-
-    for await (const _ of streamChatMessage(mockUser, 'sess-001', 'same text', ['attachment-1'])) {
-      // drain image turn
-    }
-    for await (const _ of streamChatMessage(mockUser, 'sess-001', 'same text')) {
-      // drain plain turn
-    }
-
-    expect(mockSetCachedAnswer).not.toHaveBeenCalled();
-    expect(mockGetCachedAnswer).toHaveBeenCalledTimes(1);
-    expect(mockCreateChatQuery).toHaveBeenCalledTimes(2);
-  });
-
-  it('passes bound images to the direct model request', async () => {
-    process.env.CHAT_ANSWER_BACKEND = 'llm-direct';
-    const userMsg = makeMockMessage('user', 'complete', 'msg-user-image');
-    const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-image');
-    mockCreateUserMessageWithAttachments.mockReturnValue(userMsg);
-    mockGetAttachmentsByMessage.mockReturnValue([{ relativePath: 'chat/image.png' } as any]);
-    mockCreateMessage.mockReturnValue(assistantMsg);
-    mockIsLlmDirectConfigured.mockReturnValue(true);
-    mockSearchWiki.mockReturnValue([
-      {
-        evidenceId: 'evidence-1',
-        type: 'wiki',
-        title: 'Vision context',
-        wikiPath: 'vision.md',
-        excerpt: 'context',
-        score: 1,
-        retrievedAt: '2026-07-14T00:00:00.000Z',
-      },
-    ]);
-    mockStreamLlmDirect.mockReturnValue(
-      (async function* () {
-        yield { text: 'answer' };
-        yield { text: '', usage: { inputTokens: 10, outputTokens: 5 } };
-      })(),
-    );
-
-    for await (const _ of streamChatMessage(mockUser, 'sess-001', 'inspect', ['attachment-1'])) {
-      // drain
-    }
-
-    expect(mockStreamLlmDirect).toHaveBeenCalledWith(
-      expect.objectContaining({
-        imageAttachments: [{ base64: 'aW1hZ2U=', mediaType: 'image/png' }],
-      }),
-    );
-    expect(mockGetCachedRetrieval).not.toHaveBeenCalled();
-    expect(mockSetCachedRetrieval).not.toHaveBeenCalled();
-    expect(mockCreateChatQuery).not.toHaveBeenCalled();
-  });
-
-  it('rejects an unsupported image backend before creating messages or invoking a model', async () => {
-    process.env.CHAT_ANSWER_BACKEND = 'llm-direct';
-    process.env.LLM_IMAGE_INPUT_SUPPORTED = 'false';
-
-    const generator = streamChatMessage(mockUser, 'sess-001', 'inspect', ['attachment-1']);
-
-    await expect(generator.next()).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-    expect(mockCreateMessage).not.toHaveBeenCalled();
-    expect(mockCreateUserMessageWithAttachments).not.toHaveBeenCalled();
-    expect(mockCreateChatQuery).not.toHaveBeenCalled();
-    expect(mockStreamLlmDirect).not.toHaveBeenCalled();
   });
 
   it('yields start, delta, and done events on successful stream', async () => {
@@ -552,6 +422,108 @@ describe('streamChatMessage', () => {
     expect((errorEvent as any).code).toBe('AGENT_UNAVAILABLE');
   });
 
+  it('clears an invalid resumed session and retries the same current message once', async () => {
+    mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'expired-session' });
+    mockCreateChatQuery
+      .mockReturnValueOnce(
+        createMockSDKStream([
+          {
+            type: 'result',
+            subtype: 'error_during_execution',
+            session_id: 'expired-session',
+            errors: ['Resume session not found'],
+          },
+        ]) as any,
+      )
+      .mockReturnValueOnce(
+        createMockSDKStream([
+          {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'fresh-session',
+            usage: { input_tokens: 10, output_tokens: 5 },
+            total_cost_usd: 0,
+            duration_ms: 10,
+          },
+        ]) as any,
+      );
+
+    for await (const _ of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+      // drain
+    }
+
+    expect(mockCreateChatQuery).toHaveBeenCalledTimes(2);
+    expect(mockCreateChatQuery.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        userMessage: 'current question',
+        qoderSessionId: 'expired-session',
+      }),
+    );
+    expect(mockCreateChatQuery.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ userMessage: 'current question', qoderSessionId: undefined }),
+    );
+    expect(mockUpdateQoderSessionId).toHaveBeenNthCalledWith(1, 'sess-001', null);
+    expect(mockUpdateQoderSessionId).toHaveBeenLastCalledWith('sess-001', 'fresh-session');
+  });
+
+  it('does not retry ordinary model, authentication, or timeout failures', async () => {
+    mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'active-session' });
+    mockCreateChatQuery.mockReturnValue(
+      createMockSDKStream([
+        {
+          type: 'result',
+          subtype: 'error_during_execution',
+          session_id: 'active-session',
+          errors: ['authentication failed while model timed out'],
+        },
+      ]) as any,
+    );
+
+    for await (const _ of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+      // drain
+    }
+
+    expect(mockCreateChatQuery).toHaveBeenCalledTimes(1);
+    expect(mockUpdateQoderSessionId).not.toHaveBeenCalledWith('sess-001', null);
+  });
+
+  it('persists evidence delivered directly by the Qoder query callback', async () => {
+    mockCreateChatQuery.mockImplementation((_config, options) => {
+      void options.onEvidence?.({
+        evidenceId: 'callback-evidence',
+        type: 'web',
+        title: 'Allowed source',
+        url: 'https://example.com/source',
+        excerpt: 'verified excerpt',
+        retrievedAt: '2026-07-15T00:00:00.000Z',
+      });
+      return createMockSDKStream([
+        {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'fresh-session',
+          usage: { input_tokens: 10, output_tokens: 5 },
+          total_cost_usd: 0,
+          duration_ms: 10,
+        },
+      ]) as any;
+    });
+
+    for await (const _ of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+      // drain
+    }
+
+    expect(mockCreateMessageSource).toHaveBeenCalledWith(
+      expect.any(String),
+      0,
+      expect.objectContaining({
+        sourceType: 'web',
+        title: 'Allowed source',
+        url: 'https://example.com/source',
+      }),
+    );
+  });
+
   it('handles abort (stop) gracefully', async () => {
     const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
     const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');
@@ -671,14 +643,16 @@ describe('streamChatMessage', () => {
     mockCreateMessage.mockReturnValueOnce(userMsg).mockReturnValueOnce(assistantMsg);
 
     const evidencePayload = {
-      evidence: [{
-        evidenceId: 'ev-001',
-        type: 'wiki',
-        title: 'Test Evidence',
-        wikiPath: 'test.md',
-        excerpt: 'some excerpt',
-        retrievedAt: '2026-07-14T00:00:00.000Z',
-      }],
+      evidence: [
+        {
+          evidenceId: 'ev-001',
+          type: 'wiki',
+          title: 'Test Evidence',
+          wikiPath: 'test.md',
+          excerpt: 'some excerpt',
+          retrievedAt: '2026-07-14T00:00:00.000Z',
+        },
+      ],
     };
 
     const mockStream = createMockSDKStream([
@@ -711,9 +685,11 @@ describe('streamChatMessage', () => {
       events.push(event);
     }
 
-    expect(events).toContainEqual(expect.objectContaining({
-      source: expect.objectContaining({ id: 'ev-001', title: 'Test Evidence' }),
-    }));
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        source: expect.objectContaining({ id: 'ev-001', title: 'Test Evidence' }),
+      }),
+    );
     expect(mockCreateMessageSource).toHaveBeenCalledWith(
       'msg-asst-001',
       0,
