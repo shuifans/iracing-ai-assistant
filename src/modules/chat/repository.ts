@@ -8,7 +8,7 @@
  */
 
 import { eq, and, desc, sql, lt, like, gte, lte, inArray, isNull } from 'drizzle-orm';
-import { getDb } from '@/db/client';
+import { getDb, getRawDb } from '@/db/client';
 import {
   chatSessions,
   messages,
@@ -352,6 +352,68 @@ export function getMessagesBySession(sessionId: string): Message[] {
     .where(eq(messages.sessionId, sessionId))
     .orderBy(messages.createdAt)
     .all();
+}
+
+/**
+ * Database-side defense against overlapping generations. The service also
+ * takes an in-process claim before this check; persisted pending/streaming
+ * rows protect against work already owned by another process or a prior
+ * request whose controller is no longer reachable.
+ */
+export function hasActiveAssistantMessage(sessionId: string): boolean {
+  const db = getDb();
+  return (
+    db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.sessionId, sessionId),
+          eq(messages.role, 'assistant'),
+          inArray(messages.status, ['pending', 'streaming']),
+        ),
+      )
+      .limit(1)
+      .all().length > 0
+  );
+}
+
+/** Atomically reserve a session generation and persist its user/assistant pair. */
+export function createChatTurn(
+  sessionId: string,
+  userId: string,
+  content: string,
+  attachmentIds?: string[],
+): { userMessage: Message; assistantMessage: Message } {
+  try {
+    return getRawDb()
+      .transaction(() => {
+        if (hasActiveAssistantMessage(sessionId)) {
+          throw new AppError('SESSION_BUSY', '该会话正在生成回答，请稍后重试');
+        }
+        const userMessage = attachmentIds?.length
+          ? createUserMessageWithAttachments(sessionId, userId, content, attachmentIds)
+          : createMessage(sessionId, 'user', content, 'complete');
+        const assistantMessage = createMessage(sessionId, 'assistant', '', 'pending');
+        return { userMessage, assistantMessage };
+      })
+      .immediate();
+  } catch (error) {
+    if (
+      error instanceof AppError ||
+      !(error && typeof error === 'object' && ('code' in error || 'message' in error))
+    ) {
+      throw error;
+    }
+    const record = error as { code?: unknown; message?: unknown };
+    if (
+      record.code === 'SQLITE_BUSY' ||
+      (typeof record.message === 'string' && /database is (?:busy|locked)/i.test(record.message))
+    ) {
+      throw new AppError('SESSION_BUSY', '该会话正在生成回答，请稍后重试');
+    }
+    throw error;
+  }
 }
 
 /**

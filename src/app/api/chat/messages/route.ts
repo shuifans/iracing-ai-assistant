@@ -47,16 +47,22 @@ export async function POST(request: NextRequest): Promise<Response> {
       }
     }
 
+    const streamAbortController = new AbortController();
+    const abortFromRequest = () => streamAbortController.abort();
+    request.signal.addEventListener('abort', abortFromRequest, { once: true });
+    let generation: AsyncGenerator<SSEEvent> | undefined;
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
         try {
-          for await (const event of streamChatMessage(
+          generation = streamChatMessage(
             user,
             body.sessionId,
             body.content,
             body.attachmentIds,
-          )) {
+            streamAbortController.signal,
+          );
+          for await (const event of generation) {
             // Determine event type from the event data
             const eventType = getEventType(event);
             const formatted = formatSSEEvent(eventType, event);
@@ -66,8 +72,13 @@ export async function POST(request: NextRequest): Promise<Response> {
           const errorData = createSSEErrorData(err);
           controller.enqueue(encoder.encode(formatSSEEvent('error', errorData)));
         } finally {
+          request.signal.removeEventListener('abort', abortFromRequest);
           controller.close();
         }
+      },
+      cancel() {
+        streamAbortController.abort();
+        void generation?.return(undefined).catch(() => undefined);
       },
     });
 
@@ -76,7 +87,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (err instanceof AppError) {
       return NextResponse.json(errorResponse(err), { status: err.httpStatus });
     }
-    console.error('[API] Unexpected error in POST /api/chat/messages:', err);
+    console.error('[API] chat messages request failed', {
+      errorClass: err instanceof Error ? err.name : typeof err,
+    });
     const internalError = new AppError('SERVICE_NOT_READY', '服务内部错误');
     return NextResponse.json(errorResponse(internalError), { status: 500 });
   }
@@ -99,15 +112,15 @@ function getEventType(event: SSEEvent): string {
 /**
  * Create an SSE error data object from an error.
  */
-function createSSEErrorData(err: unknown): any {
-  const message = err instanceof Error ? err.message : 'Unknown error';
+function createSSEErrorData(err: unknown): SSEEvent {
+  const isBusy = err instanceof AppError && err.code === 'SESSION_BUSY';
   return {
     requestId: generateId(),
     sessionId: '',
     messageId: '',
     timestamp: new Date().toISOString(),
-    code: 'AGENT_UNAVAILABLE',
-    message,
-    retryable: true,
+    code: isBusy ? 'SESSION_BUSY' : 'AGENT_UNAVAILABLE',
+    message: isBusy ? '该会话正在生成回答，请稍后重试' : '服务暂时不可用，请重试',
+    retryable: !isBusy,
   };
 }

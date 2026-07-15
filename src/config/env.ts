@@ -18,7 +18,10 @@ const envSchema = z.object({
   REFRESH_TOKEN_PEPPER: z.string().min(1),
   IP_HASH_PEPPER: z.string().min(1),
   QODER_PERSONAL_ACCESS_TOKEN: z.string().min(1),
-  QODER_MODEL: z.literal('Qwen3.7-Plus').default('Qwen3.7-Plus'),
+  QODER_MODEL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.literal('Qwen3.7-Plus').default('Qwen3.7-Plus'),
+  ),
   QODER_CHAT_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   QODER_CLEAN_TIMEOUT_MS: z.coerce.number().int().positive().default(900000),
   // 知识清洗后端单次 LLM 请求超时（毫秒，worker llm-direct 路径用）

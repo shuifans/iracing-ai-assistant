@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { setAccessToken } from '@/lib/auth-client';
+import { authFetch } from '@/lib/auth-client';
 import { SessionSidebar } from '@/components/chat/SessionSidebar';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -13,26 +13,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function checkAuth() {
       try {
-        const res = await fetch('/api/auth/me', { credentials: 'include' });
+        // Login stores the short-lived access token in the shared in-memory
+        // auth client. authFetch uses it first and falls back to the HttpOnly
+        // refresh cookie after a full page reload.
+        const res = await authFetch('/api/auth/me');
         if (res.ok) {
-          const json = (await res.json()) as { data: { accessToken: string } };
-          setAccessToken(json.data.accessToken);
           setAuthChecked(true);
         } else {
-          // 尝试刷新
-          const refreshRes = await fetch('/api/auth/refresh', {
-            method: 'POST',
-            credentials: 'include',
-          });
-          if (refreshRes.ok) {
-            const refreshJson = (await refreshRes.json()) as {
-              data: { accessToken: string };
-            };
-            setAccessToken(refreshJson.data.accessToken);
-            setAuthChecked(true);
-          } else {
-            router.replace('/login');
-          }
+          router.replace('/login');
         }
       } catch {
         router.replace('/login');

@@ -7,6 +7,7 @@ import {
   query,
   accessTokenFromEnv,
   type HookCallback,
+  type HookJSONOutput,
   type ModelPolicyProvider,
   type Options,
   type PostToolUseHookInput,
@@ -238,6 +239,25 @@ function authorizedSearchSite(site: string, rules: WebSourceRule[]): boolean {
   });
 }
 
+function authorizedWebSearchRule(query: unknown, rules: WebSourceRule[]): WebSourceRule | null {
+  if (
+    typeof query !== 'string' ||
+    query.trim().length === 0 ||
+    query.length > MAX_WEB_SEARCH_QUERY_LENGTH ||
+    /\b(?:OR|NOT)\b|\|/i.test(query)
+  ) {
+    return null;
+  }
+
+  const siteOccurrences = [...query.matchAll(/site:/gi)];
+  const siteOperators = [...query.matchAll(/(?:^|[\s(])(-?)site:([^\s()]+)/gi)];
+  if (siteOccurrences.length !== 1 || siteOperators.length !== 1) return null;
+
+  const [, negation, site] = siteOperators[0]!;
+  if (negation || !site) return null;
+  return rules.find((rule) => authorizedSearchSite(site, [rule])) ?? null;
+}
+
 function matchingSearchRules(query: string, rules: WebSourceRule[]): WebSourceRule[] {
   const sites = [...query.matchAll(/\bsite:([^\s]+)/gi)].map((match) => match[1]!);
   return rules.filter((rule) =>
@@ -262,18 +282,6 @@ async function reportAllowedTool(
     name: input.tool_name,
     ...extras,
   });
-}
-
-function isWebSearchAllowed(query: unknown, rules: WebSourceRule[]): boolean {
-  if (
-    typeof query !== 'string' ||
-    query.trim().length === 0 ||
-    query.length > MAX_WEB_SEARCH_QUERY_LENGTH
-  ) {
-    return false;
-  }
-  const sites = [...query.matchAll(/\bsite:([^\s]+)/gi)].map((match) => match[1]!);
-  return sites.length > 0 && sites.every((site) => authorizedSearchSite(site, rules));
 }
 
 function extractToolText(response: unknown): string {
@@ -308,11 +316,44 @@ function finalWebFetchUrl(response: unknown): unknown {
   return value.redirectUrl ?? value.url;
 }
 
+function updatedToolOutput(value: unknown) {
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PostToolUse' as const,
+      updatedToolOutput: JSON.stringify(value),
+    },
+  };
+}
+
+function sanitizedWebSearchOutput(response: unknown, rules: WebSourceRule[]) {
+  if (typeof response !== 'object' || response === null) {
+    return { ok: true, results: [] };
+  }
+
+  const results = (response as Record<string, unknown>).results;
+  if (!Array.isArray(results)) return { ok: true, results: [] };
+
+  const urls = results.flatMap((result) => {
+    if (typeof result !== 'object' || result === null) return [];
+    const parsed = parseSecureHttpsUrl((result as Record<string, unknown>).url);
+    if (!parsed || !matchingWebFetchRule(parsed.href, rules)) return [];
+    return [parsed.href];
+  });
+
+  return {
+    ok: true,
+    results: [...new Set(urls)].map((url) => ({ url })),
+  };
+}
+
 function createPreToolUseHook(config: AgentConfig, options: RuntimeChatQueryOptions): HookCallback {
   const wikiRoot = path.resolve(config.wikiRoot);
   const snapshotPath = path.resolve(options.webSourcesSnapshotPath);
   const budget = { webSearch: 0, webFetch: 0 };
-  const allowedToolUseIds = new Map<string, string>();
+  const allowedToolUseIds = new Map<
+    string,
+    { fingerprint: string; output: HookJSONOutput }
+  >();
 
   return async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {};
@@ -321,41 +362,53 @@ function createPreToolUseHook(config: AgentConfig, options: RuntimeChatQueryOpti
     const toolUseId = input.tool_use_id;
     const fingerprint = JSON.stringify([toolName, toolInput]);
     if (toolUseId && allowedToolUseIds.has(toolUseId)) {
-      return allowedToolUseIds.get(toolUseId) === fingerprint
-        ? allow()
+      const prior = allowedToolUseIds.get(toolUseId)!;
+      return prior.fingerprint === fingerprint
+        ? prior.output
         : deny('TOOL_USE_ID_INPUT_MISMATCH');
     }
 
-    const markAllowed = () => {
-      if (toolUseId) allowedToolUseIds.set(toolUseId, fingerprint);
+    const markAllowed = (output: HookJSONOutput) => {
+      if (toolUseId) allowedToolUseIds.set(toolUseId, { fingerprint, output });
     };
 
     if (toolName === 'Read' || toolName === 'Glob' || toolName === 'Grep') {
       if (!isFileToolAllowed(toolName, toolInput, wikiRoot, snapshotPath)) {
         return deny('FILE_TOOL_PATH_NOT_ALLOWED');
       }
-      markAllowed();
+      const output = allow();
+      markAllowed(output);
       await reportAllowedTool(options, input, {});
-      return allow();
+      return output;
     }
 
     if (toolName === 'WebSearch') {
       if (!options.webSearchEnabled) return deny('WEB_TOOLS_DISABLED');
       const rules = options.loadWebSourceRules();
-      if (!isWebSearchAllowed(toolInput.query, rules)) return deny('WEB_SEARCH_SOURCE_NOT_ALLOWED');
+      const matchingRule = authorizedWebSearchRule(toolInput.query, rules);
+      if (!matchingRule) return deny('WEB_SEARCH_SOURCE_NOT_ALLOWED');
       if (budget.webSearch >= WEB_SEARCH_BUDGET) return deny('WEB_TOOL_BUDGET_EXHAUSTED');
       budget.webSearch += 1;
       const sourceName = matchingSearchRules(toolInput.query as string, rules)
         .map((rule) => rule.name)
         .filter((name, index, names) => names.indexOf(name) === index)
         .join('、');
-      markAllowed();
+      const output = {
+        hookSpecificOutput: {
+          ...allow().hookSpecificOutput,
+          updatedInput: {
+            query: toolInput.query,
+            allowed_domains: [matchingRule.hostname],
+          },
+        },
+      };
+      markAllowed(output);
       await reportAllowedTool(options, input, {
         current: budget.webSearch,
         limit: WEB_SEARCH_BUDGET,
         ...(sourceName ? { sourceName } : {}),
       });
-      return allow();
+      return output;
     }
 
     if (toolName === 'WebFetch') {
@@ -365,13 +418,14 @@ function createPreToolUseHook(config: AgentConfig, options: RuntimeChatQueryOpti
       if (!matchingRule) return deny('WEB_FETCH_SOURCE_NOT_ALLOWED');
       if (budget.webFetch >= WEB_FETCH_BUDGET) return deny('WEB_TOOL_BUDGET_EXHAUSTED');
       budget.webFetch += 1;
-      markAllowed();
+      const output = allow();
+      markAllowed(output);
       await reportAllowedTool(options, input, {
         current: budget.webFetch,
         limit: WEB_FETCH_BUDGET,
         sourceName: matchingRule.name,
       });
-      return allow();
+      return output;
     }
 
     return allow();
@@ -386,10 +440,16 @@ function createPostToolUseHook(
   const snapshotPath = path.resolve(options.webSourcesSnapshotPath);
 
   return async (hookInput) => {
-    if (hookInput.hook_event_name !== 'PostToolUse' || !options.onEvidence) return {};
+    if (hookInput.hook_event_name !== 'PostToolUse') return {};
     const input: PostToolUseHookInput = hookInput;
     const toolInput = (input.tool_input ?? {}) as Record<string, unknown>;
     let evidence: Evidence | null = null;
+
+    if (input.tool_name === 'WebSearch') {
+      return updatedToolOutput(
+        sanitizedWebSearchOutput(input.tool_response, options.loadWebSourceRules()),
+      );
+    }
 
     if (
       input.tool_name === 'Read' &&
@@ -411,9 +471,21 @@ function createPostToolUseHook(
     }
 
     if (input.tool_name === 'WebFetch') {
+      const rules = options.loadWebSourceRules();
       const responseUrl = finalWebFetchUrl(input.tool_response);
-      const canonicalUrl = parseSecureHttpsUrl(responseUrl ?? toolInput.url)?.href;
-      if (canonicalUrl && matchingWebFetchRule(canonicalUrl, options.loadWebSourceRules())) {
+      const canonicalUrl = parseSecureHttpsUrl(responseUrl)?.href;
+      if (
+        !matchingWebFetchRule(toolInput.url, rules) ||
+        !canonicalUrl ||
+        !matchingWebFetchRule(canonicalUrl, rules)
+      ) {
+        return updatedToolOutput({
+          ok: false,
+          error: { code: 'WEB_FETCH_SOURCE_NOT_ALLOWED' },
+        });
+      }
+
+      if (options.onEvidence) {
         evidence = {
           evidenceId: randomUUID(),
           type: 'web',
@@ -425,7 +497,7 @@ function createPostToolUseHook(
       }
     }
 
-    if (evidence) await options.onEvidence(evidence);
+    if (evidence) await options.onEvidence?.(evidence);
     return {};
   };
 }

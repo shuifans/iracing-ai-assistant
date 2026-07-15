@@ -323,6 +323,7 @@ export default function SessionPage() {
       let currentEventType = '';
       let assistantMessageId = '';
       let accumulatedText = '';
+      let terminalReceived = false;
       const sources: MessageSourceData[] = [];
       let capturedTiming: PipelineTimingDisplay | undefined;
 
@@ -379,6 +380,7 @@ export default function SessionPage() {
                 setStatusStage({ stage: statusEvent.stage, message: statusEvent.message });
                 if (statusEvent.stage === 'complete') setStatusStage(null);
               } else if (currentEventType === 'done') {
+                terminalReceived = true;
                 const doneEvent = event as SSEDoneEvent;
                 setStatusStage(null);
                 // Capture timing from done event
@@ -403,6 +405,7 @@ export default function SessionPage() {
                   ),
                 );
               } else if (currentEventType === 'error') {
+                terminalReceived = true;
                 const errorEvent = event as SSEErrorEvent;
                 setError(errorEvent.message);
                 setStatusStage(null);
@@ -421,12 +424,19 @@ export default function SessionPage() {
         }
       }
 
-      // 流结束但没收到 done 事件（可能被中断）
-      if (assistantMessageId && accumulatedText) {
+      // Transport EOF is never success. Preserve partial text as interrupted;
+      // an empty reply is a retryable failed turn.
+      if (!terminalReceived && assistantMessageId) {
+        if (!accumulatedText) setError('回答流意外中断，请重试');
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantMessageId && m.status === 'streaming'
-              ? { ...m, status: 'interrupted', content: accumulatedText, sources }
+              ? {
+                  ...m,
+                  status: accumulatedText ? 'interrupted' : 'failed',
+                  content: accumulatedText,
+                  sources,
+                }
               : m,
           ),
         );
@@ -456,8 +466,27 @@ export default function SessionPage() {
   }
 
   // 停止生成
-  function handleStop() {
+  async function handleStop() {
+    const messageId = streamMessageIdRef.current;
+    let stopRequest: Promise<Response> | undefined;
+    if (messageId) {
+      const token = getAccessToken();
+      const headers: Record<string, string> = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+      stopRequest = fetch(`/api/chat/messages/${messageId}/stop`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+      });
+    }
     abortControllerRef.current?.abort();
+    if (stopRequest) {
+      try {
+        await stopRequest;
+      } catch {
+        // The SSE request is already cancelled locally.
+      }
+    }
   }
 
   // 重试
@@ -508,6 +537,7 @@ export default function SessionPage() {
       let currentEventType = '';
       let newMessageId = '';
       let accumulatedText = '';
+      let terminalReceived = false;
       const sources: MessageSourceData[] = [];
 
       while (true) {
@@ -560,6 +590,7 @@ export default function SessionPage() {
                     : { stage: statusEvent.stage, message: statusEvent.message },
                 );
               } else if (currentEventType === 'done') {
+                terminalReceived = true;
                 const doneEvent = event as SSEDoneEvent;
                 setStatusStage(null);
                 setMessages((prev) =>
@@ -575,6 +606,7 @@ export default function SessionPage() {
                   ),
                 );
               } else if (currentEventType === 'error') {
+                terminalReceived = true;
                 const errorEvent = event as SSEErrorEvent;
                 setError(errorEvent.message);
                 setStatusStage(null);
@@ -591,6 +623,20 @@ export default function SessionPage() {
             }
           }
         }
+      }
+      if (!terminalReceived && newMessageId) {
+        if (!accumulatedText) setError('回答流意外中断，请重试');
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === newMessageId && m.status === 'streaming'
+              ? {
+                  ...m,
+                  status: accumulatedText ? 'interrupted' : 'failed',
+                  content: accumulatedText,
+                }
+              : m,
+          ),
+        );
       }
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {

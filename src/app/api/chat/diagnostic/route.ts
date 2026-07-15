@@ -172,8 +172,13 @@ export async function POST(request: NextRequest): Promise<Response> {
           round.durationMs = Date.now() - roundStart;
         }
       } catch (err) {
-        round.error = err instanceof Error ? err.message : String(err);
+        round.error = '服务暂时不可用，请重试';
+        round.errorCode = 'AGENT_UNAVAILABLE';
         round.durationMs = Date.now() - roundStart;
+        console.error('[Diagnostic] round failed', {
+          round: i + 1,
+          errorClass: err instanceof Error ? err.name : typeof err,
+        });
       }
 
       results.push(round);
@@ -230,7 +235,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (err instanceof AppError) {
       return NextResponse.json(errorResponse(err), { status: err.httpStatus });
     }
-    console.error('[Diagnostic] Unexpected error:', err);
+    console.error('[Diagnostic] request failed', {
+      errorClass: err instanceof Error ? err.name : typeof err,
+    });
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'Diagnostic test failed' } },
       { status: 500 },

@@ -35,7 +35,7 @@ import { checkRateLimit } from '@/modules/rate-limit/service';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
 import {
-  createMessage,
+  createChatTurn,
   updateMessage,
   getMessage,
   getMessageForUser,
@@ -43,7 +43,6 @@ import {
   getSession,
   createMessageSource,
   updateQoderSessionId,
-  createUserMessageWithAttachments,
   getAttachmentsByMessage,
 } from './repository';
 import { loadAttachmentImages } from './attachment-input';
@@ -69,6 +68,72 @@ import type { Evidence } from '@/modules/agent/types';
 // ---------------------------------------------------------------------------
 
 const activeQueries = new Map<string, AbortController>();
+const activeSessions = new Map<string, string>();
+
+class AgentStreamIncompleteError extends Error {
+  constructor() {
+    super('Agent stream ended before a terminal result');
+    this.name = 'AgentStreamIncompleteError';
+  }
+}
+
+function abortError(): Error {
+  const error = new Error('Request aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+function safeAgentFailure(error: unknown): {
+  code: 'AGENT_AUTH_EXPIRED' | 'AGENT_STREAM_INCOMPLETE' | 'AGENT_UNAVAILABLE';
+  message: string;
+  retryable: boolean;
+  diagnostic: string;
+} {
+  if (error instanceof AgentStreamIncompleteError) {
+    return {
+      code: 'AGENT_STREAM_INCOMPLETE',
+      message: '回答流意外中断，请重试',
+      retryable: true,
+      diagnostic: 'unexpected_eof',
+    };
+  }
+  const record = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
+  const subtype = typeof record.subtype === 'string' ? record.subtype : '';
+  const rawErrors = Array.isArray(record.errors)
+    ? record.errors.filter((item) => typeof item === 'string')
+    : [];
+  const classificationText = [subtype, record.name, record.message, ...rawErrors]
+    .filter((item) => typeof item === 'string')
+    .join(' ')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ');
+  if (/auth|unauthorized|credential|api key|token expired/.test(classificationText)) {
+    return {
+      code: 'AGENT_AUTH_EXPIRED',
+      message: 'Agent 凭据已失效，请联系管理员',
+      retryable: false,
+      diagnostic: 'authentication',
+    };
+  }
+  return {
+    code: 'AGENT_UNAVAILABLE',
+    message: 'Agent 暂时不可用，请重试',
+    retryable: true,
+    diagnostic: new Set([
+      'error_during_execution',
+      'invalid_request',
+      'model_error',
+      'overloaded_error',
+      'rate_limit_error',
+      'request_timeout',
+      'session_not_found',
+    ]).has(subtype)
+      ? `sdk:${subtype}`
+      : subtype
+        ? 'sdk:other'
+        : 'exception',
+  };
+}
 
 function createAsyncWakeSignal(): {
   notify: () => void;
@@ -374,6 +439,7 @@ export async function* streamChatMessage(
   sessionId: string,
   content: string,
   attachmentIds?: string[],
+  externalSignal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
   const requestId = generateId();
   const t0 = performance.now();
@@ -388,19 +454,36 @@ export async function* streamChatMessage(
   checkRateLimit(user.id, user.role);
   timing.authMs = Math.round(performance.now() - t0);
 
-  // 2. Short transaction: create user message + pending assistant message
-  const t1 = performance.now();
-  const userMessage = attachmentIds?.length
-    ? createUserMessageWithAttachments(sessionId, user.id, content, attachmentIds)
-    : createMessage(sessionId, 'user', content, 'complete');
-  const imageAttachments = attachmentIds?.length
-    ? await loadAttachmentImages(getAttachmentsByMessage(userMessage.id))
-    : [];
-  const assistantMessage = createMessage(sessionId, 'assistant', '', 'pending');
-  const assistantMsgId = assistantMessage.id;
+  if (activeSessions.has(sessionId)) {
+    throw new AppError('SESSION_BUSY', '该会话正在生成回答，请稍后重试');
+  }
+  const sessionClaim = generateId();
+  activeSessions.set(sessionId, sessionClaim);
 
-  // 3. Yield start event
-  yield makeStartEvent(requestId, sessionId, assistantMsgId);
+  // 2. Short transaction: create user message + pending assistant message
+  let turn;
+  try {
+    turn = createChatTurn(sessionId, user.id, content, attachmentIds);
+  } catch (error) {
+    if (activeSessions.get(sessionId) === sessionClaim) activeSessions.delete(sessionId);
+    throw error;
+  }
+  const { userMessage, assistantMessage } = turn;
+  let imageAttachments;
+  try {
+    imageAttachments = attachmentIds?.length
+      ? await loadAttachmentImages(getAttachmentsByMessage(userMessage.id))
+      : [];
+  } catch (error) {
+    updateMessage(assistantMessage.id, {
+      status: 'failed',
+      errorCode: 'AGENT_UNAVAILABLE',
+      completedAt: utcNow(),
+    });
+    if (activeSessions.get(sessionId) === sessionClaim) activeSessions.delete(sessionId);
+    throw error;
+  }
+  const assistantMsgId = assistantMessage.id;
 
   // Track accumulated content and evidence
   let accumulatedContent = '';
@@ -446,7 +529,17 @@ export async function* streamChatMessage(
 
   // Set up abort controller
   const abortController = new AbortController();
+  const forwardExternalAbort = () => abortController.abort();
+  if (externalSignal?.aborted) abortController.abort();
+  else externalSignal?.addEventListener('abort', forwardExternalAbort, { once: true });
   activeQueries.set(assistantMsgId, abortController);
+  // A stop request may be routed to another Node process. That process marks
+  // the message interrupted; this lightweight poll propagates the persisted
+  // stop to the process that owns the SDK AbortController.
+  const persistedStopPoll = setInterval(() => {
+    if (getMessage(assistantMsgId)?.status === 'interrupted') abortController.abort();
+  }, 250);
+  persistedStopPoll.unref?.();
 
   // Timing markers — hoisted so catch block can reference them
   let t4 = performance.now();
@@ -455,6 +548,11 @@ export async function* streamChatMessage(
   let modelUsed = 'Qwen3.7-Plus';
 
   try {
+    // Keep the first visible event inside the lifecycle guard. If the client
+    // cancels immediately after receiving it, the generator still executes
+    // finally and releases/persists the reserved turn.
+    yield makeStartEvent(requestId, sessionId, assistantMsgId);
+
     // 4. Start one direct Qoder Agent query for the current turn only.
     const config = getAgentConfig();
     modelUsed = 'Qwen3.7-Plus';
@@ -505,6 +603,13 @@ export async function* streamChatMessage(
             (result) => ({ kind: 'message' as const, result }),
             (error: unknown) => ({ kind: 'error' as const, error }),
           );
+        const aborted = new Promise<{ kind: 'aborted' }>((resolve) => {
+          if (abortController.signal.aborted) resolve({ kind: 'aborted' });
+          else
+            abortController.signal.addEventListener('abort', () => resolve({ kind: 'aborted' }), {
+              once: true,
+            });
+        });
         let pendingNext = readNext();
 
         const takeAllowedToolEvents = (): SSEEvent[] => {
@@ -578,10 +683,9 @@ export async function* streamChatMessage(
 
           const wake = toolProgressWake.wait();
           let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-          const racers: Array<Promise<NextOutcome | { kind: 'tool' } | { kind: 'slow' }>> = [
-            pendingNext,
-            wake.promise.then(() => ({ kind: 'tool' as const })),
-          ];
+          const racers: Array<
+            Promise<NextOutcome | { kind: 'tool' } | { kind: 'slow' } | { kind: 'aborted' }>
+          > = [pendingNext, wake.promise.then(() => ({ kind: 'tool' as const })), aborted];
           if (usedWebTool && !synthesizingSent && !slowWebNoticeSent) {
             racers.push(
               new Promise<{ kind: 'slow' }>((resolve) => {
@@ -594,6 +698,7 @@ export async function* streamChatMessage(
           if (noticeTimer) clearTimeout(noticeTimer);
 
           if (raced.kind === 'tool') continue;
+          if (raced.kind === 'aborted') throw abortError();
           if (raced.kind === 'slow') {
             slowWebNoticeSent = true;
             synthesizingSent = true;
@@ -765,8 +870,6 @@ export async function* streamChatMessage(
               grounding = evidenceList.length > 0 ? 'grounded' : 'inferred';
               completed = true;
             } else {
-              const errorMsg =
-                'errors' in msg ? (msg.errors?.join('; ') ?? 'Query failed') : 'Query failed';
               if (
                 attempt === 0 &&
                 resumeSessionId &&
@@ -778,10 +881,12 @@ export async function* streamChatMessage(
               }
 
               // Non-resume SDK errors fail normally and are never retried as a new session.
+              const safeFailure = safeAgentFailure(msg);
               updateMessage(assistantMsgId, {
                 status: 'failed',
                 content: accumulatedContent || '',
-                errorCode: msg.subtype,
+                errorCode: safeFailure.code,
+                completedAt: utcNow(),
               });
               // Record usage event (error from SDK)
               recordUsageEvent({
@@ -797,9 +902,9 @@ export async function* streamChatMessage(
                 requestId,
                 sessionId,
                 assistantMsgId,
-                'AGENT_UNAVAILABLE',
-                errorMsg,
-                true,
+                safeFailure.code,
+                safeFailure.message,
+                safeFailure.retryable,
               );
               return;
             }
@@ -850,6 +955,11 @@ export async function* streamChatMessage(
       }
       break;
     }
+    if (abortController.signal.aborted) {
+      completed = false;
+      throw abortError();
+    }
+    if (!completed) throw new AgentStreamIncompleteError();
     if (budgetTimeout) {
       clearTimeout(budgetTimeout);
       budgetTimeout = undefined;
@@ -985,14 +1095,16 @@ export async function* streamChatMessage(
   } catch (err) {
     // 7b. On failure: mark assistant as interrupted/failed
     timing.totalMs = Math.round(performance.now() - t0);
-    const isAbort = err instanceof Error && err.name === 'AbortError';
+    const isAbort =
+      abortController.signal.aborted || (err instanceof Error && err.name === 'AbortError');
     const status = isAbort ? 'interrupted' : 'failed';
-    const errorCode = isAbort ? null : 'AGENT_UNAVAILABLE';
+    const safeFailure = safeAgentFailure(err);
+    const errorCode = isAbort ? null : safeFailure.code;
 
     console.log(
       `[ChatTiming] req=${requestId} ${isAbort ? 'ABORTED' : 'FAILED'} ` +
         `total=${timing.totalMs}ms firstByte=${timing.agentFirstByteMs ?? 'N/A'}ms ` +
-        `error=${err instanceof Error ? err.message : String(err)}`,
+        `diagnostic=${isAbort ? 'aborted' : safeFailure.diagnostic} class=${err instanceof Error ? err.name : typeof err}`,
     );
 
     updateMessage(assistantMsgId, {
@@ -1012,17 +1124,16 @@ export async function* streamChatMessage(
     });
 
     if (!isAbort) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       yield makeErrorEvent(
         requestId,
         sessionId,
         assistantMsgId,
-        'AGENT_UNAVAILABLE',
-        errorMsg,
-        true,
+        safeFailure.code,
+        safeFailure.message,
+        safeFailure.retryable,
       );
-    } else if (accumulatedContent) {
-      // Interrupted but has content — yield done with interrupted status
+    } else {
+      // Interrupted is terminal even when no text has arrived yet.
       const partialTiming: PipelineTiming = {
         authMs: timing.authMs ?? 0,
         loadAgentContextMs: timing.loadAgentContextMs ?? 0,
@@ -1045,9 +1156,23 @@ export async function* streamChatMessage(
   } finally {
     // 9. Clean up abort controller + any pending budget timeout
     if (budgetTimeout) clearTimeout(budgetTimeout);
+    clearInterval(persistedStopPoll);
     toolProgressWake.clear();
     if (!completed && !abortController.signal.aborted) abortController.abort();
+    const persistedMessage = getMessage(assistantMsgId);
+    if (
+      persistedMessage &&
+      (persistedMessage.status === 'pending' || persistedMessage.status === 'streaming')
+    ) {
+      updateMessage(assistantMsgId, {
+        status: 'interrupted',
+        errorCode: null,
+        completedAt: utcNow(),
+      });
+    }
     activeQueries.delete(assistantMsgId);
+    externalSignal?.removeEventListener('abort', forwardExternalAbort);
+    if (activeSessions.get(sessionId) === sessionClaim) activeSessions.delete(sessionId);
   }
 }
 
@@ -1065,9 +1190,13 @@ export function stopMessage(messageId: string, userId: string): void {
     throw new AppError('NOT_FOUND', 'Message not found');
   }
 
-  const controller = activeQueries.get(messageId);
-  if (controller) {
-    controller.abort();
+  if (msg.role === 'assistant' && (msg.status === 'pending' || msg.status === 'streaming')) {
+    activeQueries.get(messageId)?.abort();
+    updateMessage(messageId, {
+      status: 'interrupted',
+      errorCode: null,
+      completedAt: utcNow(),
+    });
   }
 }
 
@@ -1082,6 +1211,7 @@ export function stopMessage(messageId: string, userId: string): void {
 export async function* retryMessage(
   user: AuthenticatedUser,
   messageId: string,
+  externalSignal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
   // Find the original assistant message
   const originalMsg = getMessage(messageId);
@@ -1105,7 +1235,13 @@ export async function* retryMessage(
     }
 
     // Delegate to streamChatMessage with the original user content
-    yield* streamChatMessage(user, originalMsg.sessionId, precedingUserMsg.content);
+    yield* streamChatMessage(
+      user,
+      originalMsg.sessionId,
+      precedingUserMsg.content,
+      undefined,
+      externalSignal,
+    );
     return;
   }
 
@@ -1116,5 +1252,5 @@ export async function* retryMessage(
   }
 
   // Delegate to streamChatMessage
-  yield* streamChatMessage(user, originalMsg.sessionId, userMsg.content);
+  yield* streamChatMessage(user, originalMsg.sessionId, userMsg.content, undefined, externalSignal);
 }

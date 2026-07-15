@@ -5,6 +5,7 @@ import {
   getRefreshCookie,
   REFRESH_COOKIE_NAME,
   REFRESH_COOKIE_OPTIONS,
+  getRefreshCookieOptions,
 } from '@/modules/auth/cookies';
 
 // ─── Mock 对象 ──────────────────────────────────────────────────────────────
@@ -46,10 +47,22 @@ describe('setRefreshCookie', () => {
     // 验证 cookie 选项
     const [, , options] = response.cookies.set.mock.calls[0]!;
     expect(options.httpOnly).toBe(true);
-    expect(options.secure).toBe(true);
+    expect(options.secure).toBe(false);
     expect(options.sameSite).toBe('lax');
     expect(options.path).toBe('/api/auth');
     expect(options.maxAge).toBe(7 * 24 * 60 * 60); // 604800 秒
+  });
+
+  it('生产默认使用 Secure，并允许本地 E2E 显式关闭', () => {
+    try {
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('REFRESH_COOKIE_SECURE', '');
+      expect(getRefreshCookieOptions().secure).toBe(true);
+      vi.stubEnv('REFRESH_COOKIE_SECURE', 'false');
+      expect(getRefreshCookieOptions().secure).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { writeWebSourcesSnapshot } from '../modules/web-sources/snapshot';
+import type { WebKnowledgeSource } from './schema/web-sources';
 
 const MIGRATIONS_DIR = join(__dirname, 'migrations');
 
@@ -9,6 +11,8 @@ export interface MigrationOptions {
   dryRun?: boolean;
   /** Run migrations then verify DB integrity via PRAGMA integrity_check */
   validate?: boolean;
+  /** Regenerate the DB-backed Web source snapshot at this explicit target path. */
+  snapshotPath?: string;
 }
 
 export interface MigrationResult {
@@ -17,10 +21,16 @@ export interface MigrationResult {
   valid: boolean;
 }
 
-export function runMigrations(
-  dbPath: string,
-  options: MigrationOptions = {},
-): MigrationResult {
+export class MigrationSnapshotError extends Error {
+  readonly code = 'WEB_SOURCES_SNAPSHOT_WRITE_FAILED';
+
+  constructor(snapshotPath: string, cause: unknown) {
+    super(`Failed to regenerate Web source snapshot at ${snapshotPath}`, { cause });
+    this.name = 'MigrationSnapshotError';
+  }
+}
+
+export function runMigrations(dbPath: string, options: MigrationOptions = {}): MigrationResult {
   const db = new Database(dbPath);
   const result: MigrationResult = { applied: [], skipped: [], valid: true };
 
@@ -94,18 +104,33 @@ export function runMigrations(
     console.log('[migrate] No pending migrations.');
   }
 
+  if (options.snapshotPath) {
+    const rows = db
+      .prepare(
+        `SELECT id, name, scope_type AS scopeType, url, source_level AS sourceLevel,
+                enabled, description, created_by AS createdBy, updated_by AS updatedBy,
+                created_at AS createdAt, updated_at AS updatedAt
+         FROM web_knowledge_sources`,
+      )
+      .all() as Array<Omit<WebKnowledgeSource, 'enabled'> & { enabled: number }>;
+    try {
+      writeWebSourcesSnapshot(
+        rows.map((row) => ({ ...row, enabled: row.enabled !== 0 })),
+        options.snapshotPath,
+      );
+    } catch (error) {
+      db.close();
+      throw new MigrationSnapshotError(options.snapshotPath, error);
+    }
+  }
+
   // Validate: run integrity check
   if (options.validate) {
-    const check = db
-      .prepare('PRAGMA integrity_check')
-      .get() as { integrity_check: string };
+    const check = db.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
     if (check.integrity_check === 'ok') {
       console.log('[migrate][validate] Integrity check passed.');
     } else {
-      console.error(
-        '[migrate][validate] Integrity check FAILED:',
-        check.integrity_check,
-      );
+      console.error('[migrate][validate] Integrity check FAILED:', check.integrity_check);
       result.valid = false;
     }
   }
@@ -172,18 +197,18 @@ if (require.main === module) {
     const stepsIdx = args.indexOf('--steps');
     const stepsRaw = stepsIdx !== -1 ? args[stepsIdx + 1] : undefined;
     const steps = stepsRaw ? parseInt(stepsRaw, 10) : 1;
-    console.log(
-      `[migrate] Rolling back up to ${steps} migration(s) on: ${dbPath}`,
-    );
+    console.log(`[migrate] Rolling back up to ${steps} migration(s) on: ${dbPath}`);
     rollbackMigrations(dbPath, steps);
   } else {
-    const mode = [dryRun && 'dry-run', validate && 'validate']
-      .filter(Boolean)
-      .join(', ');
-    console.log(
-      `[migrate] Running migrations on: ${dbPath}${mode ? ` (${mode})` : ''}`,
-    );
-    const result = runMigrations(dbPath, { dryRun, validate });
+    const mode = [dryRun && 'dry-run', validate && 'validate'].filter(Boolean).join(', ');
+    console.log(`[migrate] Running migrations on: ${dbPath}${mode ? ` (${mode})` : ''}`);
+    const result = runMigrations(dbPath, {
+      dryRun,
+      validate,
+      snapshotPath:
+        process.env.WEB_KNOWLEDGE_SOURCES_SNAPSHOT_PATH ??
+        join(process.cwd(), 'notes/knowledge-sources.md'),
+    });
     if (!result.valid) {
       process.exit(1);
     }

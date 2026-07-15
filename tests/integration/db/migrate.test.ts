@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/db/migrate';
 import { join } from 'path';
-import { existsSync, unlinkSync, mkdtempSync, rmSync } from 'fs';
+import { existsSync, unlinkSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 
 // Skip all tests if better-sqlite3 native module fails to load
@@ -20,12 +20,14 @@ const describeIf = nativeOk ? describe : describe.skip;
 describeIf('Database migration', () => {
   let db: Database.Database;
   let dbPath: string;
+  let snapshotPath: string;
   let tmpDir: string;
 
   beforeAll(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'iracing-test-'));
     dbPath = join(tmpDir, 'test.sqlite');
-    runMigrations(dbPath);
+    snapshotPath = join(tmpDir, 'notes', 'knowledge-sources.md');
+    runMigrations(dbPath, { snapshotPath });
     db = new Database(dbPath);
     db.pragma('foreign_keys = ON');
   });
@@ -78,7 +80,156 @@ describeIf('Database migration', () => {
 
   // ── 2. Idempotent ──────────────────────────────────────────────────────────
   it('is idempotent (running migrations again does not throw)', () => {
-    expect(() => runMigrations(dbPath)).not.toThrow();
+    rmSync(snapshotPath, { force: true });
+    expect(() => runMigrations(dbPath, { snapshotPath })).not.toThrow();
+    expect(readFileSync(snapshotPath, 'utf8')).toContain('iRacing Support Knowledge Base');
+  });
+
+  it('seeds the legacy allowed Web sources on a fresh database', () => {
+    const sources = db
+      .prepare(
+        `SELECT scope_type AS scopeType, url, source_level AS sourceLevel, enabled
+         FROM web_knowledge_sources ORDER BY url`,
+      )
+      .all();
+
+    expect(sources).toEqual(
+      expect.arrayContaining([
+        {
+          scopeType: 'domain',
+          url: 'https://support.iracing.com',
+          sourceLevel: 'official',
+          enabled: 1,
+        },
+        {
+          scopeType: 'path',
+          url: 'https://www.iracing.com/new-racer-guide',
+          sourceLevel: 'official',
+          enabled: 1,
+        },
+        {
+          scopeType: 'path',
+          url: 'https://www.iracing.com/tracks',
+          sourceLevel: 'official',
+          enabled: 1,
+        },
+        {
+          scopeType: 'path',
+          url: 'https://www.reddit.com/r/iRacing',
+          sourceLevel: 'community',
+          enabled: 1,
+        },
+      ]),
+    );
+    expect(sources).toHaveLength(9);
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+    expect(
+      db
+        .prepare(
+          `SELECT role, status, password_hash AS passwordHash
+           FROM users WHERE id = 'system:web-source-seed'`,
+        )
+        .get(),
+    ).toEqual({
+      role: 'knowledge_admin',
+      status: 'disabled',
+      passwordHash: '!migration-only-no-login!',
+    });
+    const snapshot = readFileSync(snapshotPath, 'utf8');
+    expect(snapshot).toContain(
+      '| 启用 | official | iRacing Support Knowledge Base | domain | https://support.iracing.com |',
+    );
+    expect(snapshot).toContain(
+      '| 启用 | community | r/iRacing (Reddit) | path | https://www.reddit.com/r/iRacing |',
+    );
+    expect(snapshot).not.toContain('数据源优先级汇总');
+  });
+
+  it('seeds an empty database that already applied migration G', () => {
+    const upgradeDir = mkdtempSync(join(tmpdir(), 'web-source-upgrade-empty-'));
+    const upgradePath = join(upgradeDir, 'upgrade.sqlite');
+    const upgrade = new Database(upgradePath);
+    upgrade.exec('CREATE TABLE __migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)');
+    const throughG = [
+      '20260711000000_A_initial_schema.sql',
+      '20260713000000_B_add_retrieval_cache.sql',
+      '20260713120000_C_evaluation.sql',
+      '20260714000000_D_seed_rate_limit_defaults.sql',
+      '20260714000001_E_owned_chat_attachments.sql',
+      '20260714000002_F_knowledge_taxonomy.sql',
+      '20260715000000_G_qoder_agent_chat.sql',
+    ];
+    for (const name of throughG) {
+      upgrade.exec(readFileSync(join(process.cwd(), 'src/db/migrations', name), 'utf8'));
+      upgrade
+        .prepare('INSERT INTO __migrations (name, applied_at) VALUES (?, ?)')
+        .run(name, '2026-07-15T00:00:00.000Z');
+    }
+    upgrade.close();
+
+    const upgradeSnapshotPath = join(upgradeDir, 'knowledge-sources.md');
+    runMigrations(upgradePath, { snapshotPath: upgradeSnapshotPath });
+    const migrated = new Database(upgradePath);
+    expect(migrated.prepare('SELECT count(*) AS count FROM web_knowledge_sources').get()).toEqual({
+      count: 9,
+    });
+    expect(readFileSync(upgradeSnapshotPath, 'utf8')).toContain(
+      '| 启用 | official | iRacing New Racer Guide | path | https://www.iracing.com/new-racer-guide |',
+    );
+    migrated.close();
+    rmSync(upgradeDir, { recursive: true, force: true });
+  });
+
+  it('does not overwrite a maintained non-empty source table during the G upgrade', () => {
+    const upgradeDir = mkdtempSync(join(tmpdir(), 'web-source-upgrade-maintained-'));
+    const upgradePath = join(upgradeDir, 'upgrade.sqlite');
+    const upgrade = new Database(upgradePath);
+    upgrade.exec('CREATE TABLE __migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)');
+    const throughG = [
+      '20260711000000_A_initial_schema.sql',
+      '20260713000000_B_add_retrieval_cache.sql',
+      '20260713120000_C_evaluation.sql',
+      '20260714000000_D_seed_rate_limit_defaults.sql',
+      '20260714000001_E_owned_chat_attachments.sql',
+      '20260714000002_F_knowledge_taxonomy.sql',
+      '20260715000000_G_qoder_agent_chat.sql',
+    ];
+    for (const name of throughG) {
+      upgrade.exec(readFileSync(join(process.cwd(), 'src/db/migrations', name), 'utf8'));
+      upgrade
+        .prepare('INSERT INTO __migrations (name, applied_at) VALUES (?, ?)')
+        .run(name, '2026-07-15T00:00:00.000Z');
+    }
+    upgrade.exec(`
+      INSERT INTO users (id, username, password_hash, role, status, created_at, updated_at)
+      VALUES ('maintainer', 'maintainer', 'hash', 'knowledge_admin', 'active', '2026-07-15T00:00:00.000Z', '2026-07-15T00:00:00.000Z');
+      INSERT INTO web_knowledge_sources
+        (id, name, scope_type, url, source_level, enabled, description, created_by, updated_by, created_at, updated_at)
+      VALUES
+        ('maintained', 'Maintained', 'domain', 'https://maintained.example.com', 'community', 0, 'keep me', 'maintainer', 'maintainer', '2026-07-15T00:00:00.000Z', '2026-07-15T00:00:00.000Z');
+    `);
+    upgrade.close();
+
+    const maintainedSnapshotPath = join(upgradeDir, 'knowledge-sources.md');
+    runMigrations(upgradePath, { snapshotPath: maintainedSnapshotPath });
+    runMigrations(upgradePath, { snapshotPath: maintainedSnapshotPath });
+    const migrated = new Database(upgradePath);
+    expect(
+      migrated.prepare('SELECT id, name, enabled, description FROM web_knowledge_sources').all(),
+    ).toEqual([{ id: 'maintained', name: 'Maintained', enabled: 0, description: 'keep me' }]);
+    expect(
+      migrated
+        .prepare("SELECT count(*) AS count FROM users WHERE id = 'system:web-source-seed'")
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(readFileSync(maintainedSnapshotPath, 'utf8')).toContain(
+      '| 禁用 | community | Maintained | domain | https://maintained.example.com | keep me |',
+    );
+    expect(readFileSync(maintainedSnapshotPath, 'utf8')).not.toContain(
+      'iRacing Support Knowledge Base',
+    );
+    migrated.close();
+    rmSync(upgradeDir, { recursive: true, force: true });
   });
 
   // ── 3. __migrations table records applied migrations ───────────────────────
@@ -131,10 +282,9 @@ describeIf('Database migration', () => {
     const { readFileSync } = require('node:fs') as typeof import('node:fs');
     for (const name of migrationNames) {
       legacy.exec(readFileSync(join(process.cwd(), 'src/db/migrations', name), 'utf8'));
-      legacy.prepare('INSERT INTO __migrations (name, applied_at) VALUES (?, ?)').run(
-        name,
-        '2026-07-14T00:00:00.000Z',
-      );
+      legacy
+        .prepare('INSERT INTO __migrations (name, applied_at) VALUES (?, ?)')
+        .run(name, '2026-07-14T00:00:00.000Z');
     }
     legacy.exec(`
       INSERT INTO users (id, username, password_hash, role, status, created_at, updated_at)

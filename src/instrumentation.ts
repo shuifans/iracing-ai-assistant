@@ -3,10 +3,22 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     try {
       const { runMigrations } = await import('./db/migrate');
+      const { join } = await import('node:path');
       const dbPath = process.env.DATABASE_PATH || './data/app.sqlite';
-      runMigrations(dbPath);
+      runMigrations(dbPath, {
+        snapshotPath:
+          process.env.WEB_KNOWLEDGE_SOURCES_SNAPSHOT_PATH ??
+          join(process.cwd(), 'notes/knowledge-sources.md'),
+      });
       console.log('[instrumentation] Database migrations completed');
     } catch (err) {
+      if (
+        err instanceof Error &&
+        'code' in err &&
+        err.code === 'WEB_SOURCES_SNAPSHOT_WRITE_FAILED'
+      ) {
+        throw err;
+      }
       // Migrations are applied explicitly during deploy (deploy.sh runs
       // `npx tsx src/db/migrate.ts` from source). This startup hook is a best-effort
       // safety net; in the standalone build the bundled migrate.ts resolves the

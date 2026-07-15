@@ -175,6 +175,7 @@ export const ERROR_CODES = {
   EXTRACTION_FAILED: { http: 422, code: 'EXTRACTION_FAILED' as const },
   DRAFT_INVALID: { http: 422, code: 'DRAFT_INVALID' as const },
   RATE_LIMITED: { http: 429, code: 'RATE_LIMITED' as const },
+  SESSION_BUSY: { http: 409, code: 'SESSION_BUSY' as const },
   AGENT_UNAVAILABLE: { http: 502, code: 'AGENT_UNAVAILABLE' as const },
   WEB_FETCH_FAILED: { http: 502, code: 'WEB_FETCH_FAILED' as const },
   AGENT_AUTH_EXPIRED: { http: 503, code: 'AGENT_AUTH_EXPIRED' as const },

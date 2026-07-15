@@ -159,4 +159,28 @@ describe('POST /api/chat/diagnostic', () => {
     expect(getSession).toHaveBeenCalledWith(OWNED_SESSION.id, ADMIN_USER.id);
     expect(streamChatMessage).toHaveBeenCalledTimes(1);
   });
+
+  it('does not expose raw generation errors in diagnostic results', async () => {
+    vi.mocked(streamChatMessage).mockImplementationOnce(() =>
+      (async function* () {
+        throw new Error('token=sk-secret /Users/private https://internal.example/raw');
+      })(),
+    );
+
+    const response = await POST(makeRequest({ questions: ['test'] }));
+    const body = await response.json();
+    const serialized = JSON.stringify(body);
+
+    expect(response.status).toBe(200);
+    expect(body.data.rounds[0]).toEqual(
+      expect.objectContaining({
+        success: false,
+        errorCode: 'AGENT_UNAVAILABLE',
+        error: '服务暂时不可用，请重试',
+      }),
+    );
+    expect(serialized).not.toContain('sk-secret');
+    expect(serialized).not.toContain('/Users/private');
+    expect(serialized).not.toContain('internal.example');
+  });
 });

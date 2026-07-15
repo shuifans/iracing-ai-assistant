@@ -33,6 +33,8 @@ export const test = base.extend<{
   authedAdminPage: Page;
   /** Browser page logged in as knowledge_admin (refresh cookie set in the context). */
   authedKadminPage: Page;
+  /** Registers uniquely named Web sources for teardown isolation. */
+  webSourceCleanup: { trackName: (name: string) => void };
 }>({
   adminToken: async ({ request }, use) => {
     await use(await loginViaApi(request, E2E_ADMIN));
@@ -55,6 +57,33 @@ export const test = base.extend<{
     await loginViaApi(page.request, E2E_KADMIN);
     await use(page);
     await ctx.close();
+  },
+  webSourceCleanup: async ({ request, kadminToken }, use) => {
+    const trackedNames = new Set<string>();
+    await use({ trackName: (name) => trackedNames.add(name) });
+
+    if (trackedNames.size === 0) return;
+    const headers = { Authorization: `Bearer ${kadminToken}` };
+    const listRes = await request.get('/api/knowledge/web-sources', { headers });
+    if (!listRes.ok()) {
+      throw new Error(
+        `Web source cleanup list failed: ${listRes.status()} ${await listRes.text()}`,
+      );
+    }
+    const json = (await listRes.json()) as {
+      data: { sources: Array<{ id: string; name: string }> };
+    };
+    for (const source of json.data.sources) {
+      if (!trackedNames.has(source.name)) continue;
+      const deleteRes = await request.delete(`/api/knowledge/web-sources/${source.id}`, {
+        headers,
+      });
+      if (!deleteRes.ok()) {
+        throw new Error(
+          `Web source cleanup delete failed: ${deleteRes.status()} ${await deleteRes.text()}`,
+        );
+      }
+    }
   },
 });
 

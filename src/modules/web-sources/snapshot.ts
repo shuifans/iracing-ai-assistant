@@ -1,4 +1,12 @@
-import { mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { WebKnowledgeSource } from '@/db/schema/web-sources';
@@ -25,36 +33,43 @@ function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-export function writeWebSourcesSnapshot(
-  sources: WebKnowledgeSource[],
-  snapshotPath: string,
-): void {
-  const sorted = [...sources].sort(
-    (a, b) =>
-      compareText(a.sourceLevel, b.sourceLevel) ||
-      compareText(a.name, b.name) ||
-      compareText(a.url, b.url),
-  );
-  const header = [
-    '# iRacing AI 助手 Web 知识源',
-    '',
-    '> 此文件由知识源管理后台从数据库生成，请勿手工编辑。',
-    '',
-    '| 状态 | 级别 | 名称 | 范围 | URL | 说明 |',
-    '|---|---|---|---|---|---|',
-  ];
-  const rows = sorted.map(
-    (source) =>
-      `| ${source.enabled ? '启用' : '禁用'} | ${source.sourceLevel} | ${escapeCell(source.name)} | ${source.scopeType} | ${escapeCell(source.url)} | ${escapeCell(source.description ?? '')} |`,
-  );
-  const contents = [...header, ...rows].join('\n') + '\n';
+export function writeWebSourcesSnapshot(sources: WebKnowledgeSource[], snapshotPath: string): void {
   const parent = dirname(snapshotPath);
   mkdirSync(parent, { recursive: true });
   const temporaryPath = `${snapshotPath}.${process.pid}.${randomUUID()}.tmp`;
+  let temporaryFd: number | undefined;
   try {
-    writeFileSync(temporaryPath, contents, 'utf8');
+    temporaryFd = openSync(temporaryPath, 'wx');
+    const sorted = [...sources].sort(
+      (a, b) =>
+        compareText(a.sourceLevel, b.sourceLevel) ||
+        compareText(a.name, b.name) ||
+        compareText(a.url, b.url),
+    );
+    const header = [
+      '# iRacing AI 助手 Web 知识源',
+      '',
+      '> 此文件由知识源管理后台从数据库生成，请勿手工编辑。',
+      '',
+      '| 状态 | 级别 | 名称 | 范围 | URL | 说明 |',
+      '|---|---|---|---|---|---|',
+    ];
+    const rows = sorted.map(
+      (source) =>
+        `| ${source.enabled ? '启用' : '禁用'} | ${source.sourceLevel} | ${escapeCell(source.name)} | ${source.scopeType} | ${escapeCell(source.url)} | ${escapeCell(source.description ?? '')} |`,
+    );
+    const contents = [...header, ...rows].join('\n') + '\n';
+    writeFileSync(temporaryFd, contents, 'utf8');
+    fsyncSync(temporaryFd);
+    closeSync(temporaryFd);
+    temporaryFd = undefined;
     renameSync(temporaryPath, snapshotPath);
   } catch (error) {
+    if (temporaryFd !== undefined) {
+      try {
+        closeSync(temporaryFd);
+      } catch {}
+    }
     try {
       unlinkSync(temporaryPath);
     } catch {}

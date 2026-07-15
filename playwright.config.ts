@@ -18,10 +18,12 @@ const SERVER_ENV = {
   DATABASE_PATH: DB_PATH,
   DATA_ROOT,
   WIKI_ROOT: path.join(DATA_ROOT, 'md-wiki'),
+  WEB_KNOWLEDGE_SOURCES_SNAPSHOT_PATH: path.join(DATA_ROOT, 'knowledge-sources.md'),
   JWT_ACCESS_SECRET: 'e2e-jwt-secret-do-not-use-in-prod',
   REFRESH_TOKEN_PEPPER: 'e2e-refresh-pepper-do-not-use-in-prod',
   IP_HASH_PEPPER: 'e2e-ip-pepper-do-not-use-in-prod',
   QODER_PERSONAL_ACCESS_TOKEN: 'e2e-pat-do-not-use-in-prod',
+  REFRESH_COOKIE_SECURE: 'false',
   LOG_LEVEL: 'warn',
 };
 
@@ -49,7 +51,5 @@ export default defineConfig({
     cwd: '.',
     env: { ...process.env, ...SERVER_ENV },
   },
-  projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-  ],
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });

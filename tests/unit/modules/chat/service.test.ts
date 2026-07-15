@@ -4,11 +4,13 @@ import type { AuthenticatedUser } from '@/modules/auth/types';
 // Mock all dependencies
 vi.mock('@/modules/chat/repository', () => ({
   getSession: vi.fn(),
+  createChatTurn: vi.fn(),
   createMessage: vi.fn(),
   updateMessage: vi.fn(),
   getMessage: vi.fn(),
   getMessageForUser: vi.fn(),
   getMessagesBySession: vi.fn(),
+  hasActiveAssistantMessage: vi.fn(),
   createMessageSource: vi.fn(),
   updateQoderSessionId: vi.fn(),
   getAttachment: vi.fn(),
@@ -62,11 +64,13 @@ vi.mock('@/db/schema/admin', () => ({
 // Import after mocks
 import {
   getSession,
+  createChatTurn,
   createMessage,
   updateMessage,
   getMessage,
   getMessageForUser,
   getMessagesBySession,
+  hasActiveAssistantMessage,
   createMessageSource,
   updateSessionTitle,
   getAttachment,
@@ -82,11 +86,13 @@ import { getDb } from '@/db/client';
 import { AppError } from '@/lib/errors';
 
 const mockGetSession = vi.mocked(getSession);
+const mockCreateChatTurn = vi.mocked(createChatTurn);
 const mockCreateMessage = vi.mocked(createMessage);
 const mockUpdateMessage = vi.mocked(updateMessage);
 const mockGetMessage = vi.mocked(getMessage);
 const mockGetMessageForUser = vi.mocked(getMessageForUser);
 const mockGetMessagesBySession = vi.mocked(getMessagesBySession);
+const mockHasActiveAssistantMessage = vi.mocked(hasActiveAssistantMessage);
 const mockCreateMessageSource = vi.mocked(createMessageSource);
 const mockUpdateSessionTitle = vi.mocked(updateSessionTitle);
 const mockUpdateQoderSessionId = vi.mocked(updateQoderSessionId);
@@ -165,7 +171,17 @@ describe('streamChatMessage', () => {
     mockCreateMessage.mockImplementation((_sessionId, role, _content, status) =>
       makeMockMessage(role, (status ?? 'pending') as MessageStatus),
     );
+    mockCreateChatTurn.mockImplementation((sessionId, userId, messageContent, attachmentIds) => {
+      const userMessage = attachmentIds?.length
+        ? mockCreateUserMessageWithAttachments(sessionId, userId, messageContent, attachmentIds)
+        : mockCreateMessage(sessionId, 'user', messageContent, 'complete');
+      return {
+        userMessage,
+        assistantMessage: mockCreateMessage(sessionId, 'assistant', '', 'pending'),
+      };
+    });
     mockGetMessagesBySession.mockReturnValue([]);
+    mockHasActiveAssistantMessage.mockReturnValue(false);
     mockListEnabledWebSourceRules.mockReturnValue([]);
   });
 
@@ -190,6 +206,42 @@ describe('streamChatMessage', () => {
     expect(mockCheckRateLimit).toHaveBeenCalledWith('user-001', 'user');
     expect(mockCreateMessage).not.toHaveBeenCalled();
     expect(mockCreateChatQuery).not.toHaveBeenCalled();
+  });
+
+  it('releases and interrupts a turn when the consumer cancels after the start event', async () => {
+    const assistant = makeMockMessage('assistant', 'pending', 'msg-asst-cancel-at-start');
+    mockCreateChatTurn.mockReturnValueOnce({
+      userMessage: makeMockMessage('user', 'complete', 'msg-user-cancel-at-start'),
+      assistantMessage: assistant,
+    });
+    mockGetMessage.mockReturnValue(assistant);
+
+    const first = streamChatMessage(mockUser, 'sess-001', 'first');
+    expect((await first.next()).value).toEqual(
+      expect.objectContaining({ messageId: 'msg-asst-cancel-at-start' }),
+    );
+    await first.return(undefined);
+
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      'msg-asst-cancel-at-start',
+      expect.objectContaining({ status: 'interrupted', errorCode: null }),
+    );
+
+    mockCreateChatQuery.mockReturnValue(
+      createMockSDKStream([
+        {
+          type: 'result',
+          subtype: 'error_during_execution',
+          session_id: 'qoder-next',
+          errors: ['unavailable'],
+        },
+      ]) as any,
+    );
+    const second = streamChatMessage(mockUser, 'sess-001', 'second');
+    await expect(second.next()).resolves.toEqual(
+      expect.objectContaining({ value: expect.objectContaining({ sessionId: 'sess-001' }) }),
+    );
+    await second.return(undefined);
   });
 
   it('always creates one Qoder query with only the current turn and the session Web flag', async () => {
@@ -648,8 +700,8 @@ describe('streamChatMessage', () => {
       await vi.advanceTimersByTimeAsync(20_000);
       expect(mockCreateChatQuery.mock.calls[0]?.[1].abortController.signal.aborted).toBe(true);
       release();
-      const firstText = await afterNotice;
-      expect(firstText.value).toEqual(expect.objectContaining({ seq: 1, text: 'answer' }));
+      const terminal = await afterNotice;
+      expect(terminal.value).toEqual(expect.objectContaining({ status: 'interrupted' }));
       const remaining = [];
       for await (const event of generator) remaining.push(event);
       expect(
@@ -1310,6 +1362,82 @@ describe('streamChatMessage', () => {
     expect(doneEvent).toBeDefined();
     expect((doneEvent as any).status).toBe('interrupted');
   });
+
+  it('turns an unexpected SDK EOF into a sanitized terminal failure', async () => {
+    const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-eof');
+    mockCreateMessage
+      .mockReturnValueOnce(makeMockMessage('user', 'complete', 'msg-user-eof'))
+      .mockReturnValueOnce(assistantMsg);
+    mockCreateChatQuery.mockReturnValue(createMockSDKStream([]) as any);
+
+    const events = [];
+    for await (const event of streamChatMessage(mockUser, 'sess-001', 'Hello')) events.push(event);
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        code: 'AGENT_STREAM_INCOMPLETE',
+        message: '回答流意外中断，请重试',
+        retryable: true,
+      }),
+    );
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      'msg-asst-eof',
+      expect.objectContaining({ status: 'failed', errorCode: 'AGENT_STREAM_INCOMPLETE' }),
+    );
+  });
+
+  it('does not expose SDK error bodies in SSE or logs', async () => {
+    const secret = 'token=sk-secret path=/Users/private input=https://internal.example/raw';
+    mockCreateChatQuery.mockReturnValue(
+      createMockSDKStream([
+        {
+          type: 'result',
+          subtype: 'error_during_execution',
+          session_id: 'qoder-sess-001',
+          errors: [secret],
+        },
+      ]) as any,
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const events = [];
+    for await (const event of streamChatMessage(mockUser, 'sess-001', 'Hello')) events.push(event);
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ code: 'AGENT_UNAVAILABLE', message: 'Agent 暂时不可用，请重试' }),
+    );
+    expect(JSON.stringify(events)).not.toContain(secret);
+    expect(log.mock.calls.flat().join(' ')).not.toContain(secret);
+    log.mockRestore();
+  });
+
+  it('fails fast before persistence when the same session already has an active generation', async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockCreateChatQuery.mockReturnValue(
+      (async function* () {
+        await blocked;
+      })() as any,
+    );
+
+    const first = streamChatMessage(mockUser, 'sess-001', 'first');
+    await first.next();
+    await first.next();
+    const firstPending = first.next();
+    await Promise.resolve();
+    const persistedBeforeSecond = mockCreateMessage.mock.calls.length;
+
+    const second = streamChatMessage(mockUser, 'sess-001', 'second');
+    await expect(second.next()).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(mockCreateMessage.mock.calls.length).toBe(persistedBeforeSecond);
+    expect(mockCreateChatQuery).toHaveBeenCalledTimes(1);
+
+    release();
+    await firstPending;
+    await first.return(undefined);
+  });
   it('records usage event with result=success on successful stream', async () => {
     const userMsg = makeMockMessage('user', 'complete', 'msg-user-001');
     const assistantMsg = makeMockMessage('assistant', 'pending', 'msg-asst-001');
@@ -1470,7 +1598,17 @@ describe('stopMessage', () => {
     mockCreateMessage.mockImplementation((_sessionId, role, _content, status) =>
       makeMockMessage(role, (status ?? 'pending') as MessageStatus),
     );
+    mockCreateChatTurn.mockImplementation((sessionId, userId, messageContent, attachmentIds) => {
+      const userMessage = attachmentIds?.length
+        ? mockCreateUserMessageWithAttachments(sessionId, userId, messageContent, attachmentIds)
+        : mockCreateMessage(sessionId, 'user', messageContent, 'complete');
+      return {
+        userMessage,
+        assistantMessage: mockCreateMessage(sessionId, 'assistant', '', 'pending'),
+      };
+    });
     mockGetMessagesBySession.mockReturnValue([]);
+    mockHasActiveAssistantMessage.mockReturnValue(false);
   });
 
   it('throws NOT_FOUND when message does not exist', async () => {
@@ -1520,11 +1658,58 @@ describe('stopMessage', () => {
     abortSpy.mockRestore();
   });
 
+  it('settles a blocked SDK read immediately and persists interruption after stop', async () => {
+    const assistantMessage = makeMockMessage('assistant', 'pending', 'msg-asst-blocked');
+    mockCreateMessage
+      .mockReturnValueOnce(makeMockMessage('user', 'complete', 'msg-user-blocked'))
+      .mockReturnValueOnce(assistantMessage);
+    mockGetMessageForUser.mockReturnValue(assistantMessage);
+    mockCreateChatQuery.mockReturnValue(
+      (async function* () {
+        await new Promise(() => undefined);
+      })() as any,
+    );
+
+    const generator = streamChatMessage(mockUser, 'sess-001', 'Hello');
+    await generator.next();
+    await generator.next();
+    const pending = generator.next();
+    await Promise.resolve();
+
+    stopMessage('msg-asst-blocked', 'user-001');
+
+    await expect(
+      Promise.race([
+        pending,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('stop did not settle')), 100)),
+      ]),
+    ).resolves.toEqual(
+      expect.objectContaining({ value: expect.objectContaining({ status: 'interrupted' }) }),
+    );
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      'msg-asst-blocked',
+      expect.objectContaining({ status: 'interrupted' }),
+    );
+  });
+
   it('is idempotent when an owned message is no longer active', () => {
     mockGetMessageForUser.mockReturnValue(
       makeMockMessage('assistant', 'complete', 'msg-asst-complete'),
     );
 
     expect(() => stopMessage('msg-asst-complete', 'user-001')).not.toThrow();
+  });
+
+  it('persists interrupted when an owned pending message has no local controller', () => {
+    mockGetMessageForUser.mockReturnValue(
+      makeMockMessage('assistant', 'pending', 'msg-asst-orphaned'),
+    );
+
+    stopMessage('msg-asst-orphaned', 'user-001');
+
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      'msg-asst-orphaned',
+      expect.objectContaining({ status: 'interrupted', errorCode: null }),
+    );
   });
 });

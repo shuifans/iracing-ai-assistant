@@ -20,6 +20,7 @@ describeIf('E2E: Chat flow', () => {
   let rawDb: any;
   let cleanup: () => void;
   let accessToken: string;
+  let otherAccessToken: string;
   let userId: string;
 
   beforeAll(async () => {
@@ -60,6 +61,8 @@ describeIf('E2E: Chat flow', () => {
     rawDb.exec(`
       INSERT INTO users (id, username, password_hash, role, status, created_at, updated_at)
       VALUES ('u-chat-e2e', 'chat_e2e_user', '$2b$12$fakehashfortestingonly', 'user', 'active',
+              '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z'),
+             ('u-chat-e2e-other', 'chat_e2e_other', '$2b$12$fakehashfortestingonly', 'user', 'active',
               '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z');
     `);
     userId = 'u-chat-e2e';
@@ -69,6 +72,12 @@ describeIf('E2E: Chat flow', () => {
     accessToken = await createAccessToken({
       id: userId,
       username: 'chat_e2e_user',
+      role: 'user',
+      status: 'active',
+    });
+    otherAccessToken = await createAccessToken({
+      id: 'u-chat-e2e-other',
+      username: 'chat_e2e_other',
       role: 'user',
       status: 'active',
     });
@@ -92,6 +101,75 @@ describeIf('E2E: Chat flow', () => {
     expect(body.data).toHaveProperty('id');
     expect(body.data).toHaveProperty('userId', userId);
     expect(body.data.status).toBe('active');
+    expect(body.data.webSearchEnabled).toBe(false);
+  });
+
+  it('persists the Web toggle and rejects updates by another user', async () => {
+    const sessionsRoute = await import('@/app/api/chat/sessions/route');
+    const sessionRoute = await import('@/app/api/chat/sessions/[id]/route');
+
+    const createRes = await sessionsRoute.POST(
+      new NextRequest('http://localhost:3000/api/chat/sessions', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+      }),
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as {
+      data: { id: string; webSearchEnabled: boolean };
+    };
+    expect(created.data.webSearchEnabled).toBe(false);
+
+    const params = { params: Promise.resolve({ id: created.data.id }) };
+    const patchRes = await sessionRoute.PATCH(
+      new NextRequest(`http://localhost:3000/api/chat/sessions/${created.data.id}`, {
+        method: 'PATCH',
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ webSearchEnabled: true }),
+      }),
+      params,
+    );
+    expect(patchRes.status).toBe(200);
+    await expect(patchRes.json()).resolves.toMatchObject({
+      data: { id: created.data.id, webSearchEnabled: true },
+    });
+
+    const getRes = await sessionRoute.GET(
+      new NextRequest(`http://localhost:3000/api/chat/sessions/${created.data.id}`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+      }),
+      params,
+    );
+    expect(getRes.status).toBe(200);
+    await expect(getRes.json()).resolves.toMatchObject({
+      data: { session: { id: created.data.id, webSearchEnabled: true } },
+    });
+
+    const otherPatchRes = await sessionRoute.PATCH(
+      new NextRequest(`http://localhost:3000/api/chat/sessions/${created.data.id}`, {
+        method: 'PATCH',
+        headers: {
+          authorization: `Bearer ${otherAccessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ webSearchEnabled: false }),
+      }),
+      params,
+    );
+    expect(otherPatchRes.status).toBe(404);
+
+    const ownerGetRes = await sessionRoute.GET(
+      new NextRequest(`http://localhost:3000/api/chat/sessions/${created.data.id}`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+      }),
+      params,
+    );
+    await expect(ownerGetRes.json()).resolves.toMatchObject({
+      data: { session: { webSearchEnabled: true } },
+    });
   });
 
   it('GET /api/chat/sessions lists user sessions', async () => {

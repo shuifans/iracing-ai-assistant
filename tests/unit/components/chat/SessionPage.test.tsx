@@ -101,6 +101,73 @@ describe('SessionPage persistent web search mode', () => {
     streamController.close();
   });
 
+  it('calls the server stop endpoint for the known assistant message before cancelling the stream', async () => {
+    vi.mocked(authFetch).mockResolvedValueOnce(sessionResponse('session-1', false));
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+    fetchSpy
+      .mockResolvedValueOnce(new Response(body, { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse({ data: { stopped: true } }));
+
+    render(<SessionPage />);
+    await screen.findByRole('switch', { name: '联网搜索' });
+    fireEvent.change(screen.getByRole('textbox', { name: '消息输入' }), {
+      target: { value: '怎样刹车？' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    streamController.enqueue(
+      new TextEncoder().encode(
+        'event: start\ndata: {"requestId":"r","sessionId":"session-1","messageId":"assistant-1","timestamp":"t"}\n\n',
+      ),
+    );
+    const stop = await screen.findByRole('button', { name: '停止生成' });
+    fireEvent.click(stop);
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenNthCalledWith(
+        2,
+        '/api/chat/messages/assistant-1/stop',
+        expect.objectContaining({ method: 'POST', credentials: 'include' }),
+      );
+    });
+  });
+
+  it('marks an assistant failed when the SSE body ends without a terminal event or text', async () => {
+    vi.mocked(authFetch).mockResolvedValueOnce(sessionResponse('session-1', false));
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<SessionPage />);
+    await screen.findByRole('switch', { name: '联网搜索' });
+    fireEvent.change(screen.getByRole('textbox', { name: '消息输入' }), {
+      target: { value: '怎样刹车？' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    streamController.enqueue(
+      new TextEncoder().encode(
+        'event: start\ndata: {"requestId":"r","sessionId":"session-1","messageId":"assistant-eof","timestamp":"t"}\n\n',
+      ),
+    );
+    streamController.close();
+
+    expect(await screen.findByText('回答流意外中断，请重试')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByLabelText('停止生成')).toBeNull());
+    expect(screen.getByRole('button', { name: '重试' })).toBeTruthy();
+  });
+
   it('initializes from GET and persists a change while locking the switch', async () => {
     const patchResult = deferred<Response>();
     vi.mocked(authFetch)

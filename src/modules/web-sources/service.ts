@@ -1,17 +1,12 @@
 import { join } from 'node:path';
-import { getDb } from '@/db/client';
+import { getRawDb } from '@/db/client';
 import { AppError } from '@/lib/errors';
 import { recordAudit } from '@/modules/audit/service';
 import type { AuditAction } from '@/modules/audit/types';
 import * as repository from './repository';
 import { normalizeWebSourceUrl } from './schemas';
 import { toWebSourceRule, writeWebSourcesSnapshot } from './snapshot';
-import type {
-  WebKnowledgeSource,
-  WebSourceInput,
-  WebSourceRule,
-  WebSourceUpdate,
-} from './types';
+import type { WebKnowledgeSource, WebSourceInput, WebSourceRule, WebSourceUpdate } from './types';
 
 function snapshotPath(): string {
   return (
@@ -22,6 +17,16 @@ function snapshotPath(): string {
 
 function refreshSnapshot(): void {
   writeWebSourcesSnapshot(repository.listWebSources(), snapshotPath());
+}
+
+function mutateWithAuditAndSnapshot<T>(mutation: () => T): T {
+  return getRawDb()
+    .transaction(() => {
+      const result = mutation();
+      refreshSnapshot();
+      return result;
+    })
+    .immediate();
 }
 
 function duplicateError(error: unknown): never {
@@ -42,7 +47,7 @@ export function listEnabledWebSourceRules(): WebSourceRule[] {
 export function createWebSource(input: WebSourceInput, actorId: string): WebKnowledgeSource {
   let source: WebKnowledgeSource;
   try {
-    source = getDb().transaction(() => {
+    source = mutateWithAuditAndSnapshot(() => {
       const created = repository.createWebSource(input, actorId);
       recordAudit({
         actorId,
@@ -56,7 +61,6 @@ export function createWebSource(input: WebSourceInput, actorId: string): WebKnow
   } catch (error) {
     duplicateError(error);
   }
-  refreshSnapshot();
   return source;
 }
 
@@ -67,7 +71,7 @@ export function updateWebSource(
 ): WebKnowledgeSource {
   let updated: WebKnowledgeSource;
   try {
-    updated = getDb().transaction(() => {
+    updated = mutateWithAuditAndSnapshot(() => {
       const current = repository.getWebSource(id);
       if (!current) throw new AppError('NOT_FOUND', `Web 知识源 ${id} 不存在`);
       const normalizedChanges = { ...changes };
@@ -95,12 +99,11 @@ export function updateWebSource(
   } catch (error) {
     duplicateError(error);
   }
-  refreshSnapshot();
   return updated;
 }
 
 export function deleteWebSource(id: string, actorId: string): void {
-  getDb().transaction(() => {
+  mutateWithAuditAndSnapshot(() => {
     const deleted = repository.deleteWebSource(id);
     if (!deleted) throw new AppError('NOT_FOUND', `Web 知识源 ${id} 不存在`);
     recordAudit({
@@ -111,5 +114,4 @@ export function deleteWebSource(id: string, actorId: string): void {
       changes: { deleted },
     });
   });
-  refreshSnapshot();
 }

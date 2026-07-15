@@ -53,4 +53,48 @@ test.describe('/knowledge smoke', () => {
     expect(json.data.sourceId).toBeTruthy();
     expect(json.data.jobId).toBeTruthy();
   });
+
+  test('knowledge admin can create and disable an isolated exact-URL Web source', async ({
+    authedKadminPage: page,
+    kadminToken,
+    webSourceCleanup,
+  }, testInfo) => {
+    const unique = `${Date.now()}-${testInfo.workerIndex}`;
+    const sourceName = `e2e-web-source-${unique}`;
+    const sourceUrl = `https://support.iracing.com/e2e/${unique}`;
+    webSourceCleanup.trackName(sourceName);
+
+    await page.goto('/knowledge');
+    const webSourcesTab = page.getByRole('tab', { name: '联网知识源' });
+    await expect(webSourcesTab).toBeVisible();
+    await webSourcesTab.click();
+    await expect(page.getByRole('heading', { name: '新增联网知识源' })).toBeVisible();
+
+    await page.getByLabel('名称').fill(sourceName);
+    await page.getByLabel('范围类型').selectOption('exact_url');
+    await page.getByLabel('URL').fill(sourceUrl);
+    await page.getByLabel('来源级别').selectOption('official');
+    await page.getByRole('button', { name: `创建 ${sourceName}` }).click();
+
+    const sourceRow = page.getByRole('row').filter({ hasText: sourceName });
+    await expect(sourceRow).toContainText('精确 URL');
+    await expect(sourceRow).toContainText('已启用');
+
+    const listRes = await page.request.get('/api/knowledge/web-sources', {
+      headers: { Authorization: `Bearer ${kadminToken}` },
+    });
+    expect(listRes.ok()).toBeTruthy();
+    const listJson = (await listRes.json()) as {
+      data: { sources: Array<{ name: string; url: string }> };
+    };
+    expect(
+      listJson.data.sources.some(
+        (source) => source.name === sourceName && source.url === sourceUrl,
+      ),
+    ).toBe(true);
+
+    await sourceRow.getByRole('button', { name: `停用 ${sourceName}` }).click();
+    await expect(sourceRow).toContainText('已停用');
+    await expect(sourceRow.getByRole('button', { name: `启用 ${sourceName}` })).toBeVisible();
+  });
 });

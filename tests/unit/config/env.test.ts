@@ -159,6 +159,10 @@ describe('env validation', () => {
     expect(() => parseEnv({ ...minimalValid, QODER_MODEL: 'another-model' })).toThrow();
   });
 
+  it('treats an empty legacy QODER_MODEL as unset', () => {
+    expect(parseEnv({ ...minimalValid, QODER_MODEL: '' }).QODER_MODEL).toBe('Qwen3.7-Plus');
+  });
+
   it('does not expose legacy chat backend or direct-chat LLM settings', () => {
     const backendKey = ['CHAT', 'ANSWER', 'BACKEND'].join('_');
     const directKeys = [
