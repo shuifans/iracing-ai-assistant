@@ -18,10 +18,14 @@
 
 ---
 
-### Task 1: Track the backup script as executable
+### Task 1: Track operational scripts as executable
 
 **Files:**
 - Modify mode: `scripts/backup.sh` (`100644` -> `100755`)
+- Modify mode: `scripts/cron-backup.sh` (`100644` -> `100755`)
+- Modify mode: `scripts/deploy.sh` (`100644` -> `100755`)
+- Modify mode: `scripts/pre-deploy-migrate.sh` (`100644` -> `100755`)
+- Modify mode: `scripts/restore.sh` (`100644` -> `100755`)
 
 **Interfaces:**
 - Consumes: Git index metadata.
@@ -29,19 +33,19 @@
 
 - [ ] **Step 1: Verify the failing mode check**
 
-Run: `git ls-files -s scripts/backup.sh`
+Run: `git ls-files -s 'scripts/*.sh'`
 
-Expected RED: output begins with `100644`.
+Expected RED: the operational scripts include `100644` entries.
 
 - [ ] **Step 2: Apply the minimal mode change**
 
-Run: `chmod +x scripts/backup.sh`
+Run: `chmod +x scripts/*.sh`
 
 - [ ] **Step 3: Verify the mode is fixed**
 
-Run: `git diff --summary -- scripts/backup.sh && git ls-files -s scripts/backup.sh`
+Run: `git diff --summary -- scripts/*.sh && git ls-files -s 'scripts/*.sh'`
 
-Expected: mode change `100644 => 100755`; after staging, the index must report `100755`.
+Expected: every operational script has mode `100755` after staging.
 
 - [ ] **Step 4: Commit the isolated fix with the dependency remediation in Task 2**
 
@@ -116,7 +120,7 @@ Expected: all commands exit 0; migration applies A-H on the fresh database.
 - [ ] **Step 7: Commit repository remediation**
 
 ```bash
-git add package.json package-lock.json scripts/backup.sh docs/superpowers/specs/2026-07-15-release-hygiene-remediation-design.md docs/superpowers/plans/2026-07-15-release-hygiene-remediation.md
+git add package.json package-lock.json scripts/*.sh docs/superpowers/specs/2026-07-15-release-hygiene-remediation-design.md docs/superpowers/plans/2026-07-15-release-hygiene-remediation.md
 git commit -m "fix(deploy): clear release hygiene issues"
 ```
 
@@ -166,9 +170,9 @@ Use `iracing-ai-deploy-via-sgserver` without deviations: verified bundle, sgserv
 
 - [ ] **Step 2: Verify the executable mode in production**
 
-Run: `stat -c '%a %n' /opt/iracing-ai-assistant/scripts/backup.sh`
+Run: `stat -c '%a %n' /opt/iracing-ai-assistant/scripts/*.sh`
 
-Expected: `755`.
+Expected: all five operational scripts report `755`.
 
 ### Task 5: Archive and reset PM2 logs
 

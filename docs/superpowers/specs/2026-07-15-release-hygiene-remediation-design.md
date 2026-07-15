@@ -6,7 +6,7 @@ Eliminate the four release leftovers from the Qoder Agent deployment without wea
 
 ## Confirmed root causes
 
-1. `scripts/backup.sh` is tracked by Git as mode `100644`, so every deployment reproduces the missing executable bit.
+1. The operational shell scripts were tracked by Git as mode `100644`, so direct invocations documented for backup, migration, restore, cron, and deployment reproduced permission failures on every checkout.
 2. shserver has no `sqlite3` package installed; Ubuntu Noble provides candidate `3.45.1-1ubuntu2.6` from the configured Alibaba Cloud mirror.
 3. The six moderate npm findings collapse to two vulnerable transitive dependency roots:
    - `next@15.5.20` pins `postcss@8.4.31`, below the `8.5.10` security floor.
@@ -17,7 +17,7 @@ Eliminate the four release leftovers from the Qoder Agent deployment without wea
 
 Use the smallest compatible remediation:
 
-- Track `scripts/backup.sh` as executable (`100755`).
+- Track all five operational shell scripts as executable (`100755`): `backup.sh`, `cron-backup.sh`, `deploy.sh`, `pre-deploy-migrate.sh`, and `restore.sh`.
 - Install the distribution-maintained `sqlite3` package on shserver and verify both CLI execution and the checked-in migration script dry-run.
 - Add precise npm `overrides` that reuse the direct safe PostCSS dependency across the tree and replace the vulnerable nested Esbuild copy, regenerate the lockfile, require `npm audit` to report zero vulnerabilities, and retain Next.js 15.5.20 and drizzle-kit 0.31.10.
 - Archive the existing PM2 logs under `/srv/iracing-ai-assistant/data/backups/`, record SHA-256, then flush PM2 logs. Generate fresh health traffic and require the error log to stay empty.
@@ -28,7 +28,7 @@ No `npm audit fix --force`, Next.js major upgrade, dependency downgrade, force-p
 
 ### Local acceptance gates
 
-- Before the mode change, `git ls-files -s scripts/backup.sh` demonstrates RED with `100644`; after the change it must show `100755`.
+- Before the mode change, `git ls-files -s 'scripts/*.sh'` demonstrates RED with `100644`; after the change all five scripts must show `100755`.
 - Before dependency changes, `npm audit --json` demonstrates RED with exactly six moderate findings; after lockfile regeneration it must report zero total findings.
 - `npm ls` must show safe nested PostCSS and Esbuild versions with no invalid dependency tree.
 - Typecheck, unit tests, integration tests, lint, API E2E, production build, fresh A-H migration, and `git diff --check` must pass.
