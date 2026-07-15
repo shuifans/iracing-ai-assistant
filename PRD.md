@@ -101,16 +101,17 @@
 #### 3.1.2 问答流程
 
 ```
-用户提问 → H5 服务后端 → Qoder Agent SDK → [md-wiki 本地检索（Grep/Glob/Read）] + [在线知识源 WebFetch] → 综合生成回答
+用户提问 → Qoder Agent → Glob/Grep/Read 本地优先 →（本地不足且会话已开启联网）WebSearch/WebFetch → 综合生成回答
 ```
 
 详细流程说明：
 
 1. **用户提问**：用户通过 H5 页面提交问题，后端接收并传入 Qoder Agent SDK
 2. **md-wiki 本地检索**：Agent 使用内置工具（Grep 内容搜索、Glob 文件名匹配、Read 文件读取）在本地 Markdown Wiki 目录中快速定位和提取相关知识片段
-3. **在线知识源补充**：当本地 Wiki 中信息不足时，Agent 通过 WebFetch 工具实时访问 knowledge-sources.md 中列出的权威站点（IQS 作为 fallback）
-4. **综合回答生成**：Agent 综合本地 Wiki 和在线检索结果，生成精准、结构化的中文回答
-5. **流式输出**：以 Server-Sent Events (SSE) 方式逐步返回回答内容
+3. **按会话联网**：默认关闭；用户开启后持续生效。仅当本地 Wiki 没有有效证据时，Agent 才能使用 WebSearch/WebFetch
+4. **来源授权**：联网目标必须匹配知识管理员在 SQLite 中维护的 domain/path/exact URL；Markdown 文件只是数据库生成的审阅快照
+5. **综合回答生成**：同一个 Agent 综合本地和被授权的在线证据，生成精准、结构化的中文回答
+6. **流式输出与进度**：SSE 返回正文和真实脱敏工具阶段，不展示思考链或敏感工具入参
 
 #### 3.1.3 追问细化能力
 
@@ -151,7 +152,7 @@
 | 优先级 | 来源类型            | 说明                                                                                                                                                              |
 | ------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P0     | 本地 md-wiki 知识库 | 由知识库管理员将采集的信息清洗为结构化 Markdown 文件，存储在项目 md-wiki 目录中，Agent 通过 Grep/Glob/Read 直接检索                                               |
-| P0     | 权威站点实时查询    | 本地 Wiki 信息不足时，Agent 通过 WebFetch 工具实时访问 knowledge-sources.md 中列出的权威站点（IQS 作为 fallback）                                                 |
+| P0     | 权威站点实时查询    | 用户开启会话联网且本地信息不足时，Agent 在管理员登记的 SQLite 来源范围内使用 WebSearch/WebFetch；每轮最多 1 次搜索和 2 次抓取                                     |
 | P1     | 视频简介搜索        | 基于视频简介（标题、描述）内容进行搜索，返回视频链接（不含时间戳）                                                                                                |
 | P1     | iRacing 官方论坛    | forums.iracing.com — 官方社区讨论区，含赛道攻略、调校分享、新手问答等高质量内容。支持游客浏览大部分帖子，无需登录即可通过 WebFetch 采集。作为在线查询的重要补充源 |
 
@@ -160,7 +161,7 @@
 - [ ] 带时间戳的视频片段引用（需字幕提取/语音转写）
 - [ ] 用户 UGC 内容入库
 
-详细知识源清单参见 [knowledge-sources.md](./knowledge-sources.md)。
+联网知识源由知识管理员在后台维护；生成的审阅快照见 [notes/knowledge-sources.md](./notes/knowledge-sources.md)。
 
 #### 3.2.2 知识分类体系与 md-wiki 目录结构
 
@@ -422,103 +423,61 @@ const result = await query({
 
 #### 4.2.5 Hooks 生命周期
 
-SDK 支持 15 种生命周期事件，V1 重点使用以下 Hooks：
+聊天 Agent 使用 Hooks 落实文件边界、联网来源范围、预算和证据采集。前端只接收真实工具阶段、工具名称、当前次数与上限，不接收思考链或原始工具入参：
 
 ```typescript
 const result = await query({
   prompt: userMessage,
   options: {
     hooks: {
-      // 工具调用前拦截：用于权限检查和日志记录
-      PreToolUse: async (tool, input) => {
-        console.log(`[Hook] Calling tool: ${tool}, input:`, input);
-        // 可在此拦截危险操作
-        return input;
+      PreToolUse: async (event) => {
+        const decision = validateToolBoundary(event);
+        if (decision.allowed) {
+          emitProgress({
+            tool: event.tool_name,
+            current: decision.current,
+            limit: decision.limit,
+          });
+        }
+        return decision.hookResult;
       },
-      // 工具调用后处理：用于结果后处理和统计
-      PostToolUse: async (tool, input, output) => {
-        console.log(`[Hook] Tool ${tool} completed`);
-        return output;
+      PostToolUse: async (event) => {
+        collectAuthorizedEvidence(event);
+        return {};
       },
     },
   },
 });
 ```
 
-### 4.3 子 Agent 设计
+### 4.3 单 Agent 检索与回答流程
 
-#### 4.3.1 Agent 编排架构
+#### 4.3.1 工作流
 
 ```
-主 Agent（对话管理 + 回答生成）
-├── md-wiki 检索 Agent  → 通过 Grep/Glob/Read 在本地 md-wiki 目录中检索知识
-└── 网页采集 Agent      → 通过 WebFetch 从权威站点实时获取信息（本地不足时补充）
+用户当前轮消息
+└── Qoder Agent（Qwen3.7-Plus，高推理）
+    ├── Glob / Grep / Read：必须优先检索本地 md-wiki
+    ├── 本地证据有效：直接综合、引用并回答
+    └── 本地证据不足且会话联网开关已开启
+        └── WebSearch / WebFetch：仅管理员登记来源 → 综合、引用并回答
 ```
 
-#### 4.3.2 md-wiki 检索 Agent
+新会话只注入一次 System Prompt。后续轮次由 Qoder SDK 通过 `session_id + resume` 保持上下文，应用只发送当前用户消息，不拼接数据库历史。整个业务会话持续保持，直到用户手动结束。
 
-```typescript
-const wikiSearchAgent = {
-  description: '从本地 md-wiki 知识库中检索与用户问题相关的 Markdown 文件和知识片段',
-  prompt: `你是一个 iRacing 知识库检索专家。你的任务是从本地 md-wiki 目录中检索与用户问题最相关的知识。
+#### 4.3.2 联网控制与知识源
 
-    md-wiki 目录结构：
-    - md-wiki/track-technique/  → 赛道技术（走线、刹车、轮胎、悬挂）
-    - md-wiki/car-setup/       → 车辆调校（理论、实操、工具）
-    - md-wiki/basics/          → 基础知识（入门、购车、赛事、硬件）
+- 会话联网默认关闭；用户开启后持续保持，直到手动关闭。
+- 开关开启不代表必须联网。Agent 始终先查本地 Wiki，只有没有有效本地证据才允许联网。
+- 运行时知识源以 SQLite `web_knowledge_sources` 为事实来源，由知识管理员维护 domain、path 或 exact URL 范围；`notes/knowledge-sources.md` 是确定性生成的审阅快照。
+- WebSearch 查询必须带匹配已登记规则的 `site:` 限定；WebFetch 初始 URL 和每次重定向都重新校验。
+- 每轮最多 1 次 WebSearch、2 次 WebFetch、6 个 Agent turn，总 deadline 120 秒。越权或格式无效调用不消耗有效预算。
 
-    工作流程：
-    1. 分析用户问题的核心意图，判断属于哪个知识分类
-    2. 使用 Glob 工具匹配对应分类目录下的相关文件（如 *braking*.md）
-    3. 使用 Grep 工具在匹配的文件中搜索关键词，定位具体段落
-    4. 使用 Read 工具读取相关文件的关键内容
-    5. 整理并返回检索结果（包含文件路径、相关内容片段、来源信息）
+#### 4.3.3 真实进度与证据
 
-    检索技巧：
-    - 如果问题涉及特定赛道，优先用赛道名作为搜索关键词
-    - 如果问题涉及特定车辆，优先用车辆名 + 分类作为搜索关键词
-    - 中英文关键词都要尝试（md 文件可能使用英文文件名）
-    - 如果初次搜索结果不足，扩大搜索范围或尝试同义词`,
-  tools: ['Read', 'Grep', 'Glob'],
-  maxTurns: 5,
-  effort: 'medium',
-};
-```
-
-#### 4.3.3 网页采集 Agent
-
-```typescript
-const webFetchAgent = {
-  name: 'web-fetch',
-  description: '当本地知识库无法满足用户需求时，从权威网站实时获取信息',
-  prompt: `你是一个网页信息采集专家。当本地知识库中没有足够信息回答用户问题时，你需要从权威网站获取相关信息。
-    
-    优先访问的站点：
-    - iRacing 官方知识库: https://support.iracing.com/
-    - iRacing 官方: https://www.iracing.com/
-    - iRacing 官方论坛: https://forums.iracing.com/（游客可浏览，含赛道攻略、调校分享、新手问答）
-    - r/iRacing Reddit: https://www.reddit.com/r/iRacing/
-    
-    工作流程：
-    1. 判断是否需要外部查询（本地知识不足时）
-    2. 选择最合适的权威站点
-    3. 使用 WebFetch 工具获取页面内容
-    4. 提取与用户问题相关的关键信息
-    5. 如果 WebFetch 失败，使用 IQS 作为 fallback
-    6. 返回采集到的信息和来源 URL`,
-  tools: ['WebFetch', 'WebSearch'],
-  maxTurns: 5,
-  effort: 'medium',
-};
-```
-
-#### 4.3.4 子 Agent 编排注意事项
-
-- 回答生成由**主 Agent** 完成，综合子 Agent 的检索结果后直接输出回答
-- 子 Agent 使用**独立上下文**，不共享主 Agent 的对话历史
-- 子 Agent **不能再创建子 Agent**（仅一层深度限制）
-- 通过 `options.agents` 对象注册，每个 Agent 可指定 `description`、`prompt`、`tools`、`model`、`maxTurns`、`effort` 等参数
-- 主 Agent 负责协调子 Agent 的执行顺序和结果整合
+- 进度事件必须来自 Qoder 实际允许的工具事件，阶段包括理解问题、本地搜索、读取本地知识、联网搜索、读取网页和整理答案。
+- 前端只显示脱敏的工具名称、来源展示名、当前次数与上限；不得展示 thinking、Prompt、查询词、文件路径或完整 URL 等敏感输入。
+- 成功的直接 `Read` 与 `WebFetch` 生成 evidence；工具原始输出仍返回 Qoder。最终答案只持久化和展示实际引用的来源。
 
 ### 4.4 部署架构
 
@@ -624,11 +583,13 @@ const webFetchAgent = {
 |                | 追问细化能力                                         | P0     |
 |                | 幻觉控制（不知道就说不知道）                         | P0     |
 |                | 图片上传与视觉理解                                   | P1     |
-| **Agent 后端** | 主 Agent + 子 Agent 编排                             | P0     |
-|                | Query 改写                                           | P0     |
-|                | md-wiki 检索集成                                     | P0     |
+| **Agent 后端** | Qoder 单 Agent（Qwen3.7-Plus）                       | P0     |
+|                | Qoder session resume 多轮保持                        | P0     |
+|                | md-wiki 本地优先直接检索                             | P0     |
+|                | 会话级联网开关、来源范围与工具预算                   | P0     |
+|                | 真实脱敏工具进度                                     | P0     |
 | **知识库**     | md-wiki 知识库初始化（第一梯队数据源清洗为 md 文件） | P0     |
-|                | 权威站点 WebFetch 采集                               | P0     |
+|                | 管理员维护联网知识源及确定性快照                     | P0     |
 |                | 视频简介搜索 + 链接返回                              | P1     |
 |                | 知识文件变更与 Git 管理流程                          | P1     |
 | **用户系统**   | 注册 + 审批机制                                      | P0     |
@@ -652,7 +613,7 @@ const webFetchAgent = {
 | 调校文件下载           | 对接 Garage 61 等平台，支持直接下载 Setup 文件          |
 | 对接 iracing.club      | 与已有社区网站集成，共享用户体系                        |
 | 微信小程序             | 新增微信小程序端，扩大用户触达渠道                      |
-| 完整 Agent 架构升级    | 更精细的子 Agent 编排、引入更多工具能力                 |
+| Agent 效果评测优化     | 基于真实工具事件、来源质量和用户反馈持续改进提示词       |
 | 社区化 UGC             | 用户贡献走线心得、调校分享，优质内容入知识库            |
 | 知识管理员角色         | 专业玩家可参与知识库维护和内容审核                      |
 | 自动化知识更新         | 定时任务自动爬取和增量更新，减少人工操作                |
@@ -666,9 +627,9 @@ const webFetchAgent = {
 | 风险                              | 影响                                                               | 缓解措施                                                                       |
 | --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
 | **Qoder Agent SDK 依赖 qodercli** | SDK 需要本地安装 `qodercli` 可执行文件，部署服务器需确保环境已安装 | 部署脚本中增加 qodercli 安装检查，服务器环境中预装                            |
-| **BYOK 可用性**                   | 自有模型接入依赖 provider 目录匹配，可能因 provider 变更导致不可用 | 准备多个备选 LLM provider，定期验证连通性                                      |
-| **DeepSeek API 并发限制**         | DeepSeek API 存在账号级并发限制，高并发时可能触发限流              | 实现请求队列和退避重试机制，监控并发数                                         |
-| **子 Agent 嵌套限制**             | 子 Agent 仅支持一层深度，复杂任务无法多层分解                      | 合理设计子 Agent 职责粒度，避免需要多层嵌套的场景                              |
+| **Qoder 会话恢复失败**            | SDK 会话失效时可能丢失此前由 SDK 管理的上下文                      | 仅用当前消息创建新会话并明确记录恢复指标，不回放数据库历史                      |
+| **联网工具延迟**                  | WebSearch/WebFetch 可能显著增加单轮等待时间                         | 默认关闭联网、本地优先，并限制为 1 次搜索、2 次抓取、6 turn、120 秒             |
+| **联网来源漂移或越权**            | 搜索结果或重定向可能离开管理员批准范围                              | SQLite 来源规则、site 限定、PreToolUse 校验和逐跳 URL 复验                      |
 | **md-wiki 知识量增长后检索效率**  | 当 md 文件数量超过数百个时，Grep/Glob 检索可能变慢                 | 合理设计目录层级和文件命名规范，控制单目录文件数量；后续可引入向量检索作为补充 |
 | **md 文件维护成本**               | 知识清洗为结构化 Markdown 需要人工投入，管理员负担较重             | 提供 md 文件模板和编辑工具降低门槛；后续引入自动化采集+AI辅助清洗流程          |
 
@@ -869,6 +830,6 @@ iracing-ai-assistant/
 ├── tailwind.config.ts          # Tailwind CSS 配置
 ├── tsconfig.json               # TypeScript 配置
 ├── package.json
-├── knowledge-sources.md        # 知识源梳理文档
+├── notes/knowledge-sources.md  # 从 SQLite 确定性生成的联网知识源审阅快照
 └── PRD.md                      # 本文档
 ```

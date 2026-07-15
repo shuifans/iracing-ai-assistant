@@ -53,6 +53,10 @@ if (ENV_FILE) loadEnvFile(ENV_FILE);
 // ── 强制本地 DB / Wiki 路径 (覆盖服务端 .env 的 /srv/... 路径) ──────────
 process.env.DATABASE_PATH = resolve(process.cwd(), 'data/eval.sqlite');
 process.env.WIKI_ROOT = resolve(process.cwd(), 'data/md-wiki');
+process.env.WEB_KNOWLEDGE_SOURCES_SNAPSHOT_PATH = resolve(
+  process.cwd(),
+  'data/eval/knowledge-sources.md',
+);
 // NODE_ENV 留服务端的 production 也无妨；但确保不是 test
 ;(process.env as Record<string, string | undefined>).NODE_ENV = 'production';
 
@@ -63,10 +67,15 @@ import { users } from '@/db/schema/users';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
 import { createAccessToken } from '@/modules/auth/token-service';
-import { createSession, updateSessionWebSearch } from '@/modules/chat/repository';
+import { createSession } from '@/modules/chat/repository';
 import { streamChatMessage } from '@/modules/chat/service';
 import type { AuthenticatedUser } from '@/modules/auth/types';
 import type { SSEEvent } from '@/modules/chat/sse-events';
+import {
+  EVAL_OFFICIAL_WEB_SOURCE,
+  ensureEvalWebKnowledgeFixture,
+  setEvalSessionWebState,
+} from './eval-chat-support';
 
 // ── 类型 ────────────────────────────────────────────────────────────────
 interface EvalCase {
@@ -186,7 +195,7 @@ async function runDirect(scenarios: EvalScenario[], user: AuthenticatedUser): Pr
     console.log(`\n[Direct] ${sc.id} ${sc.name} (session ${session.id.slice(0, 8)})`);
     for (let i = 0; i < sc.turns.length; i++) {
       const turn = sc.turns[i]!;
-      updateSessionWebSearch(session.id, user.id, turn.category === 'A2');
+      setEvalSessionWebState(session.id, user.id, turn.category);
       const m = newMetrics('direct', sc, turn, i + 1);
       const t0 = Date.now();
       process.stdout.write(`  T${i + 1} ${turn.id} [${turn.category}] ${turn.question.slice(0, 30)}... `);
@@ -290,6 +299,37 @@ async function runHttp(
     console.log(`${m.success ? '✓' : '✗'} cTotal=${m.clientTotalMs}ms sTotal=${m.totalMs ?? '-'}ms Δ=${m.clientTotalMs && m.totalMs ? m.clientTotalMs - m.totalMs : '-'}ms`);
   }
   return out;
+}
+
+async function ensureHttpWebKnowledgeFixture(baseUrl: string, token: string): Promise<void> {
+  const origin = new URL(baseUrl).origin;
+  const headers = { Authorization: `Bearer ${token}`, Origin: origin };
+  const listResponse = await fetch(`${baseUrl}/api/knowledge/web-sources`, { headers });
+  if (!listResponse.ok) throw new Error(`Web source list HTTP ${listResponse.status}`);
+  const payload = (await listResponse.json()) as {
+    data?: { sources?: Array<{ id: string; url: string; scopeType: string; enabled: boolean }> };
+  };
+  const existing = (payload.data?.sources ?? []).find(
+    (source) =>
+      source.url === EVAL_OFFICIAL_WEB_SOURCE.url &&
+      source.scopeType === EVAL_OFFICIAL_WEB_SOURCE.scopeType,
+  );
+  if (existing) {
+    if (existing.enabled) return;
+    const response = await fetch(`${baseUrl}/api/knowledge/web-sources/${existing.id}`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true }),
+    });
+    if (!response.ok) throw new Error(`Web source enable HTTP ${response.status}`);
+    return;
+  }
+  const createResponse = await fetch(`${baseUrl}/api/knowledge/web-sources`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(EVAL_OFFICIAL_WEB_SOURCE),
+  });
+  if (!createResponse.ok) throw new Error(`Web source create HTTP ${createResponse.status}`);
 }
 
 // ── 聚合 ────────────────────────────────────────────────────────────────
@@ -465,6 +505,8 @@ async function main() {
   // Direct 模式
   if (MODE === 'direct' || MODE === 'both') {
     console.log('\n========== Direct 模式 ==========');
+    const fixture = ensureEvalWebKnowledgeFixture(user.id);
+    console.log(`[eval] Web fixture: ${fixture.rules[0]!.url} | snapshot: ${fixture.snapshotPath}`);
     direct = await runDirect(cases.scenarios, user);
   }
 
@@ -474,6 +516,7 @@ async function main() {
     try {
       const ping = await fetch(`${HTTP_URL}/api/health/live`);
       if (!ping.ok) throw new Error(`health ${ping.status}`);
+      await ensureHttpWebKnowledgeFixture(HTTP_URL, token);
       http = await runHttp(cases.scenarios, user, token, HTTP_URL, HTTP_SUBSET);
     } catch (err) {
       console.warn(`[eval] HTTP 模式跳过: 服务未启动 (${(err as Error).message})。用 PAT=... JWT_ACCESS_SECRET=... npm run dev 起服务后重试。`);

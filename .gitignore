@@ -29,6 +29,7 @@ coverage/
 /test-results/
 /playwright-report/
 /data/e2e/
+/data/eval/
 
 # IDE
 .vscode/
