@@ -18,6 +18,7 @@ export const chatSessions = sqliteTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     qoderSessionId: text('qoder_session_id'),
+    webSearchEnabled: integer('web_search_enabled', { mode: 'boolean' }).notNull().default(false),
     status: text('status', { enum: SESSION_STATUSES }).notNull(),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),

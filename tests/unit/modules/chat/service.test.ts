@@ -150,6 +150,7 @@ const mockSession = {
   title: 'Test Session',
   status: 'active' as const,
   qoderSessionId: null,
+  webSearchEnabled: false,
   createdAt: '2026-07-12T00:00:00.000Z',
   updatedAt: '2026-07-12T00:00:00.000Z',
   lastMessageAt: '2026-07-12T00:00:00.000Z',

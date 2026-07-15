@@ -14,6 +14,7 @@ export interface ChatSessionSummary {
   id: string;
   title: string;
   status: string;
+  webSearchEnabled: boolean;
   lastMessageAt: string;
   createdAt: string;
 }

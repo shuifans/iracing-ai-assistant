@@ -47,6 +47,7 @@ export function createSession(userId: string, title?: string): ChatSession {
     title: title ?? '新会话',
     status: 'active' as const,
     qoderSessionId: null,
+    webSearchEnabled: false,
     createdAt: now,
     updatedAt: now,
     lastMessageAt: now,
@@ -161,6 +162,7 @@ export function adminListSessions(opts: {
       userId: chatSessions.userId,
       title: chatSessions.title,
       qoderSessionId: chatSessions.qoderSessionId,
+      webSearchEnabled: chatSessions.webSearchEnabled,
       status: chatSessions.status,
       createdAt: chatSessions.createdAt,
       updatedAt: chatSessions.updatedAt,
@@ -187,6 +189,7 @@ export function adminListSessions(opts: {
     userId: row.userId,
     title: row.title,
     qoderSessionId: row.qoderSessionId,
+    webSearchEnabled: row.webSearchEnabled,
     status: row.status,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -225,6 +228,22 @@ export function updateSessionTitle(sessionId: string, title: string): void {
     .set({ title, updatedAt: now })
     .where(eq(chatSessions.id, sessionId))
     .run();
+}
+
+/**
+ * Update whether a session may use web search, verifying ownership.
+ */
+export function updateSessionWebSearch(
+  sessionId: string,
+  userId: string,
+  enabled: boolean,
+): ChatSession | null {
+  const db = getDb();
+  db.update(chatSessions)
+    .set({ webSearchEnabled: enabled, updatedAt: utcNow() })
+    .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)))
+    .run();
+  return getSession(sessionId, userId);
 }
 
 /**

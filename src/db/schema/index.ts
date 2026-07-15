@@ -4,3 +4,4 @@ export * from './knowledge';
 export * from './evaluation';
 export * from './admin';
 export * from './cache';
+export * from './web-sources';

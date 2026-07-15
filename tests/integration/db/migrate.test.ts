@@ -35,8 +35,8 @@ describeIf('Database migration', () => {
     if (existsSync(dbPath)) unlinkSync(dbPath);
   });
 
-  // ── 1. All 16 tables exist ─────────────────────────────────────────────────
-  it('creates all 16 tables after migration', () => {
+  // ── 1. All tables exist ────────────────────────────────────────────────────
+  it('creates all tables after migration', () => {
     const expectedTables = [
       'users',
       'refresh_tokens',
@@ -45,6 +45,7 @@ describeIf('Database migration', () => {
       'message_attachments',
       'message_sources',
       'message_feedback',
+      'web_knowledge_sources',
       'knowledge_sources',
       'knowledge_jobs',
       'knowledge_drafts',
@@ -72,7 +73,7 @@ describeIf('Database migration', () => {
     for (const t of expectedTables) {
       expect(actualTables).toContain(t);
     }
-    expect(actualTables.length).toBe(20);
+    expect(actualTables.length).toBe(21);
   });
 
   // ── 2. Idempotent ──────────────────────────────────────────────────────────
