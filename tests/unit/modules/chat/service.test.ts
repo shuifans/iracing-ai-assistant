@@ -158,6 +158,7 @@ function createMockSDKStream(events: Array<{ type: string; [key: string]: unknow
 describe('streamChatMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCreateChatQuery.mockReset();
     delete process.env.WEB_KNOWLEDGE_SOURCES_SNAPSHOT_PATH;
     mockCheckRateLimit.mockReset();
     mockInsertValues.mockReturnValue({ run: mockInsertRun });
@@ -560,6 +561,168 @@ describe('streamChatMessage', () => {
     },
   );
 
+  it('streams the first resumed delta before the Qoder query finishes', async () => {
+    mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'active-session' });
+    let releaseResult!: () => void;
+    const resultGate = new Promise<void>((resolve) => {
+      releaseResult = resolve;
+    });
+    mockCreateChatQuery.mockReturnValue(
+      (async function* () {
+        yield {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'live delta' },
+          },
+        };
+        await resultGate;
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'active-session',
+          usage: { input_tokens: 10, output_tokens: 5 },
+          total_cost_usd: 0,
+          duration_ms: 10,
+        };
+      })() as any,
+    );
+
+    const generator = streamChatMessage(mockUser, 'sess-001', 'current question');
+    await generator.next(); // start
+    await generator.next(); // status
+    const firstVisiblePromise = generator.next();
+    const race = await Promise.race([
+      firstVisiblePromise.then((result) => ({ kind: 'event' as const, result })),
+      new Promise<{ kind: 'blocked' }>((resolve) =>
+        setTimeout(() => resolve({ kind: 'blocked' }), 10),
+      ),
+    ]);
+    releaseResult();
+    const firstVisible = race.kind === 'event' ? race.result : await firstVisiblePromise;
+    for await (const _ of generator) {
+      // drain after releasing the terminal result
+    }
+
+    expect(race.kind).toBe('event');
+    expect(firstVisible.value).toEqual(expect.objectContaining({ seq: 1, text: 'live delta' }));
+  });
+
+  it('does not retry a resume-like failure after visible output is committed', async () => {
+    mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'active-session' });
+    mockCreateChatQuery.mockReturnValue(
+      createMockSDKStream([
+        {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'visible partial' },
+          },
+        },
+        {
+          type: 'result',
+          subtype: 'error_during_execution',
+          session_id: 'active-session',
+          errors: ['resume session expired'],
+        },
+      ]) as any,
+    );
+
+    const events = [];
+    for await (const event of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => 'seq' in event)).toEqual([
+      expect.objectContaining({ seq: 1, text: 'visible partial' }),
+    ]);
+    expect(mockCreateChatQuery).toHaveBeenCalledTimes(1);
+    expect(mockUpdateQoderSessionId).not.toHaveBeenCalledWith('sess-001', null);
+  });
+
+  it.each(['session_not_found', 'resume-session-not-found', 'resume session not found'])(
+    'recovers subtype-only stale resume variants: %s',
+    async (subtype) => {
+      mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'stale-session' });
+      mockCreateChatQuery
+        .mockReturnValueOnce(
+          createMockSDKStream([{ type: 'result', subtype, session_id: 'stale-session' }]) as any,
+        )
+        .mockReturnValueOnce(
+          createMockSDKStream([
+            {
+              type: 'result',
+              subtype: 'success',
+              session_id: 'fresh-session',
+              usage: { input_tokens: 10, output_tokens: 5 },
+              total_cost_usd: 0,
+              duration_ms: 10,
+            },
+          ]) as any,
+        );
+
+      for await (const _ of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+        // drain
+      }
+
+      expect(mockCreateChatQuery).toHaveBeenCalledTimes(2);
+      expect(mockUpdateQoderSessionId).toHaveBeenCalledWith('sess-001', null);
+    },
+  );
+
+  it('measures fresh retry timing from the second attempt only', async () => {
+    mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'stale-session' });
+    let now = 0;
+    const performanceSpy = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    mockCreateChatQuery
+      .mockReturnValueOnce(
+        (async function* () {
+          now = 100;
+          yield {
+            type: 'result',
+            subtype: 'session_not_found',
+            session_id: 'stale-session',
+          };
+        })() as any,
+      )
+      .mockReturnValueOnce(
+        (async function* () {
+          now = 110;
+          yield {
+            type: 'stream_event',
+            event: {
+              type: 'content_block_delta',
+              delta: { type: 'text_delta', text: 'fresh' },
+            },
+          };
+          now = 130;
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'fresh-session',
+            usage: { input_tokens: 10, output_tokens: 5 },
+            total_cost_usd: 0,
+            duration_ms: 20,
+          };
+        })() as any,
+      );
+
+    const events = [];
+    try {
+      for await (const event of streamChatMessage(mockUser, 'sess-001', 'current question')) {
+        events.push(event);
+      }
+    } finally {
+      performanceSpy.mockRestore();
+    }
+
+    expect(events.find((event) => 'inputTokens' in event)).toEqual(
+      expect.objectContaining({
+        timing: expect.objectContaining({ agentFirstByteMs: 10, agentStreamMs: 30 }),
+      }),
+    );
+  });
+
   it('discards partial output, evidence, usage, and workflow from a failed resume attempt', async () => {
     mockGetSession.mockReturnValue({ ...mockSession, qoderSessionId: 'expired-session' });
     mockCreateChatQuery.mockImplementation((_config, options) => {
@@ -575,16 +738,9 @@ describe('streamChatMessage', () => {
         });
         return createMockSDKStream([
           {
-            type: 'stream_event',
-            event: {
-              type: 'content_block_delta',
-              delta: { type: 'text_delta', text: 'stale partial' },
-            },
-          },
-          {
             type: 'assistant',
             message: {
-              content: [{ type: 'tool_use', id: 'stale-tool', name: 'Read', input: {} }],
+              content: [{ type: 'text', text: 'stale uncommitted answer' }],
             },
           },
           { type: 'system', subtype: 'api_retry' },
