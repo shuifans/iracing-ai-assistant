@@ -49,6 +49,7 @@ vi.mock('@/config/env', () => ({
     URL_FETCH_MAX_BYTES: 5242880,
     LLM_CLEAN_TIMEOUT_MS: 120000,
     LLM_CLEAN_MAX_INPUT_CHARS: 100000,
+    LLM_CLEAN_MAX_TOKENS: 16000,
   },
 }));
 
@@ -562,7 +563,7 @@ describe('processKnowledgeJob', () => {
       expect.objectContaining({
         rawText: 'extracted text content',
         maxOutputChars: 12_000,
-        maxTokens: 6_000,
+        maxTokens: 16_000,
       }),
     );
   });

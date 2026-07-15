@@ -140,6 +140,41 @@ describe('cleanWithLlmDirect', () => {
       cleanWithLlmDirect({ rawText: 'raw', signal: AbortSignal.abort() }),
     ).rejects.toThrow(/aborted/);
   });
+
+  it('sends both max_tokens and max_completion_tokens so reasoning models apply the budget', async () => {
+    fetchMock.mockResolvedValue(okResponse('ok'));
+
+    await cleanWithLlmDirect({ rawText: 'raw', maxTokens: 9000 });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string);
+    expect(body.max_tokens).toBe(9000);
+    expect(body.max_completion_tokens).toBe(9000);
+  });
+
+  it('throws a self-diagnosing error when content is empty (reasoning truncation)', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'length',
+              message: { role: 'assistant', content: '', reasoning_content: 'thinking…' },
+            },
+          ],
+          usage: { completion_tokens: 6000, completion_tokens_details: { reasoning_tokens: 6000 } },
+        }),
+    });
+
+    const err = await cleanWithLlmDirect({ rawText: 'raw' }).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    // finish_reason + reasoning budget + remediation hint are all surfaced,
+    // and the raw body is no longer discarded.
+    expect(err.message).toMatch(/finish_reason=length/);
+    expect(err.message).toMatch(/reasoning_content=\d+chars/);
+    expect(err.message).toMatch(/LLM_CLEAN_MAX_TOKENS/);
+  });
 });
 
 describe('buildCleanerSystemPrompt', () => {

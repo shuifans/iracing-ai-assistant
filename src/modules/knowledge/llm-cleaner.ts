@@ -252,7 +252,15 @@ async function callProvider(params: {
           { role: 'user', content: params.userPrompt },
         ],
         temperature: 0.2,
+        // Send BOTH budget fields: legacy/non-reasoning OpenAI-compatible
+        // endpoints read `max_tokens`; reasoning models (e.g. LongCat thinking
+        // variants) budget reasoning+answer under `max_completion_tokens` and
+        // may ignore `max_tokens`. Sending the same value to both keeps the
+        // total budget correct on either kind without breaking tolerant
+        // endpoints (an endpoint that already accepts `max_tokens` tolerates
+        // the extra field).
         max_tokens: params.maxTokens,
+        max_completion_tokens: params.maxTokens,
       }),
       signal: controller.signal,
     });
@@ -280,11 +288,37 @@ async function callProvider(params: {
       );
     }
 
-    const content = json?.choices?.[0]?.message?.content;
-    if (!content || typeof content !== 'string') {
-      throw new Error(`${params.provider.name} API response missing choices[0].message.content`);
+    const choice = json?.choices?.[0];
+    const message = choice?.message;
+    const content = message?.content;
+    if (typeof content === 'string' && content.trim()) {
+      return content.trim();
     }
-    return content.trim();
+
+    // The provider returned HTTP 200 + JSON but no usable content. Instead of
+    // discarding the body, surface its shape so the cause is legible without
+    // re-running against the live API: reasoning-budget truncation
+    // (finish_reason=length with reasoning_content present), a content filter,
+    // empty choices, or a non-standard envelope.
+    const finishReason = choice?.finish_reason ?? '(none)';
+    const reasoning = message?.reasoning_content;
+    const reasoningInfo =
+      typeof reasoning === 'string' && reasoning.length > 0
+        ? `reasoning_content=${reasoning.length}chars`
+        : 'reasoning_content=absent';
+    const messageKeys =
+      message && typeof message === 'object' ? Object.keys(message).join(',') : '(no message)';
+    const usage = json?.usage ? `usage=${JSON.stringify(json.usage)}` : 'usage=absent';
+    const hint =
+      finishReason === 'length'
+        ? ' 可能原因：max_tokens/max_completion_tokens 预算被（思考过程）耗尽，请提高 LLM_CLEAN_MAX_TOKENS。'
+        : finishReason === 'content_filter'
+          ? ' 可能原因：内容被安全策略拦截。'
+          : '';
+    throw new Error(
+      `${params.provider.name} API 返回空 content（finish_reason=${finishReason}, ${reasoningInfo}, ` +
+        `message.keys=[${messageKeys}], ${usage}）。响应片段: ${bodyText.slice(0, 500)}${hint}`,
+    );
   } finally {
     clearTimeout(timer);
     if (params.signal) params.signal.removeEventListener('abort', onExternalAbort);

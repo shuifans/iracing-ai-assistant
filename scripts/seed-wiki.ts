@@ -258,7 +258,7 @@ async function cleanWithConfiguredLLMs(
   sourceUrl: string,
   hint: string,
 ): Promise<string> {
-  return cleanWithLlmDirect({ rawText, sourceUrl, hint, maxTokens: 6000 });
+  return cleanWithLlmDirect({ rawText, sourceUrl, hint, maxTokens: 16000 });
 }
 
 // ── Front Matter 验证 + 路径生成 ─────────────────────────────────────────

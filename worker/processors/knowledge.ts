@@ -121,7 +121,7 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
       feedback: job.instructionsJson ?? undefined,
       signal,
       maxOutputChars: MAX_CONTENT_CHARS,
-      maxTokens: 6_000,
+      maxTokens: env.LLM_CLEAN_MAX_TOKENS,
       timeoutMs: env.LLM_CLEAN_TIMEOUT_MS,
       maxInputChars: env.LLM_CLEAN_MAX_INPUT_CHARS,
       sourceMetadata: {
