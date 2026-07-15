@@ -33,6 +33,11 @@ export const AUDIT_ACTIONS = [
   'knowledge.eval.deep',
   'knowledge.feedback',
   'knowledge.reclean',
+  'web_source.created',
+  'web_source.updated',
+  'web_source.deleted',
+  'web_source.enabled',
+  'web_source.disabled',
   // 系统
   'rate_limit.updated',
   'settings.updated',
@@ -52,6 +57,7 @@ export type AuditResource =
   | 'knowledge_job'
   | 'knowledge_draft'
   | 'knowledge_item'
+  | 'web_knowledge_source'
   | 'rate_limit_config'
   | 'system_setting';
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { join } from 'node:path';
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -10,6 +11,9 @@ const envSchema = z.object({
   WIKI_ROOT: z.string().default('/data/md-wiki'),
   WIKI_GIT_REMOTE: z.string().optional(),
   WIKI_GIT_BRANCH: z.string().default('main'),
+  WEB_KNOWLEDGE_SOURCES_SNAPSHOT_PATH: z
+    .string()
+    .default(join(process.cwd(), 'notes/knowledge-sources.md')),
   JWT_ACCESS_SECRET: z.string().min(1),
   REFRESH_TOKEN_PEPPER: z.string().min(1),
   IP_HASH_PEPPER: z.string().min(1),

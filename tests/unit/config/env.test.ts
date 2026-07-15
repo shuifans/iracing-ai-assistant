@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { join } from 'node:path';
 import { parseEnv } from '../../../src/config/env';
 
 // 最小必需变量集（必填字段）
@@ -68,6 +69,9 @@ describe('env validation', () => {
     expect(result.DATA_ROOT).toBe('/data');
     expect(result.WIKI_ROOT).toBe('/data/md-wiki');
     expect(result.WIKI_GIT_BRANCH).toBe('main');
+    expect(result.WEB_KNOWLEDGE_SOURCES_SNAPSHOT_PATH).toBe(
+      join(process.cwd(), 'notes/knowledge-sources.md'),
+    );
     expect(result.QODER_CHAT_TIMEOUT_MS).toBe(120000);
     expect(result.QODER_CLEAN_TIMEOUT_MS).toBe(900000);
     expect(result.KNOWLEDGE_WORKER_CONCURRENCY).toBe(1);
