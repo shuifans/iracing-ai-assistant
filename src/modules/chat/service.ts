@@ -70,6 +70,45 @@ import type { Evidence } from '@/modules/agent/types';
 
 const activeQueries = new Map<string, AbortController>();
 
+function createAsyncWakeSignal(): {
+  notify: () => void;
+  wait: () => { promise: Promise<void>; cancel: () => void };
+  clear: () => void;
+} {
+  const listeners = new Set<() => void>();
+  return {
+    notify() {
+      const pending = [...listeners];
+      listeners.clear();
+      for (const resolve of pending) resolve();
+    },
+    wait() {
+      let active = true;
+      let resolvePromise!: () => void;
+      const promise = new Promise<void>((resolve) => {
+        resolvePromise = resolve;
+      });
+      const listener = () => {
+        if (!active) return;
+        active = false;
+        resolvePromise();
+      };
+      listeners.add(listener);
+      return {
+        promise,
+        cancel() {
+          if (!active) return;
+          active = false;
+          listeners.delete(listener);
+        },
+      };
+    },
+    clear() {
+      listeners.clear();
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Agent config factory
 // ---------------------------------------------------------------------------
@@ -408,6 +447,7 @@ export async function* streamChatMessage(
   let slowWebNoticeSent = false;
   let webSearchCount = 0;
   let webFetchCount = 0;
+  const toolProgressWake = createAsyncWakeSignal();
 
   // Set up abort controller
   const abortController = new AbortController();
@@ -449,8 +489,9 @@ export async function* streamChatMessage(
             }
           },
           onAllowedToolUse: (tool) => {
-            if (!displayedToolUseIds.has(tool.toolUseId)) {
+            if (!displayedToolUseIds.has(tool.toolUseId) && !allowedTools.has(tool.toolUseId)) {
               allowedTools.set(tool.toolUseId, tool);
+              toolProgressWake.notify();
             }
           },
         });
@@ -458,68 +499,24 @@ export async function* streamChatMessage(
           `[ChatTiming] req=${requestId} QODER_SDK budget=120000ms web=${session.webSearchEnabled}`,
         );
 
-        // 5. Iterate SDK messages while independently surfacing the 100s Web notice.
+        // 5. Keep exactly one SDK next() in flight. Permission-hook notifications
+        // race that promise so approved tool progress is not held behind a slow tool.
         const iterator = query[Symbol.asyncIterator]();
-        while (true) {
-          const nextMessage = iterator.next();
-          let next: IteratorResult<SDKMessage>;
-          const slowNoticeRemaining = 100_000 - (Date.now() - startTime);
-          if (usedWebTool && !synthesizingSent && !slowWebNoticeSent && slowNoticeRemaining > 0) {
-            let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-            const raced = await Promise.race([
-              nextMessage.then((result) => ({ kind: 'message' as const, result })),
-              new Promise<{ kind: 'slow' }>((resolve) => {
-                noticeTimer = setTimeout(() => resolve({ kind: 'slow' }), slowNoticeRemaining);
-              }),
-            ]);
-            if (noticeTimer) clearTimeout(noticeTimer);
-            if (raced.kind === 'slow') {
-              slowWebNoticeSent = true;
-              synthesizingSent = true;
-              yield makeStatusEvent(
-                requestId,
-                sessionId,
-                assistantMsgId,
-                'synthesizing',
-                '联网资料响应较慢，正在使用已获得的内容完成回答…',
-              );
-              next = await nextMessage;
-            } else {
-              next = raced.result;
-            }
-          } else {
-            if (
-              usedWebTool &&
-              !synthesizingSent &&
-              !slowWebNoticeSent &&
-              slowNoticeRemaining <= 0
-            ) {
-              slowWebNoticeSent = true;
-              synthesizingSent = true;
-              yield makeStatusEvent(
-                requestId,
-                sessionId,
-                assistantMsgId,
-                'synthesizing',
-                '联网资料响应较慢，正在使用已获得的内容完成回答…',
-              );
-            }
-            next = await nextMessage;
-          }
-          if (next.done) break;
-          const sdkMsg = next.value;
-          if (!firstDeltaLogged) {
-            timing.agentFirstByteMs = Math.round(performance.now() - t4);
-            firstDeltaLogged = true;
-            console.log(
-              `[ChatTiming] req=${requestId} agentFirstByte=${timing.agentFirstByteMs}ms`,
-            );
-          }
+        type NextOutcome =
+          | { kind: 'message'; result: IteratorResult<SDKMessage> }
+          | { kind: 'error'; error: unknown };
+        const readNext = (): Promise<NextOutcome> =>
+          iterator.next().then(
+            (result) => ({ kind: 'message' as const, result }),
+            (error: unknown) => ({ kind: 'error' as const, error }),
+          );
+        let pendingNext = readNext();
 
-          // Permission hooks are the source of truth: only calls that have already
-          // passed validation and budget checks are surfaced. Depending on SDK
-          // ordering, the callback can occur while awaiting this SDK message.
-          for (const allowed of allowedTools.values()) {
+        const takeAllowedToolEvents = (): SSEEvent[] => {
+          const events: SSEEvent[] = [];
+          for (const allowed of [...allowedTools.values()]) {
+            allowedTools.delete(allowed.toolUseId);
+            if (displayedToolUseIds.has(allowed.toolUseId)) continue;
             const status = statusForAllowedTool(allowed);
             if (!status) continue;
             usedTool = true;
@@ -527,34 +524,52 @@ export async function* streamChatMessage(
             workflow.toolCallCount++;
             if (allowed.name === 'WebSearch') webSearchCount = allowed.current ?? 0;
             if (allowed.name === 'WebFetch') webFetchCount = allowed.current ?? 0;
-            yield makeStatusEvent(
-              requestId,
-              sessionId,
-              assistantMsgId,
-              status.stage,
-              status.message,
-              {
+            events.push(
+              makeStatusEvent(requestId, sessionId, assistantMsgId, status.stage, status.message, {
                 current: allowed.current,
                 limit: allowed.limit,
                 sourceName: allowed.sourceName,
-              },
+              }),
+              makeToolEvent(requestId, sessionId, assistantMsgId, {
+                toolUseId: allowed.toolUseId,
+                name: allowed.name,
+                isSubAgent: false,
+                inputPreview: allowed.sourceName,
+              }),
             );
-            yield makeToolEvent(requestId, sessionId, assistantMsgId, {
-              toolUseId: allowed.toolUseId,
-              name: allowed.name,
-              isSubAgent: false,
-              inputPreview: allowed.sourceName,
-            });
             displayedToolUseIds.add(allowed.toolUseId);
             visibleOutputCommitted = true;
           }
-          allowedTools.clear();
           if (
             !synthesizingSent &&
             !slowWebNoticeSent &&
-            ((webSearchCount >= 1 && webFetchCount >= 2) ||
-              (usedWebTool && Date.now() - startTime >= 100_000))
+            webSearchCount >= 1 &&
+            webFetchCount >= 2
           ) {
+            slowWebNoticeSent = true;
+            synthesizingSent = true;
+            events.push(
+              makeStatusEvent(
+                requestId,
+                sessionId,
+                assistantMsgId,
+                'synthesizing',
+                '联网资料响应较慢，正在使用已获得的内容完成回答…',
+              ),
+            );
+          }
+          return events;
+        };
+
+        while (true) {
+          const queuedEvents = takeAllowedToolEvents();
+          if (queuedEvents.length > 0) {
+            for (const event of queuedEvents) yield event;
+            continue;
+          }
+
+          const slowNoticeRemaining = 100_000 - (Date.now() - startTime);
+          if (usedWebTool && !synthesizingSent && !slowWebNoticeSent && slowNoticeRemaining <= 0) {
             slowWebNoticeSent = true;
             synthesizingSent = true;
             yield makeStatusEvent(
@@ -563,6 +578,51 @@ export async function* streamChatMessage(
               assistantMsgId,
               'synthesizing',
               '联网资料响应较慢，正在使用已获得的内容完成回答…',
+            );
+            continue;
+          }
+
+          const wake = toolProgressWake.wait();
+          let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+          const racers: Array<Promise<NextOutcome | { kind: 'tool' } | { kind: 'slow' }>> = [
+            pendingNext,
+            wake.promise.then(() => ({ kind: 'tool' as const })),
+          ];
+          if (usedWebTool && !synthesizingSent && !slowWebNoticeSent) {
+            racers.push(
+              new Promise<{ kind: 'slow' }>((resolve) => {
+                noticeTimer = setTimeout(() => resolve({ kind: 'slow' }), slowNoticeRemaining);
+              }),
+            );
+          }
+          const raced = await Promise.race(racers);
+          wake.cancel();
+          if (noticeTimer) clearTimeout(noticeTimer);
+
+          if (raced.kind === 'tool') continue;
+          if (raced.kind === 'slow') {
+            slowWebNoticeSent = true;
+            synthesizingSent = true;
+            yield makeStatusEvent(
+              requestId,
+              sessionId,
+              assistantMsgId,
+              'synthesizing',
+              '联网资料响应较慢，正在使用已获得的内容完成回答…',
+            );
+            continue;
+          }
+          if (raced.kind === 'error') throw raced.error;
+          if (allowedTools.size > 0) continue;
+
+          const next = raced.result;
+          if (next.done) break;
+          const sdkMsg = next.value;
+          if (!firstDeltaLogged) {
+            timing.agentFirstByteMs = Math.round(performance.now() - t4);
+            firstDeltaLogged = true;
+            console.log(
+              `[ChatTiming] req=${requestId} agentFirstByte=${timing.agentFirstByteMs}ms`,
             );
           }
 
@@ -750,6 +810,7 @@ export async function* streamChatMessage(
               return;
             }
           }
+          pendingNext = readNext();
         }
       } catch (error) {
         if (
@@ -991,6 +1052,8 @@ export async function* streamChatMessage(
   } finally {
     // 9. Clean up abort controller + any pending budget timeout
     if (budgetTimeout) clearTimeout(budgetTimeout);
+    toolProgressWake.clear();
+    if (!completed && !abortController.signal.aborted) abortController.abort();
     activeQueries.delete(assistantMsgId);
   }
 }

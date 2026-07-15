@@ -517,6 +517,80 @@ describe('streamChatMessage', () => {
     ]);
   });
 
+  it('emits an allowed Web tool immediately while the SDK next call is still pending', async () => {
+    mockGetSession.mockReturnValue({ ...mockSession, webSearchEnabled: true });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let inFlight = false;
+    let completed = false;
+    let nextCalls = 0;
+    mockCreateChatQuery.mockImplementation((_config, options) => {
+      const iterator = {
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+        async next() {
+          nextCalls++;
+          if (completed) return { done: true as const, value: undefined };
+          if (inFlight) throw new Error('concurrent iterator.next()');
+          inFlight = true;
+          void options.onAllowedToolUse?.({
+            toolUseId: 'fetch-pending',
+            name: 'WebFetch',
+            current: 1,
+            limit: 2,
+            sourceName: 'Official',
+          });
+          await gate;
+          inFlight = false;
+          completed = true;
+          return {
+            done: false as const,
+            value: {
+              type: 'result',
+              subtype: 'success',
+              session_id: 'qoder-sess-001',
+              usage: { input_tokens: 10, output_tokens: 5 },
+              total_cost_usd: 0,
+              duration_ms: 10,
+            },
+          };
+        },
+      };
+      return iterator as any;
+    });
+
+    const generator = streamChatMessage(mockUser, 'sess-001', 'question');
+    await generator.next(); // start
+    await generator.next(); // understanding
+    let progress: IteratorResult<any> | undefined;
+    const pendingProgress = generator.next().then((result) => {
+      progress = result;
+      return result;
+    });
+
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(progress?.value).toEqual(
+        expect.objectContaining({ stage: 'web_fetch', sourceName: 'Official' }),
+      );
+      expect((await generator.next()).value).toEqual(
+        expect.objectContaining({ toolUseId: 'fetch-pending', name: 'WebFetch' }),
+      );
+      expect(nextCalls).toBe(1);
+    } finally {
+      release();
+      await pendingProgress;
+      for await (const _event of generator) {
+        // drain
+      }
+    }
+    expect(nextCalls).toBe(2);
+  });
+
   it('emits a slow Web notice at 100 seconds after a real allowed Web call without aborting', async () => {
     vi.useFakeTimers();
     mockGetSession.mockReturnValue({ ...mockSession, webSearchEnabled: true });
@@ -534,7 +608,6 @@ describe('streamChatMessage', () => {
             limit: 2,
             sourceName: 'Official',
           });
-          yield { type: 'assistant', message: { content: [] } };
           await gate;
           yield {
             type: 'stream_event',
@@ -572,8 +645,11 @@ describe('streamChatMessage', () => {
         }),
       );
       expect(mockCreateChatQuery.mock.calls[0]?.[1].abortController.signal.aborted).toBe(false);
+      const afterNotice = generator.next();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(mockCreateChatQuery.mock.calls[0]?.[1].abortController.signal.aborted).toBe(true);
       release();
-      const firstText = await generator.next();
+      const firstText = await afterNotice;
       expect(firstText.value).toEqual(expect.objectContaining({ seq: 1, text: 'answer' }));
       const remaining = [];
       for await (const event of generator) remaining.push(event);
@@ -640,7 +716,6 @@ describe('streamChatMessage', () => {
       (_config, options) =>
         (async function* () {
           void options.onAllowedToolUse?.({ toolUseId: 'grep-1', name: 'Grep' });
-          yield { type: 'assistant', message: { content: [] } };
           await gate;
           yield {
             type: 'result',
