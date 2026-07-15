@@ -19,7 +19,7 @@ Use the smallest compatible remediation:
 
 - Track `scripts/backup.sh` as executable (`100755`).
 - Install the distribution-maintained `sqlite3` package on shserver and verify both CLI execution and the checked-in migration script dry-run.
-- Add precise npm `overrides` for the vulnerable nested PostCSS and Esbuild copies, regenerate the lockfile, require `npm audit` to report zero vulnerabilities, and retain Next.js 15.5.20 and drizzle-kit 0.31.10.
+- Add precise npm `overrides` that reuse the direct safe PostCSS dependency across the tree and replace the vulnerable nested Esbuild copy, regenerate the lockfile, require `npm audit` to report zero vulnerabilities, and retain Next.js 15.5.20 and drizzle-kit 0.31.10.
 - Archive the existing PM2 logs under `/srv/iracing-ai-assistant/data/backups/`, record SHA-256, then flush PM2 logs. Generate fresh health traffic and require the error log to stay empty.
 
 No `npm audit fix --force`, Next.js major upgrade, dependency downgrade, force-push, or direct Mac GitHub push is allowed.
@@ -48,4 +48,3 @@ No `npm audit fix --force`, Next.js major upgrade, dependency downgrade, force-p
 - sqlite3 installation failure: stop before any release mutation; the existing Node/better-sqlite3 migration fallback remains valid.
 - Deployment failure: use the normal verified production database backup and previous Git target.
 - Log cleanup failure: keep the archive and do not delete source logs manually.
-

@@ -67,5 +67,11 @@
     "tsx": "^4.23.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "postcss": "$postcss",
+    "@esbuild-kit/core-utils": {
+      "esbuild": "0.25.12"
+    }
   }
 }

@@ -69,9 +69,7 @@ Add to `package.json`:
 
 ```json
 "overrides": {
-  "next": {
-    "postcss": "8.5.16"
-  },
+  "postcss": "$postcss",
   "@esbuild-kit/core-utils": {
     "esbuild": "0.25.12"
   }
