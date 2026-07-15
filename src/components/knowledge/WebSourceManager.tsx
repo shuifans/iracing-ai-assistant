@@ -355,7 +355,8 @@ export function WebSourceManager() {
         isOpen={deleteTarget !== null}
         title="删除联网知识源"
         message={`确定要删除“${deleteTarget?.name ?? ''}”吗？此操作无法撤销。`}
-        confirmLabel="确认删除"
+        confirmLabel={`确认删除 ${deleteTarget?.name ?? ''}`}
+        cancelLabel={`取消删除 ${deleteTarget?.name ?? ''}`}
         danger
         onConfirm={() => void deleteSource()}
         onCancel={() => setDeleteTarget(null)}

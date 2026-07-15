@@ -174,7 +174,8 @@ describe('WebSourceManager', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '删除 iRacing Help' }));
     expect(screen.getByRole('alertdialog')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+    expect(screen.getByRole('button', { name: '取消删除 iRacing Help' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '确认删除 iRacing Help' }));
 
     await waitFor(() => {
       expect(authFetch).toHaveBeenCalledWith('/api/knowledge/web-sources/s1', {
