@@ -63,12 +63,7 @@ interface SSEErrorEvent extends SSEEventBase {
 }
 
 type SSEEvent =
-  | SSEStartEvent
-  | SSEDeltaEvent
-  | SSESourceEvent
-  | SSEStatusEvent
-  | SSEDoneEvent
-  | SSEErrorEvent;
+  SSEStartEvent | SSEDeltaEvent | SSESourceEvent | SSEStatusEvent | SSEDoneEvent | SSEErrorEvent;
 
 export default function SessionPage() {
   const params = useParams<{ sessionId: string }>();
@@ -80,10 +75,17 @@ export default function SessionPage() {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [statusStage, setStatusStage] = useState<{ stage: string; message: string } | null>(null);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [webSearchUpdating, setWebSearchUpdating] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const webSearchAbortControllerRef = useRef<AbortController | null>(null);
+  const webSearchUpdateRef = useRef(false);
+  const activeSessionIdRef = useRef(sessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamMessageIdRef = useRef<string | null>(null);
+
+  activeSessionIdRef.current = sessionId;
 
   // 滚动到底部
   function scrollToBottom() {
@@ -96,26 +98,111 @@ export default function SessionPage() {
 
   // 加载历史消息
   useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    setLoaded(false);
+    setMessages([]);
+    setError(null);
+    setWebSearchEnabled(false);
+    setWebSearchUpdating(false);
+    webSearchUpdateRef.current = false;
+    webSearchAbortControllerRef.current?.abort();
+    webSearchAbortControllerRef.current = null;
+
     async function loadSession() {
       try {
-        const res = await authFetch(`/api/chat/sessions/${sessionId}`);
+        const res = await authFetch(`/api/chat/sessions/${sessionId}`, {
+          signal: controller.signal,
+        });
+        if (cancelled) return;
         if (res.ok) {
           const json = (await res.json()) as {
-            data: { session: { id: string }; messages: ChatMessage[] };
+            data: {
+              session: { id: string; webSearchEnabled: boolean };
+              messages: ChatMessage[];
+            };
           };
+          if (cancelled) return;
           setMessages(json.data.messages);
+          setWebSearchEnabled(json.data.session.webSearchEnabled);
         } else if (res.status === 404) {
           router.replace('/chat');
           return;
         }
-      } catch {
-        setError('加载会话失败');
+      } catch (loadError) {
+        if (!cancelled && (loadError as Error).name !== 'AbortError') {
+          setError('加载会话失败');
+        }
       } finally {
-        setLoaded(true);
+        if (!cancelled) setLoaded(true);
       }
     }
     loadSession();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      webSearchAbortControllerRef.current?.abort();
+      webSearchAbortControllerRef.current = null;
+      webSearchUpdateRef.current = false;
+    };
   }, [sessionId, router]);
+
+  const handleWebSearchChange = useCallback(
+    async (enabled: boolean) => {
+      if (webSearchUpdateRef.current || !loaded) return;
+
+      const targetSessionId = sessionId;
+      const controller = new AbortController();
+      webSearchUpdateRef.current = true;
+      webSearchAbortControllerRef.current = controller;
+      setWebSearchUpdating(true);
+      setError(null);
+
+      try {
+        const response = await authFetch(`/api/chat/sessions/${targetSessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ webSearchEnabled: enabled }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          let message = '保存联网搜索设置失败';
+          try {
+            const payload = (await response.json()) as { error?: { message?: string } };
+            message = payload.error?.message ?? message;
+          } catch {
+            // 保留通用错误文案
+          }
+          throw new Error(message);
+        }
+
+        const payload = (await response.json()) as {
+          data: { id: string; webSearchEnabled: boolean };
+        };
+        if (
+          !controller.signal.aborted &&
+          activeSessionIdRef.current === targetSessionId &&
+          payload.data.id === targetSessionId
+        ) {
+          setWebSearchEnabled(payload.data.webSearchEnabled);
+        }
+      } catch (updateError) {
+        if (!controller.signal.aborted && activeSessionIdRef.current === targetSessionId) {
+          setError((updateError as Error).message || '保存联网搜索设置失败');
+        }
+      } finally {
+        if (activeSessionIdRef.current === targetSessionId) {
+          webSearchUpdateRef.current = false;
+          webSearchAbortControllerRef.current = null;
+          setWebSearchUpdating(false);
+        }
+      }
+    },
+    [loaded, sessionId],
+  );
 
   // 检查 pending message（从新会话页面跳转过来）
   useEffect(() => {
@@ -546,9 +633,13 @@ export default function SessionPage() {
       <div className="mx-auto w-full max-w-3xl px-3 sm:px-4">
         <ChatInput
           sessionId={sessionId}
+          disabled={!loaded}
           isStreaming={isStreaming}
           onSendMessage={sendMessage}
           onStop={handleStop}
+          webSearchEnabled={webSearchEnabled}
+          onWebSearchChange={handleWebSearchChange}
+          webSearchUpdating={webSearchUpdating}
         />
       </div>
     </div>

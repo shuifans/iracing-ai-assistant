@@ -10,6 +10,7 @@ import {
   getSession,
   getMessagesBySession,
   updateSessionTitle,
+  updateSessionWebSearch,
   deleteSession,
 } from '@/modules/chat/repository';
 import { AppError } from '@/lib/errors';
@@ -40,7 +41,7 @@ export const GET = withErrorHandler(
 );
 
 /**
- * PATCH /api/chat/sessions/:id — update session title.
+ * PATCH /api/chat/sessions/:id — update exactly one supported session setting.
  */
 export const PATCH = withErrorHandler(
   async (
@@ -57,14 +58,45 @@ export const PATCH = withErrorHandler(
       throw new AppError('NOT_FOUND', '会话不存在或无权访问');
     }
 
-    const body = await request.json();
-    const title = body.title;
-    if (typeof title !== 'string' || title.trim().length === 0 || title.length > 200) {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      throw new AppError('VALIDATION_ERROR', '请求体必须是有效 JSON');
+    }
+
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      throw new AppError('VALIDATION_ERROR', '请求体格式无效');
+    }
+
+    const values = body as Record<string, unknown>;
+    const keys = Object.keys(values);
+    if (keys.length !== 1 || !['title', 'webSearchEnabled'].includes(keys[0] ?? '')) {
+      throw new AppError('VALIDATION_ERROR', '必须且只能更新一个支持的会话字段');
+    }
+
+    if (keys[0] === 'webSearchEnabled') {
+      if (typeof values.webSearchEnabled !== 'boolean') {
+        throw new AppError('VALIDATION_ERROR', '联网搜索开关必须为布尔值');
+      }
+
+      const updated = updateSessionWebSearch(id, user.id, values.webSearchEnabled);
+      if (!updated) {
+        throw new AppError('NOT_FOUND', '会话不存在或无权访问');
+      }
+      return NextResponse.json(
+        successResponse({ id: updated.id, webSearchEnabled: updated.webSearchEnabled }),
+      );
+    }
+
+    const title = values.title;
+    const trimmedTitle = typeof title === 'string' ? title.trim() : '';
+    if (typeof title !== 'string' || trimmedTitle.length === 0 || title.length > 200) {
       throw new AppError('VALIDATION_ERROR', '标题必须为 1-200 个字符');
     }
 
-    updateSessionTitle(id, title.trim());
-    return NextResponse.json(successResponse({ id, title: title.trim() }));
+    updateSessionTitle(id, trimmedTitle);
+    return NextResponse.json(successResponse({ id, title: trimmedTitle }));
   },
 );
 

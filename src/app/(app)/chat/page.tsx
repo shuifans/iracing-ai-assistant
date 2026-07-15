@@ -91,6 +91,9 @@ export default function ChatPage() {
           isStreaming={false}
           onSendMessage={createAndSend}
           onStop={() => {}}
+          webSearchEnabled={false}
+          onWebSearchChange={() => {}}
+          webSearchUpdating
         />
       </div>
     </div>

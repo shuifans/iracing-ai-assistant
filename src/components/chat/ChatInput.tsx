@@ -9,6 +9,9 @@ interface ChatInputProps {
   isStreaming?: boolean;
   onSendMessage: (content: string, attachmentIds: string[]) => void;
   onStop: () => void;
+  webSearchEnabled: boolean;
+  onWebSearchChange: (enabled: boolean) => void;
+  webSearchUpdating?: boolean;
 }
 
 export function ChatInput({
@@ -17,6 +20,9 @@ export function ChatInput({
   isStreaming,
   onSendMessage,
   onStop,
+  webSearchEnabled,
+  onWebSearchChange,
+  webSearchUpdating = false,
 }: ChatInputProps) {
   const [content, setContent] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -110,6 +116,36 @@ export function ChatInput({
 
   return (
     <div className="border-t border-gray-200/80 bg-gray-50/80 px-3 py-2 sm:px-4 sm:py-3">
+      <div className="mb-2 flex items-start gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+        <button
+          type="button"
+          role="switch"
+          aria-label="联网搜索"
+          aria-checked={webSearchEnabled}
+          disabled={disabled || webSearchUpdating}
+          onClick={() => onWebSearchChange(!webSearchEnabled)}
+          className={`relative mt-0.5 inline-flex h-6 w-11 flex-none items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 ${
+            webSearchEnabled ? 'bg-blue-600' : 'bg-gray-300'
+          }`}
+        >
+          <span
+            aria-hidden
+            className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+              webSearchEnabled ? 'translate-x-5' : 'translate-x-0.5'
+            }`}
+          />
+        </button>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-700">
+            联网搜索{webSearchUpdating ? '（保存中…）' : ''}
+          </p>
+          <p className="mt-0.5 text-xs leading-5 text-gray-500">
+            优先使用本地知识库；仅本地资料不足时访问管理员授权的网站。联网回答可能需要最多约 2
+            分钟。
+          </p>
+        </div>
+      </div>
+
       {/* 图片预览区 */}
       {attachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
@@ -123,14 +159,19 @@ export function ChatInput({
                 className="absolute -right-2 -top-2 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-white"
                 aria-label="移除图片"
               >
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-xs">×</span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-xs">
+                  ×
+                </span>
               </button>
             </div>
           ))}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex items-end gap-1.5 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-sm">
+      <form
+        onSubmit={handleSubmit}
+        className="flex items-end gap-1.5 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-sm"
+      >
         {/* 图片上传按钮 */}
         <label
           className={`flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center rounded-xl text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 ${
