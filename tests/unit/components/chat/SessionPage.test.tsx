@@ -135,4 +135,36 @@ describe('SessionPage persistent web search mode', () => {
     view.unmount();
     expect(signal?.aborted).toBe(true);
   });
+
+  it('shows a load error and keeps the switch disabled after GET 500', async () => {
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse({ error: { code: 'SERVICE_NOT_READY', message: '会话服务暂不可用' } }, 500),
+    );
+
+    render(<SessionPage />);
+
+    expect(await screen.findByText('会话服务暂不可用')).toBeTruthy();
+    expect(screen.getByRole('switch', { name: '联网搜索' })).toHaveProperty('disabled', true);
+  });
+
+  it('shows a load error and keeps the switch disabled after GET throws', async () => {
+    vi.mocked(authFetch).mockRejectedValueOnce(new Error('network down'));
+
+    render(<SessionPage />);
+
+    expect(await screen.findByText('加载会话失败')).toBeTruthy();
+    expect(screen.getByRole('switch', { name: '联网搜索' })).toHaveProperty('disabled', true);
+  });
+
+  it('redirects and keeps the switch disabled after GET 404', async () => {
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse({ error: { code: 'NOT_FOUND', message: '会话不存在' } }, 404),
+    );
+
+    render(<SessionPage />);
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/chat'));
+    expect(screen.getByText('正在加载会话…')).toBeTruthy();
+    expect(screen.getByRole('switch', { name: '联网搜索' })).toHaveProperty('disabled', true);
+  });
 });

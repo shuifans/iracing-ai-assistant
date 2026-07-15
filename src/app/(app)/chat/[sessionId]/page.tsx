@@ -116,26 +116,43 @@ export default function SessionPage() {
           signal: controller.signal,
         });
         if (cancelled) return;
-        if (res.ok) {
-          const json = (await res.json()) as {
-            data: {
-              session: { id: string; webSearchEnabled: boolean };
-              messages: ChatMessage[];
-            };
-          };
-          if (cancelled) return;
-          setMessages(json.data.messages);
-          setWebSearchEnabled(json.data.session.webSearchEnabled);
-        } else if (res.status === 404) {
+        if (res.status === 404) {
           router.replace('/chat');
           return;
         }
+        if (!res.ok) {
+          let message = '加载会话失败';
+          try {
+            const payload = (await res.json()) as { error?: { message?: string } };
+            message = payload.error?.message ?? message;
+          } catch {
+            // 保留通用错误文案
+          }
+          setError(message);
+          return;
+        }
+
+        const json = (await res.json()) as {
+          data?: {
+            session?: { id?: string; webSearchEnabled?: unknown };
+            messages?: unknown;
+          };
+        };
+        if (
+          json.data?.session?.id !== sessionId ||
+          typeof json.data.session.webSearchEnabled !== 'boolean' ||
+          !Array.isArray(json.data.messages)
+        ) {
+          throw new Error('INVALID_SESSION_RESPONSE');
+        }
+        if (cancelled) return;
+        setMessages(json.data.messages as ChatMessage[]);
+        setWebSearchEnabled(json.data.session.webSearchEnabled);
+        setLoaded(true);
       } catch (loadError) {
         if (!cancelled && (loadError as Error).name !== 'AbortError') {
           setError('加载会话失败');
         }
-      } finally {
-        if (!cancelled) setLoaded(true);
       }
     }
     loadSession();
@@ -575,6 +592,12 @@ export default function SessionPage() {
       {/* 消息区 */}
       <div className="flex-1 overflow-y-auto px-3 py-3 sm:px-6 sm:py-4">
         <div className="mx-auto max-w-3xl space-y-3">
+          {!loaded && !error && (
+            <div role="status" className="py-16 text-center text-sm text-gray-400">
+              正在加载会话…
+            </div>
+          )}
+
           {messages.length === 0 && loaded && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <p className="text-base font-medium text-gray-400">开始一段新对话</p>

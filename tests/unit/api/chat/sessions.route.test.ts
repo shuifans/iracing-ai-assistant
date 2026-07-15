@@ -67,6 +67,36 @@ describe('PATCH /api/chat/sessions/:id', () => {
     expect(updateSessionTitle).not.toHaveBeenCalled();
   });
 
+  it('rejects an initial ownership miss before attempting either update', async () => {
+    vi.mocked(getSession).mockReturnValueOnce(null);
+
+    const response = await PATCH(request({ webSearchEnabled: true }), params);
+
+    expect(response.status).toBe(404);
+    expect(updateSessionWebSearch).not.toHaveBeenCalled();
+    expect(updateSessionTitle).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the ownership-scoped web update no longer finds the session', async () => {
+    vi.mocked(updateSessionWebSearch).mockReturnValueOnce(null);
+
+    const response = await PATCH(request({ webSearchEnabled: true }), params);
+
+    expect(response.status).toBe(404);
+    expect(updateSessionWebSearch).toHaveBeenCalledWith(ownedSession.id, 'user-1', true);
+  });
+
+  it('still updates a valid title as the only field', async () => {
+    const response = await PATCH(request({ title: '  New title  ' }), params);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { id: ownedSession.id, title: 'New title' },
+    });
+    expect(updateSessionTitle).toHaveBeenCalledWith(ownedSession.id, 'New title');
+    expect(updateSessionWebSearch).not.toHaveBeenCalled();
+  });
+
   const invalidBodies: Array<[unknown, string]> = [
     [{}, 'empty body'],
     [{ title: 'new', webSearchEnabled: true }, 'both supported fields'],

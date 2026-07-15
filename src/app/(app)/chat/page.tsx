@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authFetch } from '@/lib/auth-client';
 import { ChatInput } from '@/components/chat/ChatInput';
@@ -16,20 +16,36 @@ const SUGGESTED_QUESTIONS = [
 export default function ChatPage() {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const creatingRef = useRef(false);
 
   async function createAndSend(content: string, attachmentIds: string[]) {
-    if (creating) return;
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setCreating(true);
+    setError(null);
 
     try {
       // 创建新会话
       const sessionRes = await authFetch('/api/chat/sessions', { method: 'POST' });
       if (!sessionRes.ok) {
-        setCreating(false);
-        return;
+        throw new Error(await readResponseError(sessionRes, '创建会话失败'));
       }
       const sessionJson = (await sessionRes.json()) as { data: { id: string } };
       const sessionId = sessionJson.data.id;
+
+      // 首条消息必须等到联网选择持久化后，目标会话页才可发送给 Agent。
+      if (webSearchEnabled) {
+        const webResponse = await authFetch(`/api/chat/sessions/${sessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ webSearchEnabled: true }),
+        });
+        if (!webResponse.ok) {
+          throw new Error(await readResponseError(webResponse, '保存联网搜索设置失败'));
+        }
+      }
 
       // 将首条消息存入 sessionStorage，由 [sessionId] 页面发送
       sessionStorage.setItem(
@@ -38,7 +54,9 @@ export default function ChatPage() {
       );
 
       router.push(`/chat/${sessionId}`);
-    } catch {
+    } catch (createError) {
+      setError((createError as Error).message || '创建会话失败');
+      creatingRef.current = false;
       setCreating(false);
     }
   }
@@ -80,6 +98,12 @@ export default function ChatPage() {
               ))}
             </div>
           </div>
+
+          {error && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+              {error}
+            </div>
+          )}
         </div>
       </div>
 
@@ -91,11 +115,23 @@ export default function ChatPage() {
           isStreaming={false}
           onSendMessage={createAndSend}
           onStop={() => {}}
-          webSearchEnabled={false}
-          onWebSearchChange={() => {}}
-          webSearchUpdating
+          webSearchEnabled={webSearchEnabled}
+          onWebSearchChange={(enabled) => {
+            setWebSearchEnabled(enabled);
+            setError(null);
+          }}
+          webSearchUpdating={creating && webSearchEnabled}
         />
       </div>
     </div>
   );
+}
+
+async function readResponseError(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = (await response.json()) as { error?: { message?: string } };
+    return payload.error?.message ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
