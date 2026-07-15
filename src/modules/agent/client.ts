@@ -97,6 +97,10 @@ function isRealPathContained(root: string, target: string): boolean {
   return Boolean(realTargetOrParent && isPathContained(realRoot, realTargetOrParent));
 }
 
+function hasParentTraversalSegment(candidate: string): boolean {
+  return candidate.split(/[\\/]/).includes('..');
+}
+
 function deny(reason: string) {
   return {
     hookSpecificOutput: {
@@ -124,7 +128,13 @@ function isFileToolAllowed(
 ): boolean {
   if (toolName === 'Read') {
     const candidate = toolInput.file_path;
-    if (typeof candidate !== 'string' || candidate.length === 0) return false;
+    if (
+      typeof candidate !== 'string' ||
+      candidate.length === 0 ||
+      hasParentTraversalSegment(candidate)
+    ) {
+      return false;
+    }
     const resolved = path.resolve(wikiRoot, candidate);
     return resolved === snapshotPath || isRealPathContained(wikiRoot, resolved);
   }
@@ -132,7 +142,13 @@ function isFileToolAllowed(
   if (toolName === 'Grep') {
     const candidate = toolInput.path;
     if (candidate === undefined) return true;
-    if (typeof candidate !== 'string' || candidate.length === 0) return false;
+    if (
+      typeof candidate !== 'string' ||
+      candidate.length === 0 ||
+      hasParentTraversalSegment(candidate)
+    ) {
+      return false;
+    }
     return isRealPathContained(wikiRoot, path.resolve(wikiRoot, candidate));
   }
 
@@ -142,7 +158,8 @@ function isFileToolAllowed(
     typeof pattern !== 'string' ||
     pattern.length === 0 ||
     (baseInput !== undefined && (typeof baseInput !== 'string' || baseInput.length === 0)) ||
-    pattern.split(/[\\/]/).includes('..')
+    hasParentTraversalSegment(pattern) ||
+    (typeof baseInput === 'string' && hasParentTraversalSegment(baseInput))
   ) {
     return false;
   }
@@ -316,9 +333,13 @@ function createPostToolUseHook(
     const toolInput = (input.tool_input ?? {}) as Record<string, unknown>;
     let evidence: Evidence | null = null;
 
-    if (input.tool_name === 'Read' && typeof toolInput.file_path === 'string') {
+    if (
+      input.tool_name === 'Read' &&
+      typeof toolInput.file_path === 'string' &&
+      isFileToolAllowed('Read', toolInput, wikiRoot, snapshotPath)
+    ) {
       const absolutePath = path.resolve(wikiRoot, toolInput.file_path);
-      if (absolutePath !== snapshotPath && isRealPathContained(wikiRoot, absolutePath)) {
+      if (absolutePath !== snapshotPath) {
         const wikiPath = path.relative(wikiRoot, absolutePath).split(path.sep).join('/');
         evidence = {
           evidenceId: randomUUID(),

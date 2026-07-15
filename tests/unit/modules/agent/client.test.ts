@@ -292,6 +292,29 @@ describe('createChatQuery', () => {
       },
     );
 
+    it.each([
+      ['Read', { file_path: 'escape/../outside/secret.md' }],
+      ['Glob', { pattern: '**/*.md', path: 'escape/../outside' }],
+      ['Grep', { pattern: 'secret', path: 'escape/../outside' }],
+    ])('denies raw %s paths with .. before symlink resolution', async (toolName, toolInput) => {
+      const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'qoder-dotdot-boundary-'));
+      const wikiRoot = path.join(tempRoot, 'wiki');
+      const outsideRoot = path.join(tempRoot, 'outside');
+      mkdirSync(wikiRoot);
+      mkdirSync(outsideRoot);
+      symlinkSync(outsideRoot, path.join(wikiRoot, 'escape'));
+
+      try {
+        const { hook } = getHook({}, { ...baseConfig, wikiRoot });
+        await expect(decision(hook, input(toolName, toolInput))).resolves.toMatchObject({
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'FILE_TOOL_PATH_NOT_ALLOWED',
+        });
+      } finally {
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
+    });
+
     it('allows a nonexistent candidate whose nearest real parent remains in the Wiki', async () => {
       const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'qoder-file-boundary-'));
       const wikiRoot = path.join(tempRoot, 'wiki');
@@ -409,9 +432,9 @@ describe('createChatQuery', () => {
   });
 
   describe('direct-tool PostToolUse evidence', () => {
-    function getHook() {
+    function getHook(config: typeof baseConfig = baseConfig) {
       const options = makeOptions({ webSearchEnabled: true });
-      createChatQuery(baseConfig, options);
+      createChatQuery(config, options);
       return {
         hook: lastCallArgs().options.hooks.PostToolUse[0].hooks[0] as (
           input: PostToolUseHookInput,
@@ -519,6 +542,27 @@ describe('createChatQuery', () => {
       await hook(input('Grep', { pattern: 'trail' }, 'matches'));
 
       expect(onEvidence).not.toHaveBeenCalled();
+    });
+
+    it('does not record Read evidence for a raw symlink plus .. traversal path', async () => {
+      const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'qoder-evidence-boundary-'));
+      const wikiRoot = path.join(tempRoot, 'wiki');
+      const outsideRoot = path.join(tempRoot, 'outside');
+      mkdirSync(wikiRoot);
+      mkdirSync(outsideRoot);
+      symlinkSync(outsideRoot, path.join(wikiRoot, 'escape'));
+
+      try {
+        const { hook, onEvidence } = getHook({ ...baseConfig, wikiRoot });
+        const result = await hook(
+          input('Read', { file_path: 'escape/../outside/secret.md' }, 'outside secret'),
+        );
+
+        expect(result).toEqual({});
+        expect(onEvidence).not.toHaveBeenCalled();
+      } finally {
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
     });
   });
 });
