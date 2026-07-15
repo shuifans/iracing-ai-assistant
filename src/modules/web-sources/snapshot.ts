@@ -18,7 +18,7 @@ export function toWebSourceRule(source: WebKnowledgeSource): WebSourceRule {
 }
 
 function escapeCell(value: string): string {
-  return value.replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
+  return value.replace(/\|/g, '&#124;').replace(/[\r\n]+/g, ' ');
 }
 
 function compareText(a: string, b: string): number {

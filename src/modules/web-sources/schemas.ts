@@ -3,8 +3,25 @@ import type { WebSourceScope } from './types';
 
 const unsafeEncodedPath = /%(?:2f|5c|2e)/i;
 
+function hasExplicitPortMarker(input: string): boolean {
+  const schemeEnd = input.indexOf('://');
+  if (schemeEnd === -1) return false;
+  const authorityStart = schemeEnd + 3;
+  const boundaryOffset = input.slice(authorityStart).search(/[/?#]/);
+  const authorityEnd = boundaryOffset === -1 ? input.length : authorityStart + boundaryOffset;
+  const authority = input.slice(authorityStart, authorityEnd);
+  const hostAndPort = authority.slice(authority.lastIndexOf('@') + 1);
+
+  if (hostAndPort.startsWith('[')) {
+    const closingBracket = hostAndPort.indexOf(']');
+    return closingBracket !== -1 && hostAndPort.slice(closingBracket + 1).startsWith(':');
+  }
+  return hostAndPort.includes(':');
+}
+
 export function normalizeWebSourceUrl(scopeType: WebSourceScope, input: string): string {
   input = input.trim();
+  if (hasExplicitPortMarker(input)) throw new Error('知识源 URL 不得包含端口');
   const rawWithoutQuery = input.split(/[?#]/, 1)[0] ?? input;
   const authorityEnd = rawWithoutQuery.indexOf('/', rawWithoutQuery.indexOf('://') + 3);
   const rawPath = authorityEnd === -1 ? '' : rawWithoutQuery.slice(authorityEnd);

@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { getDb } from '@/db/client';
 import { AppError } from '@/lib/errors';
 import { recordAudit } from '@/modules/audit/service';
 import type { AuditAction } from '@/modules/audit/types';
@@ -41,17 +42,20 @@ export function listEnabledWebSourceRules(): WebSourceRule[] {
 export function createWebSource(input: WebSourceInput, actorId: string): WebKnowledgeSource {
   let source: WebKnowledgeSource;
   try {
-    source = repository.createWebSource(input, actorId);
+    source = getDb().transaction(() => {
+      const created = repository.createWebSource(input, actorId);
+      recordAudit({
+        actorId,
+        action: 'web_source.created',
+        resource: 'web_knowledge_source',
+        resourceId: created.id,
+        changes: input,
+      });
+      return created;
+    });
   } catch (error) {
     duplicateError(error);
   }
-  recordAudit({
-    actorId,
-    action: 'web_source.created',
-    resource: 'web_knowledge_source',
-    resourceId: source.id,
-    changes: input,
-  });
   refreshSnapshot();
   return source;
 }
@@ -61,47 +65,51 @@ export function updateWebSource(
   changes: WebSourceUpdate,
   actorId: string,
 ): WebKnowledgeSource {
-  const current = repository.getWebSource(id);
-  if (!current) throw new AppError('NOT_FOUND', `Web 知识源 ${id} 不存在`);
-  const normalizedChanges = { ...changes };
-  if (changes.url !== undefined || changes.scopeType !== undefined) {
-    const scopeType = changes.scopeType ?? current.scopeType;
-    normalizedChanges.url = normalizeWebSourceUrl(scopeType, changes.url ?? current.url);
-  }
-
-  let updated: WebKnowledgeSource | null;
+  let updated: WebKnowledgeSource;
   try {
-    updated = repository.updateWebSource(id, normalizedChanges, actorId);
+    updated = getDb().transaction(() => {
+      const current = repository.getWebSource(id);
+      if (!current) throw new AppError('NOT_FOUND', `Web 知识源 ${id} 不存在`);
+      const normalizedChanges = { ...changes };
+      if (changes.url !== undefined || changes.scopeType !== undefined) {
+        const scopeType = changes.scopeType ?? current.scopeType;
+        normalizedChanges.url = normalizeWebSourceUrl(scopeType, changes.url ?? current.url);
+      }
+      const result = repository.updateWebSource(id, normalizedChanges, actorId);
+      if (!result) throw new AppError('NOT_FOUND', `Web 知识源 ${id} 不存在`);
+      const action: AuditAction =
+        changes.enabled !== undefined && changes.enabled !== current.enabled
+          ? changes.enabled
+            ? 'web_source.enabled'
+            : 'web_source.disabled'
+          : 'web_source.updated';
+      recordAudit({
+        actorId,
+        action,
+        resource: 'web_knowledge_source',
+        resourceId: id,
+        changes: normalizedChanges,
+      });
+      return result;
+    });
   } catch (error) {
     duplicateError(error);
   }
-  if (!updated) throw new AppError('NOT_FOUND', `Web 知识源 ${id} 不存在`);
-  const action: AuditAction =
-    changes.enabled !== undefined && changes.enabled !== current.enabled
-      ? changes.enabled
-        ? 'web_source.enabled'
-        : 'web_source.disabled'
-      : 'web_source.updated';
-  recordAudit({
-    actorId,
-    action,
-    resource: 'web_knowledge_source',
-    resourceId: id,
-    changes: normalizedChanges,
-  });
   refreshSnapshot();
   return updated;
 }
 
 export function deleteWebSource(id: string, actorId: string): void {
-  const deleted = repository.deleteWebSource(id);
-  if (!deleted) throw new AppError('NOT_FOUND', `Web 知识源 ${id} 不存在`);
-  recordAudit({
-    actorId,
-    action: 'web_source.deleted',
-    resource: 'web_knowledge_source',
-    resourceId: id,
-    changes: { deleted },
+  getDb().transaction(() => {
+    const deleted = repository.deleteWebSource(id);
+    if (!deleted) throw new AppError('NOT_FOUND', `Web 知识源 ${id} 不存在`);
+    recordAudit({
+      actorId,
+      action: 'web_source.deleted',
+      resource: 'web_knowledge_source',
+      resourceId: id,
+      changes: { deleted },
+    });
   });
   refreshSnapshot();
 }

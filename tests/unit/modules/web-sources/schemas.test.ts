@@ -10,6 +10,10 @@ describe('web source schemas', () => {
     'http://iracing.com',
     'https://user@iracing.com',
     'https://iracing.com:444',
+    'https://iracing.com:443',
+    'https://iracing.com:0443',
+    'https://iracing.com:',
+    'https://[2001:db8::1]:443/news',
     'https://iracing.com./news',
     'https://iracing.com/a%2fb',
     'https://iracing.com/a%5cb',
@@ -30,6 +34,12 @@ describe('web source schemas', () => {
   it('normalizes a path source', () => {
     expect(normalizeWebSourceUrl('path', 'https://reddit.com/r/iRacing/')).toBe(
       'https://reddit.com/r/iRacing',
+    );
+  });
+
+  it('allows an IPv6 authority without an explicit port', () => {
+    expect(normalizeWebSourceUrl('domain', 'https://[2001:db8::1]/news')).toBe(
+      'https://[2001:db8::1]',
     );
   });
 

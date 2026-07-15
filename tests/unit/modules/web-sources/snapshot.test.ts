@@ -54,7 +54,7 @@ describe('web source snapshot', () => {
       [
         source({
           id: 'z',
-          name: 'Reddit | Community',
+          name: 'Reddit \\| Community',
           scopeType: 'path',
           url: 'https://reddit.com/r/iRacing',
           sourceLevel: 'community',
@@ -78,8 +78,10 @@ describe('web source snapshot', () => {
         '> 此文件由知识源管理后台从数据库生成，请勿手工编辑。\n\n' +
         '| 状态 | 级别 | 名称 | 范围 | URL | 说明 |\n' +
         '|---|---|---|---|---|---|\n' +
-        '| 禁用 | community | Reddit \\| Community | path | https://reddit.com/r/iRacing | Drivers \\| discussion |\n' +
+        '| 禁用 | community | Reddit \\&#124; Community | path | https://reddit.com/r/iRacing | Drivers &#124; discussion |\n' +
         '| 启用 | official | iRacing | domain | https://iracing.com |  |\n',
     );
+    const dataRows = readFileSync(snapshotPath, 'utf8').split('\n').slice(6).filter(Boolean);
+    expect(dataRows.every((row) => row.split('|').length === 8)).toBe(true);
   });
 });

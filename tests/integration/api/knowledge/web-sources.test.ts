@@ -50,6 +50,7 @@ describe('knowledge web sources API', () => {
       status: 'active',
     } as any);
     const db = new Database(dbPath);
+    db.exec('DROP TRIGGER IF EXISTS fail_web_source_audit');
     db.prepare('DELETE FROM audit_logs').run();
     db.prepare('DELETE FROM web_knowledge_sources').run();
     db.close();
@@ -91,6 +92,51 @@ describe('knowledge web sources API', () => {
     );
 
     expect(response.status).toBe(400);
+  });
+
+  it('rejects an explicit default HTTPS port with 400', async () => {
+    const response = await collection.POST(
+      request('http://localhost/api/knowledge/web-sources', 'POST', {
+        name: 'Default port',
+        scopeType: 'domain',
+        url: 'https://iracing.com:443',
+        sourceLevel: 'official',
+        enabled: true,
+      }),
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it('rolls back a source mutation when its audit insert fails', async () => {
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TRIGGER fail_web_source_audit
+      BEFORE INSERT ON audit_logs
+      WHEN NEW.action = 'web_source.created'
+      BEGIN
+        SELECT RAISE(ABORT, 'audit unavailable');
+      END
+    `);
+    db.close();
+
+    const response = await collection.POST(
+      request('http://localhost/api/knowledge/web-sources', 'POST', {
+        name: 'Must roll back',
+        scopeType: 'domain',
+        url: 'https://rollback.example.com',
+        sourceLevel: 'official',
+        enabled: true,
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    const verifyDb = new Database(dbPath);
+    const sourceCount = verifyDb
+      .prepare("SELECT count(*) AS count FROM web_knowledge_sources WHERE name = 'Must roll back'")
+      .get() as { count: number };
+    verifyDb.close();
+    expect(sourceCount.count).toBe(0);
   });
 
   it('creates, lists, updates, deletes, audits, and refreshes the snapshot', async () => {
