@@ -27,5 +27,13 @@ cp src/db/migrations/*.sql .next/standalone/.next/server/chunks/migrations/
 # bcrypt: standalone 不会复制原生 prebuilds 目录，需手动复制，否则注册/登录 500
 cp -r node_modules/bcrypt/prebuilds .next/standalone/node_modules/bcrypt/prebuilds
 
+# qodercli: standalone 不会复制 Qoder SDK 通过 spawn 动态加载的 CLI 二进制(132MB ELF)，
+# 缺失会让所有对话在 ~100ms 内报 QoderCliProcessError（前端提示"Agent 暂时不可用，请重试"）。
+# SDK 固定从 <sdk>/dist/_bundled/qodercli 解析该二进制。
+mkdir -p .next/standalone/node_modules/@qoder-ai/qoder-agent-sdk/dist/_bundled
+cp node_modules/@qoder-ai/qoder-agent-sdk/dist/_bundled/qodercli \
+  .next/standalone/node_modules/@qoder-ai/qoder-agent-sdk/dist/_bundled/qodercli
+chmod +x .next/standalone/node_modules/@qoder-ai/qoder-agent-sdk/dist/_bundled/qodercli
+
 npx tsx src/db/migrate.ts
 pm2 restart iracing-ai-web iracing-ai-worker
