@@ -13,12 +13,19 @@ const SUGGESTED_QUESTIONS = [
   'iRacing 的安全等级（Safety Rating）是如何计算的？',
 ];
 
+interface CreatedSessionState {
+  id: string;
+  webSearchEnabled: boolean;
+  webStateUncertain: boolean;
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const creatingRef = useRef(false);
+  const createdSessionRef = useRef<CreatedSessionState | null>(null);
 
   async function createAndSend(content: string, attachmentIds: string[]) {
     if (creatingRef.current) return;
@@ -27,33 +34,46 @@ export default function ChatPage() {
     setError(null);
 
     try {
-      // 创建新会话
-      const sessionRes = await authFetch('/api/chat/sessions', { method: 'POST' });
-      if (!sessionRes.ok) {
-        throw new Error(await readResponseError(sessionRes, '创建会话失败'));
-      }
-      const sessionJson = (await sessionRes.json()) as { data: { id: string } };
-      const sessionId = sessionJson.data.id;
+      const desiredWebSearchEnabled = webSearchEnabled;
+      let session = createdSessionRef.current;
 
-      // 首条消息必须等到联网选择持久化后，目标会话页才可发送给 Agent。
-      if (webSearchEnabled) {
-        const webResponse = await authFetch(`/api/chat/sessions/${sessionId}`, {
+      if (!session) {
+        const sessionRes = await authFetch('/api/chat/sessions', { method: 'POST' });
+        if (!sessionRes.ok) {
+          throw new Error(await readResponseError(sessionRes, '创建会话失败'));
+        }
+        const sessionJson = (await sessionRes.json()) as { data?: { id?: unknown } };
+        if (typeof sessionJson.data?.id !== 'string' || sessionJson.data.id.length === 0) {
+          throw new Error('创建会话失败');
+        }
+        session = {
+          id: sessionJson.data.id,
+          webSearchEnabled: false,
+          webStateUncertain: false,
+        };
+        createdSessionRef.current = session;
+      }
+
+      if (session.webStateUncertain || session.webSearchEnabled !== desiredWebSearchEnabled) {
+        session.webStateUncertain = true;
+        const webResponse = await authFetch(`/api/chat/sessions/${session.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ webSearchEnabled: true }),
+          body: JSON.stringify({ webSearchEnabled: desiredWebSearchEnabled }),
         });
-        if (!webResponse.ok) {
-          throw new Error(await readResponseError(webResponse, '保存联网搜索设置失败'));
-        }
+        await validateWebSearchResponse(webResponse, session.id, desiredWebSearchEnabled);
+        session.webSearchEnabled = desiredWebSearchEnabled;
+        session.webStateUncertain = false;
       }
 
       // 将首条消息存入 sessionStorage，由 [sessionId] 页面发送
       sessionStorage.setItem(
-        `pending-message-${sessionId}`,
+        `pending-message-${session.id}`,
         JSON.stringify({ content, attachmentIds }),
       );
 
-      router.push(`/chat/${sessionId}`);
+      router.push(`/chat/${session.id}`);
+      createdSessionRef.current = null;
     } catch (createError) {
       setError((createError as Error).message || '创建会话失败');
       creatingRef.current = false;
@@ -133,5 +153,26 @@ async function readResponseError(response: Response, fallback: string): Promise<
     return payload.error?.message ?? fallback;
   } catch {
     return fallback;
+  }
+}
+
+async function validateWebSearchResponse(
+  response: Response,
+  sessionId: string,
+  expectedEnabled: boolean,
+): Promise<void> {
+  if (!response.ok) {
+    throw new Error(await readResponseError(response, '保存联网搜索设置失败'));
+  }
+
+  try {
+    const payload = (await response.json()) as {
+      data?: { id?: unknown; webSearchEnabled?: unknown };
+    };
+    if (payload.data?.id !== sessionId || payload.data.webSearchEnabled !== expectedEnabled) {
+      throw new Error('INVALID_WEB_SEARCH_RESPONSE');
+    }
+  } catch {
+    throw new Error('保存联网搜索设置失败');
   }
 }
