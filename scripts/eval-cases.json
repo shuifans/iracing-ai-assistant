@@ -4,8 +4,8 @@
   "version": "1.0",
   "description": "5 场景 × ~3.5 轮 = 17 轮，覆盖 5 类检索来源(A1-A5) + 4 种多轮模式(S1-S4)。每轮标注预期工具与 grounding，用于算行为符合预期率。",
   "categories": {
-    "A1": "Wiki-grounded — 应命中 wiki-search(Read/Glob/Grep)，grounded",
-    "A2": "Web-grounded — 应命中 web-research(WebSearch/WebFetch)，grounded",
+    "A1": "Wiki-grounded — 应命中 direct Read/Glob/Grep，grounded",
+    "A2": "Web-grounded — 应命中 direct WebSearch/WebFetch，grounded",
     "A3": "Inferred — 推理型，无工具或少量工具，inferred",
     "A4": "Off-topic — 无工具，礼貌拒绝，insufficient",
     "A5": "Ambiguous — 应追问澄清一个聚焦问题，inferred"
@@ -21,7 +21,7 @@
           "id": "S1T1",
           "question": "iRating 是什么？它是如何计算的？",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "基础知识，应查 wiki what-is-irating.md"
         },
@@ -29,7 +29,7 @@
           "id": "S1T2",
           "question": "那它和真实赛车手的评分体系有什么本质区别？",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "追问对比，'它'指代 iRating，测指代消解 + cache_read"
         },
@@ -37,7 +37,7 @@
           "id": "S1T3",
           "question": "详细解释一下你刚才提到的安全等级和 iRating 的关系。",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "引用上文('刚才提到的')，强依赖上下文 + cache"
         }
@@ -53,7 +53,7 @@
           "id": "S2T1",
           "question": "Dallara F3 这辆车在 iRacing 里刹车平衡应该怎么调？",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "具体车型调校"
         },
@@ -61,7 +61,7 @@
           "id": "S2T2",
           "question": "那它在高速弯道的表现如何？需要怎么调？",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "'它'=Dallara F3，测指代消解"
         },
@@ -69,7 +69,7 @@
           "id": "S2T3",
           "question": "如果我想让它更稳定一些，入弯不容易推头，应该改什么？",
           "category": "A3",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "inferred",
           "notes": "推理型调校建议，可能 grounded 也可能 inferred"
         }
@@ -85,7 +85,7 @@
           "id": "S3T1",
           "question": "如何在 iRacing 里做好循迹刹车？",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "刹车技巧"
         },
@@ -93,7 +93,7 @@
           "id": "S3T2",
           "question": "轮胎压力对圈速有什么影响？怎么调？",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "切换到轮胎话题"
         },
@@ -101,7 +101,7 @@
           "id": "S3T3",
           "question": "回到刹车——刚才说的循迹刹车和轮胎温度有关系吗？",
           "category": "A3",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "inferred",
           "notes": "回到刹车并跨话题关联，测上下文整合"
         }
@@ -117,7 +117,7 @@
           "id": "S4T1",
           "question": "新手入门 iRacing 应该选什么级别的赛车和赛道？",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "首轮，应 cache_creation 较高、cache_read≈0"
         },
@@ -125,7 +125,7 @@
           "id": "S4T2",
           "question": "iRacing 的驾照(License)等级是怎么划分的？",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "第2轮，观察 cache_read 是否开始增长"
         },
@@ -133,7 +133,7 @@
           "id": "S4T3",
           "question": "安全等级(Safety Rating)是如何计算的？怎么提升？",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "第3轮"
         },
@@ -141,7 +141,7 @@
           "id": "S4T4",
           "question": "iRating 和 Safety Rating 有什么区别？",
           "category": "A1",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "grounded",
           "notes": "第4轮"
         },
@@ -149,7 +149,7 @@
           "id": "S4T5",
           "question": "综合来看，新手前三个月应该优先提升哪个？为什么？",
           "category": "A3",
-          "expectedTools": ["wiki-search"],
+          "expectedTools": ["Glob", "Grep", "Read"],
           "expectedGrounding": "inferred",
           "notes": "第5轮综合推理，应 cache_read 最高"
         }
@@ -165,9 +165,9 @@
           "id": "S5T1",
           "question": "iRacing 2026 赛季官方新增了哪些赛道或赛车？",
           "category": "A2",
-          "expectedTools": ["web-research"],
+          "expectedTools": ["WebSearch", "WebFetch"],
           "expectedGrounding": "grounded",
-          "notes": "时效性内容，wiki 可能没有，应走 web-research"
+          "notes": "时效性内容，wiki 可能没有，应走 direct WebSearch/WebFetch"
         },
         {
           "id": "S5T2",

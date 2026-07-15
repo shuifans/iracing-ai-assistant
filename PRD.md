@@ -348,7 +348,7 @@ Eau Rouge 是 Spa 赛道最具标志性的弯道...
 | **前端**      | React + Tailwind CSS                 | 移动端优先的响应式 UI                                   |
 | **后端**      | Next.js API Routes + Qoder Agent SDK | API 层 + Agent 编排层                                   |
 | **Agent SDK** | `@qoder-ai/qoder-agent-sdk`          | 核心 Agent 编排能力                                     |
-| **LLM**       | 兼容 OpenAI/Anthropic 协议的模型     | 如阿里云百炼 qwen3.6-plus、小米 MIMO 等，需支持视觉理解 |
+| **聊天模型**  | Qwen3.7-Plus                         | 由 Qoder Agent SDK 固定调用，支持工具与视觉理解         |
 | **认证**      | JWT（jose 库）                       | Access Token + Refresh Token                            |
 | **数据库**    | SQLite (better-sqlite3)              | 用户、会话、知识条目等结构化数据存储                    |
 | **部署**      | PM2 + Nginx                        | PM2 进程管理，Nginx 反向代理 + HTTPS                    |
@@ -370,22 +370,16 @@ import { query } from '@qoder-ai/qoder-agent-sdk';
 const result = await query({
   prompt: '用户的问题内容',
   options: {
-    // 模型配置（BYOK 模式）
-    model: {
-      provider: 'custom-provider', // 匹配 BYOK 目录中的 provider
-      model: 'qwen3.6-plus',
-      style: 'openai', // OpenAI 兼容协议
-      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      apiKey: process.env.LLM_API_KEY,
-    },
+    model: 'Qwen3.7-Plus',
+    reasoningEffort: 'high',
     // 流式输出
     includePartialMessages: true,
-    // 内置工具
-    allowedTools: ['WebFetch', 'WebSearch', 'Read', 'Glob', 'Grep'],
-    // 子 Agent 注册
-    agents: { 'wiki-search': wikiSearchAgent, 'web-fetch': webFetchAgent },
+    // 默认只开放本地 Wiki 工具；用户开启会话联网后才追加 Web 工具
+    tools: webSearchEnabled
+      ? ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch']
+      : ['Read', 'Glob', 'Grep'],
     // 会话恢复
-    resume: sessionId, // 传入 session ID 恢复历史会话
+    resume: sessionId,
   },
 });
 
@@ -398,46 +392,19 @@ for await (const message of result) {
 }
 ```
 
-#### 4.2.2 BYOK 模型配置
+#### 4.2.2 模型与工具边界
 
-通过 `resolveModel` 回调 + `CustomModel` 对象实现自有模型接入：
-
-```typescript
-import { query, type CustomModel } from '@qoder-ai/qoder-agent-sdk';
-
-const customModel: CustomModel = {
-  provider: 'aliyun-bailian',
-  model: 'qwen3.6-plus',
-  style: 'openai', // 使用 OpenAI 兼容协议
-  baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  apiKey: process.env.ALIYUN_BAILIAN_API_KEY,
-};
-
-const result = await query({
-  prompt: userMessage,
-  options: {
-    resolveModel: () => customModel,
-    // ... 其他选项
-  },
-});
-```
+聊天只使用 Qoder Agent SDK 的 `Qwen3.7-Plus`，不提供可切换的聊天后端。Agent 必须先直接使用 `Read`、`Glob`、`Grep` 检索本地 Wiki；只有用户为当前会话开启联网且本地证据不足时，才可在知识管理员登记的来源范围内调用 `WebSearch`、`WebFetch`。单轮上限为 1 次 WebSearch、2 次 WebFetch、6 个 Agent turn 和 120 秒。
 
 #### 4.2.3 多轮对话支持
 
-通过 `prompt` 参数传入 AsyncGenerator 实现多消息会话：
+Qoder `session_id` 是聊天上下文的唯一载体。新会话注入一次 System Prompt；后续通过 `resume` 恢复，并只发送当前用户消息：
 
 ```typescript
-async function* messageGenerator() {
-  yield '第一轮用户消息';
-  // 等待 Agent 响应后继续
-  yield '第二轮追问消息';
-}
-
 const result = await query({
-  prompt: messageGenerator(),
+  prompt: currentUserMessage,
   options: {
-    resume: existingSessionId, // 恢复之前的会话
-    // ...
+    resume: existingSessionId,
   },
 });
 ```

@@ -18,7 +18,6 @@ vi.mock('@/modules/chat/repository', () => ({
 }));
 
 vi.mock('@/modules/chat/attachment-input', () => ({
-  assertAttachmentBackendSupported: vi.fn(),
   loadAttachmentImages: vi.fn(async () => [{ base64: 'aW1hZ2U=', mediaType: 'image/png' }]),
 }));
 

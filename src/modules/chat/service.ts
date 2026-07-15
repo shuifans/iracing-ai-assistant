@@ -46,7 +46,7 @@ import {
   createUserMessageWithAttachments,
   getAttachmentsByMessage,
 } from './repository';
-import { assertAttachmentBackendSupported, loadAttachmentImages } from './attachment-input';
+import { loadAttachmentImages } from './attachment-input';
 import { generateSessionTitle } from './session-context';
 import type {
   SSEEvent,
@@ -190,8 +190,6 @@ function makeToolEvent(
   tool: {
     toolUseId: string;
     name: string;
-    isSubAgent: boolean;
-    agentName?: string;
     inputPreview?: string;
   },
 ): SSEToolEvent {
@@ -387,8 +385,6 @@ export async function* streamChatMessage(
     throw new AppError('NOT_FOUND', 'Session not found or access denied');
   }
 
-  assertAttachmentBackendSupported('qoder-sdk', Boolean(attachmentIds?.length));
-
   checkRateLimit(user.id, user.role);
   timing.authMs = Math.round(performance.now() - t0);
 
@@ -412,7 +408,6 @@ export async function* streamChatMessage(
   const evidenceList: Evidence[] = [];
   // Workflow / cache telemetry accumulators
   const workflow: SSEWorkflow = {
-    subAgents: [],
     toolCallCount: 0,
     compacted: false,
     retries: 0,
@@ -533,7 +528,6 @@ export async function* streamChatMessage(
               makeToolEvent(requestId, sessionId, assistantMsgId, {
                 toolUseId: allowed.toolUseId,
                 name: allowed.name,
-                isSubAgent: false,
                 inputPreview: allowed.sourceName,
               }),
             );
@@ -837,7 +831,6 @@ export async function* streamChatMessage(
         slowWebNoticeSent = false;
         webSearchCount = 0;
         webFetchCount = 0;
-        workflow.subAgents = [];
         workflow.toolCallCount = 0;
         workflow.compacted = false;
         workflow.retries = 0;

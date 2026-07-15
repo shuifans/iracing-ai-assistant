@@ -73,6 +73,7 @@ describe('env validation', () => {
       join(process.cwd(), 'notes/knowledge-sources.md'),
     );
     expect(result.QODER_CHAT_TIMEOUT_MS).toBe(120000);
+    expect(result.QODER_MODEL).toBe('Qwen3.7-Plus');
     expect(result.QODER_CLEAN_TIMEOUT_MS).toBe(900000);
     expect(result.KNOWLEDGE_WORKER_CONCURRENCY).toBe(1);
     expect(result.KNOWLEDGE_JOB_LEASE_SECONDS).toBe(300);
@@ -136,7 +137,6 @@ describe('env validation', () => {
   it('optional variables are undefined when not set', () => {
     const result = parseEnv(minimalValid);
     expect(result.WIKI_GIT_REMOTE).toBeUndefined();
-    expect(result.QODER_MODEL).toBeUndefined();
     expect(result.IQS_API_BASE_URL).toBeUndefined();
     expect(result.IQS_API_KEY).toBeUndefined();
   });
@@ -145,13 +145,36 @@ describe('env validation', () => {
     const result = parseEnv({
       ...minimalValid,
       WIKI_GIT_REMOTE: 'git@github.com:test/test.git',
-      QODER_MODEL: 'gpt-4',
+      QODER_MODEL: 'Qwen3.7-Plus',
       IQS_API_BASE_URL: 'https://api.example.com',
       IQS_API_KEY: 'api-key-123',
     });
     expect(result.WIKI_GIT_REMOTE).toBe('git@github.com:test/test.git');
-    expect(result.QODER_MODEL).toBe('gpt-4');
+    expect(result.QODER_MODEL).toBe('Qwen3.7-Plus');
     expect(result.IQS_API_BASE_URL).toBe('https://api.example.com');
     expect(result.IQS_API_KEY).toBe('api-key-123');
+  });
+
+  it('rejects a chat model other than Qwen3.7-Plus', () => {
+    expect(() => parseEnv({ ...minimalValid, QODER_MODEL: 'another-model' })).toThrow();
+  });
+
+  it('does not expose legacy chat backend or direct-chat LLM settings', () => {
+    const backendKey = ['CHAT', 'ANSWER', 'BACKEND'].join('_');
+    const directKeys = [
+      ['LLM', 'API', 'BASE', 'URL'].join('_'),
+      ['LLM', 'API', 'KEY'].join('_'),
+      ['LLM', 'MODEL'].join('_'),
+    ];
+    const result = parseEnv({
+      ...minimalValid,
+      [backendKey]: 'legacy',
+      [directKeys[0]!]: 'https://chat.example.test',
+      [directKeys[1]!]: 'chat-secret',
+      [directKeys[2]!]: 'legacy-chat-model',
+    });
+
+    expect(result).not.toHaveProperty(backendKey);
+    for (const key of directKeys) expect(result).not.toHaveProperty(key);
   });
 });

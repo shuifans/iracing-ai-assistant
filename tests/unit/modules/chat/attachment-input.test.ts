@@ -7,7 +7,6 @@ describe('chat attachment model input', () => {
   afterEach(() => {
     vi.clearAllMocks();
     delete process.env.DATA_ROOT;
-    delete process.env.LLM_IMAGE_INPUT_SUPPORTED;
   });
 
   it('reads images from DATA_ROOT/uploads and encodes them', async () => {
@@ -24,15 +23,6 @@ describe('chat attachment model input', () => {
 
     expect(readFile).toHaveBeenCalledWith('/custom/data/uploads/chat/2026/07/image.png');
     expect(images).toEqual([{ base64: Buffer.from('image').toString('base64'), mediaType: 'image/png' }]);
-  });
-
-  it('rejects an explicitly unsupported direct backend before invocation', async () => {
-    process.env.LLM_IMAGE_INPUT_SUPPORTED = 'false';
-    const { assertAttachmentBackendSupported } = await import('@/modules/chat/attachment-input');
-
-    expect(() => assertAttachmentBackendSupported('llm-direct', true)).toThrow(
-      '当前模型后端不支持图片输入',
-    );
   });
 
   it('rejects a traversal path without reading it', async () => {

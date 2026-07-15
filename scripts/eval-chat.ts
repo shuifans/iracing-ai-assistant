@@ -63,7 +63,7 @@ import { users } from '@/db/schema/users';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
 import { createAccessToken } from '@/modules/auth/token-service';
-import { createSession } from '@/modules/chat/repository';
+import { createSession, updateSessionWebSearch } from '@/modules/chat/repository';
 import { streamChatMessage } from '@/modules/chat/service';
 import type { AuthenticatedUser } from '@/modules/auth/types';
 import type { SSEEvent } from '@/modules/chat/sse-events';
@@ -93,7 +93,7 @@ interface TurnMetrics {
   cacheCreationTokens?: number; cacheReadTokens?: number; cacheHit?: boolean;
   contextUsageRatio?: number;
   // tools / workflow
-  toolCalls: string[]; subAgents: string[];
+  toolCalls: string[];
   numTurns?: number; compacted: boolean; retries: number;
   stopReason?: string | null;
   webFetchRequests?: number; webSearchRequests?: number;
@@ -110,7 +110,6 @@ function collectFromEvent(eventType: string, data: any, m: TurnMetrics) {
     m.responseText += data.text;
   } else if (eventType === 'tool') {
     m.toolCalls.push(data.name);
-    if (data.isSubAgent && data.agentName) m.subAgents.push(data.agentName);
   } else if (eventType === 'source') {
     m.sourceCount++;
   } else if (eventType === 'usage') {
@@ -157,7 +156,7 @@ function newMetrics(mode: 'direct' | 'http', sc: EvalScenario, turn: EvalCase, r
     question: turn.question, category: turn.category,
     expectedTools: turn.expectedTools, expectedGrounding: turn.expectedGrounding,
     success: false,
-    toolCalls: [], subAgents: [],
+    toolCalls: [],
     compacted: false, retries: 0,
     responseLength: 0, responseText: '', sourceCount: 0,
   };
@@ -173,7 +172,7 @@ function finalize(m: TurnMetrics) {
     toolsMatch = m.toolCalls.length === 0;
   } else {
     const have = new Set(m.toolCalls);
-    toolsMatch = expected.every((t) => have.has(t) || m.subAgents.some((s) => s.includes(t.replace('-', ''))));
+    toolsMatch = expected.every((t) => have.has(t));
   }
   const groundingMatch = m.grounding === m.expectedGrounding;
   m.behaviorMatch = toolsMatch && groundingMatch && m.success;
@@ -187,6 +186,7 @@ async function runDirect(scenarios: EvalScenario[], user: AuthenticatedUser): Pr
     console.log(`\n[Direct] ${sc.id} ${sc.name} (session ${session.id.slice(0, 8)})`);
     for (let i = 0; i < sc.turns.length; i++) {
       const turn = sc.turns[i]!;
+      updateSessionWebSearch(session.id, user.id, turn.category === 'A2');
       const m = newMetrics('direct', sc, turn, i + 1);
       const t0 = Date.now();
       process.stdout.write(`  T${i + 1} ${turn.id} [${turn.category}] ${turn.question.slice(0, 30)}... `);
@@ -202,7 +202,7 @@ async function runDirect(scenarios: EvalScenario[], user: AuthenticatedUser): Pr
       m.clientTotalMs = Date.now() - t0;
       finalize(m);
       out.push(m);
-      console.log(`${m.success ? '✓' : '✗'} ${m.totalMs ?? m.clientTotalMs}ms cache=${m.cacheHit ? 'Y' : 'N'} tools=[${m.toolCalls.join(',')}] agents=[${m.subAgents.join(',')}] grounding=${m.grounding ?? '-'}`);
+      console.log(`${m.success ? '✓' : '✗'} ${m.totalMs ?? m.clientTotalMs}ms cache=${m.cacheHit ? 'Y' : 'N'} tools=[${m.toolCalls.join(',')}] grounding=${m.grounding ?? '-'}`);
     }
   }
   return out;
@@ -242,6 +242,18 @@ async function runHttp(
       });
       const sjson = await sres.json() as { data: { id: string } };
       const sid = sjson.data.id;
+
+      const webSearchEnabled = turn.category === 'A2';
+      const patchRes = await fetch(`${baseUrl}/api/chat/sessions/${sid}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Origin: new URL(baseUrl).origin,
+        },
+        body: JSON.stringify({ webSearchEnabled }),
+      });
+      if (!patchRes.ok) throw new Error(`session Web toggle HTTP ${patchRes.status}`);
 
       const res = await fetch(`${baseUrl}/api/chat/messages`, {
         method: 'POST',
@@ -295,9 +307,6 @@ function summarize(ms: TurnMetrics[]) {
   const allTools = ok.flatMap((m) => m.toolCalls);
   const toolDist: Record<string, number> = {};
   for (const t of allTools) toolDist[t] = (toolDist[t] ?? 0) + 1;
-  const subAgents = ok.flatMap((m) => m.subAgents);
-  const subDist: Record<string, number> = {};
-  for (const s of subAgents) subDist[s] = (subDist[s] ?? 0) + 1;
   const behaviorMatch = ok.filter((m) => m.behaviorMatch).length;
   return {
     count: ms.length, success: ok.length, fail: ms.length - ok.length,
@@ -313,7 +322,6 @@ function summarize(ms: TurnMetrics[]) {
       avgCacheCreate: ok.length ? Math.round(ok.reduce((a, m) => a + (m.cacheCreationTokens ?? 0), 0) / ok.length) : 0,
     },
     tools: toolDist,
-    subAgents: subDist,
     workflow: {
       avgNumTurns: ok.length ? +(ok.reduce((a, m) => a + (m.numTurns ?? 0), 0) / ok.length).toFixed(1) : 0,
       compactedCount: ok.filter((m) => m.compacted).length,
@@ -344,15 +352,14 @@ function genReport(direct: TurnMetrics[] | null, http: TurnMetrics[] | null): st
     lines.push(`- 总耗时: p50=${fmtMs(s.latency.total.p50)} p95=${fmtMs(s.latency.total.p95)} 均=${fmtMs(s.latency.total.mean)}`);
     lines.push(`- **缓存命中率: ${s.cache.hitRate}%** | 平均 cache_read=${s.cache.avgCacheRead} tokens | 平均 cache_create=${s.cache.avgCacheCreate} tokens`);
     lines.push(`- 工具调用分布: ${JSON.stringify(s.tools)}`);
-    lines.push(`- 子 Agent 分布: ${JSON.stringify(s.subAgents)}`);
     lines.push(`- Agent 工作流: 平均 num_turns=${s.workflow.avgNumTurns} | 压缩触发=${s.workflow.compactedCount} | 重试=${s.workflow.retryCount}`);
     lines.push(`- 行为符合预期率: ${s.behaviorMatchRate}%`);
     lines.push(`- 总 token: ${s.totalTokens.toLocaleString()}\n`);
 
     // 每轮明细表
     lines.push('### 每轮明细 (Direct)\n');
-    lines.push('| 场景 | 轮 | 类别 | 问题 | TTFB | 生成 | 总耗时 | in/out | 缓存 | cache_read | 工具 | 子Agent | numTurns | grounding | 行为 | 结果 |');
-    lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+    lines.push('| 场景 | 轮 | 类别 | 问题 | TTFB | 生成 | 总耗时 | in/out | 缓存 | cache_read | 工具 | numTurns | grounding | 行为 | 结果 |');
+    lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
     for (const m of direct) {
       const q = m.question.slice(0, 18).replace(/\|/g, '/');
       lines.push([
@@ -362,7 +369,6 @@ function genReport(direct: TurnMetrics[] | null, http: TurnMetrics[] | null): st
         m.cacheHit ? '✓' : '✗',
         String(m.cacheReadTokens ?? '-'),
         m.toolCalls.join(',') || '-',
-        m.subAgents.join(',') || '-',
         m.numTurns ?? '-',
         m.grounding ?? '-',
         m.behaviorMatch ? '✓' : '✗',
@@ -406,7 +412,7 @@ function genReport(direct: TurnMetrics[] | null, http: TurnMetrics[] | null): st
     const s = summarize(direct);
     lines.push(`- **缓存**: 命中率 ${s.cache.hitRate}%。SDK resume 机制下，多轮应逐步建立缓存——若 S4 后几轮 cache_read 仍≈0，说明缓存未生效或上下文变动过大。`);
     lines.push(`- **延迟瓶颈**: TTFB 均值 ${fmtMs(s.latency.ttfb.mean)}（含 reasoningEffort=high 推理 + 工具调用）；生成均值 ${fmtMs(s.latency.gen.mean)}。`);
-    lines.push(`- **工具路由**: ${Object.keys(s.tools).length ? JSON.stringify(s.tools) : '无工具调用'}；子 Agent ${JSON.stringify(s.subAgents)}。`);
+    lines.push(`- **工具路由**: ${Object.keys(s.tools).length ? JSON.stringify(s.tools) : '无工具调用'}。`);
     lines.push(`- **行为符合预期**: ${s.behaviorMatchRate}%——若低，检查 system prompt scope lock / 工具路由是否符合用例标注。`);
   }
   lines.push('\n> 原始数据见 `scripts/eval-results.json`');

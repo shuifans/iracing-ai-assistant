@@ -22,7 +22,6 @@ const SERVER_ENV = {
   REFRESH_TOKEN_PEPPER: 'e2e-refresh-pepper-do-not-use-in-prod',
   IP_HASH_PEPPER: 'e2e-ip-pepper-do-not-use-in-prod',
   QODER_PERSONAL_ACCESS_TOKEN: 'e2e-pat-do-not-use-in-prod',
-  CHAT_ANSWER_BACKEND: 'llm-direct',
   LOG_LEVEL: 'warn',
 };
 

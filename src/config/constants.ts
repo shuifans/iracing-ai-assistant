@@ -155,13 +155,6 @@ export type RateLimitScope = (typeof RATE_LIMIT_SCOPES)[number];
 export const FEEDBACK_RATINGS = ['up', 'down'] as const;
 export type FeedbackRating = (typeof FEEDBACK_RATINGS)[number];
 
-// 对话答案后端选择（SPEC §11.1 — 多轮对话生成方案开关）
-// - 'llm-direct'：BM25 本地检索 + OpenAI 兼容 LLM 直调（默认，最快，当前 LongCat-2.0）
-// - 'qoder-sdk' ：Qoder Agent SDK + Qwen3.7-Plus 全量 Agent 循环（wiki-search + web-research 子 Agent）
-// 经 `CHAT_ANSWER_BACKEND` 环境变量切换；默认 'llm-direct'。
-export const CHAT_ANSWER_BACKENDS = ['llm-direct', 'qoder-sdk'] as const;
-export type ChatAnswerBackend = (typeof CHAT_ANSWER_BACKENDS)[number];
-
 // 业务错误码（SPEC 14.6 完整覆盖 — 22 个）
 export const ERROR_CODES = {
   VALIDATION_ERROR: { http: 400, code: 'VALIDATION_ERROR' as const },

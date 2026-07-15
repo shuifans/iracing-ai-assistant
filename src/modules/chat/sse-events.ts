@@ -71,12 +71,8 @@ export interface SSESourceEvent extends SSEEventBase {
 export interface SSEToolEvent extends SSEEventBase {
   /** Matches the tool_use block id (e.g. toolu_xxx) */
   toolUseId: string;
-  /** Tool name: Read/Glob/Grep/WebSearch/WebFetch/Agent */
+  /** Tool name: Read/Glob/Grep/WebSearch/WebFetch */
   name: string;
-  /** Always false for the direct-tool chat Agent. */
-  isSubAgent: boolean;
-  /** Sub-agent name when isSubAgent (wiki-search/web-research) */
-  agentName?: string;
   /** Authorized source display name only; raw tool input is never exposed. */
   inputPreview?: string;
 }
@@ -130,8 +126,6 @@ export interface SSEUsageEvent extends SSEEventBase {
 
 /** Agent workflow summary collected across the stream */
 export interface SSEWorkflow {
-  /** Distinct sub-agents invoked (wiki-search, web-research, ...) */
-  subAgents: string[];
   /** Total tool_use blocks emitted */
   toolCallCount: number;
   /** Whether context compaction was triggered */

@@ -15,6 +15,14 @@ import {
   FEEDBACK_RATINGS,
   ERROR_CODES,
 } from '../../../src/config/constants';
+import * as constants from '../../../src/config/constants';
+
+describe('chat backend constants', () => {
+  it('does not expose a legacy chat backend switch', () => {
+    const legacyExport = ['CHAT', 'ANSWER', 'BACKENDS'].join('_');
+    expect(constants).not.toHaveProperty(legacyExport);
+  });
+});
 
 describe('USER_ROLES', () => {
   it('contains user, knowledge_admin and admin', () => {

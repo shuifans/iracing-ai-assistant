@@ -49,6 +49,8 @@ ssl_cert/
 
 # QA
 qa-report/
+scripts/eval-results.json
+scripts/eval-report.md
 
 # Qoder
 .qoder

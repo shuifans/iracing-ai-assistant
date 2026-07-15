@@ -1,8 +1,7 @@
 /**
  * Local BM25 search index over the md-wiki.
  *
- * Replaces the slow `wiki-search` LLM sub-agent (100-300s) with instant
- * keyword retrieval (~ms, no LLM). Chunks each wiki .md by H2/H3 headings,
+ * Provides instant keyword retrieval (~ms, no LLM). Chunks each wiki .md by H2/H3 headings,
  * builds a minisearch BM25 index, persists to JSON, and exposes `searchWiki()`
  * returning the existing `Evidence` contract.
  *

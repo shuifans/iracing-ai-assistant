@@ -1,6 +1,6 @@
 # iRacing AI 助手
 
-面向 iRacing 新手和中等水平玩家的智能问答助手，基于 Markdown Wiki 知识库 + 双后端 LLM 架构（LLM 直连 / Qoder Agent，可随时切换），帮助用户提升圈速、驾驶稳定性和比赛策略水平。
+面向 iRacing 新手和中等水平玩家的智能问答助手，由 Qoder Agent 自主理解问题、检索 Markdown Wiki，并在用户允许时补充受控网页知识，帮助用户提升圈速、驾驶稳定性和比赛策略水平。
 
 > **中文友好** · **幻觉可控** · **个性化追问** · **专业知识即时获取**
 
@@ -12,12 +12,13 @@ iRacing AI 助手整合官方文档、权威社区、专业教程等知识源，
 
 ### 核心能力
 
-- **智能问答** — BM25 本地检索 + 流式生成，双后端可切换（LLM 直连[默认 LongCat-2.0，≤30s] / Qoder SDK[Qwen3.7-Plus]），含答案缓存
-- **多轮对话** — 支持上下文追问，逐步细化用户需求
+- **智能问答** — Qoder Agent（Qwen3.7-Plus）直接使用 Read/Glob/Grep 检索本地 Wiki，并流式生成答案
+- **多轮对话** — Qoder SDK 会话持续保持，支持上下文追问，逐步细化用户需求
+- **按会话联网** — 默认关闭；用户手动开启后持续生效，本地知识不足时才在管理员维护的知识源范围内调用 WebSearch/WebFetch
 - **追问引导** — 问题过于宽泛时主动追问，获取赛道/车辆/天气等具体条件
 - **幻觉控制** — 知识库中找不到答案时坦诚告知，引导至社区专家
 - **图片理解** — 支持上传调校截图，Agent 具备视觉理解能力
-- **知识管理** — 上传文件/URL → 异步清洗（默认 LongCat，可经后台密码门禁切换 Qwen3.7-Plus）→ **知识评估（启发式+检索探针评分卡）** → 人工审核+反馈 → 带反馈重洗 → 原子发布到 Wiki。管理后台含**概览仪表盘**（待审核/已发布/已归档/重洗用量统计卡片 + 分类/等级/审核队列/重洗版本分布图）、**候选稿列表**（待审核草稿按等级/状态过滤）、**已发布条目正文查看**、**派生修订草稿**（已发布条目→派生新草稿→review/编辑/重洗→批准原地覆盖旧条目，保留 wikiPath 唯一约束与 git 历史）、**LLM 重洗软上限提示**（从首次重洗起提示 token 消耗、引导一次性描述清楚修改要求，随次数递进、不硬禁）
+- **知识管理** — 上传文件/URL → 独立 LLM Provider 异步清洗 → **知识评估（启发式+检索探针评分卡）** → 人工审核+反馈 → 带反馈重洗 → 原子发布到 Wiki。管理后台含**概览仪表盘**（待审核/已发布/已归档/重洗用量统计卡片 + 分类/等级/审核队列/重洗版本分布图）、**候选稿列表**（待审核草稿按等级/状态过滤）、**已发布条目正文查看**、**派生修订草稿**（已发布条目→派生新草稿→review/编辑/重洗→批准原地覆盖旧条目，保留 wikiPath 唯一约束与 git 历史）、**LLM 重洗软上限提示**（从首次重洗起提示 token 消耗、引导一次性描述清楚修改要求，随次数递进、不硬禁）
 - **管理后台** — 用户审批、会话质检、使用统计、限流配置和审计日志
 
 ### 目标用户
@@ -47,7 +48,7 @@ PM2 Process Manager (shserver, Ubuntu 24.04)
    ├── iracing-ai-worker (知识清洗 Worker, 256M limit)
    │   ├── SQLite Job Leasing
    │   ├── File & URL Extraction
-   │   ├── Knowledge Cleaning (默认 LongCat LLM 直连；可经后台密码门禁切换 Qoder SDK)
+   │   ├── Knowledge Cleaning (独立 OpenAI 兼容 Provider，默认 LongCat)
    │   ├── Knowledge Evaluation (启发式+检索探针，清洗后自动评分)
    │   └── Draft Generation / Publish
    ├── SQLite (/srv/iracing-ai-assistant/data/db/app.sqlite)
@@ -69,41 +70,39 @@ PM2 Process Manager (shserver, Ubuntu 24.04)
 | 密码      | bcrypt (cost 12)                                    |
 | Token     | jose (JWT HS256)                                    |
 | 文档解析  | mammoth / pdf-parse / read-excel-file（仅 `.xlsx`） |
-| 本地检索  | minisearch（BM25 + CJK bigram）                     |
-| 缓存      | lru-cache（L1）+ SQLite（L2）                       |
-| LLM 直连  | LongCat-2.0（OpenAI 兼容流式）                      |
+| Agent 工具 | Read / Glob / Grep / WebSearch / WebFetch          |
+| 清洗 LLM  | LongCat-2.0（OpenAI 兼容接口，仅知识清洗）          |
 | 测试      | Vitest + Testing Library + Playwright               |
 | 部署      | PM2 + Nginx + Let's Encrypt                         |
 
 ### 对话与 Agent 架构
 
-对话答案生成支持双后端，经 `CHAT_ANSWER_BACKEND` 环境变量切换（改值后重启 PM2 生效）：
+对话答案完全由 Qoder Agent 承担：
 
 ```
 用户提问
-   │  答案缓存查询 (query+history hash) ── HIT ──► 回放缓存答案
-   │
-   ▼ 缓存未命中
-   ├── [llm-direct，默认] BM25 本地检索(minisearch) → OpenAI 兼容 LLM 直调流式
-   │                        (LongCat-2.0，30s 预算；本地未命中则降级 SDK web-research 60s)
-   └── [qoder-sdk] Qoder Agent SDK 全量循环 (Qwen3.7-Plus，120s 预算)
-          ├── wiki-search Agent   → Glob/Grep/Read 本地知识检索
-          └── web-research Agent  → WebSearch/WebFetch 在线权威站点补充
+   └── Qoder Agent SDK（Qwen3.7-Plus，高推理，最多 6 个 Agent turn / 120s）
+          ├── Read / Glob / Grep → 优先检索本地 Wiki
+          └── 本地证据不足且会话联网已开启
+                 └── WebSearch（最多 1 次）/ WebFetch（最多 2 次）
+                      → 仅管理员登记的 domain / path / exact URL
 
 knowledge-cleaner → 原始文本 → 候选 Markdown（离线 Worker，可带管理员反馈重洗）
    清洗仅走 OpenAI 兼容 LLM 直连；Qoder SDK 不参与知识清洗。
    一份来源固化一份不可变快照，生成一篇候选笔记，经管理员审核后发布。
 ```
 
-> **对话答案**默认走 `llm-direct`（LongCat-2.0，均值 ~15s、≤30s）；`qoder-sdk` 为备选（较慢）。换 LLM 厂商只需改 `.env` 的 `LLM_API_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 三项（OpenAI 兼容接口）+ restart。
+> **对话答案**只使用 Qoder Agent。新会话只注入一次系统提示词；后续轮次通过 Qoder `session_id` 恢复，并只发送当前用户消息。
 >
-> **知识清洗**仅使用 OpenAI 兼容 LLM；Qoder SDK 只用于 Agent 问答、检索与总结。
+> **联网搜索**由用户按会话控制。即使已开启，Agent 仍先查本地 Wiki；只有本地证据无效或不足时才联网。过程提示只展示阶段、工具名称和计数，不展示思考链或敏感工具入参。
+>
+> **知识清洗**使用独立的 OpenAI 兼容 Provider 配置，与聊天 Agent 链路无关。
 
 ### 安全与可靠性边界
 
 - **发布一致性**：知识发布使用 argv 形式调用 Git；SQLite 发布状态在事务内提交，异步 push 通过 commit SHA + 状态 CAS 防止旧回调覆盖新发布。
 - **聊天保护**：global / role / user 限流在共享聊天入口原子执行；诊断接口仅管理员可用并验证 Origin；停止生成会校验消息所属会话。
-- **图片附件**：上传记录带 owner 和过期时间，发送时与 user message 原子绑定；最多 4 张、总计 20 MiB，Direct 与 Qoder 均接收真实图片输入，图片回答不进入共享文本缓存。
+- **图片附件**：上传记录带 owner 和过期时间，发送时与 user message 原子绑定；最多 4 张、总计 20 MiB，由 Qoder Agent 接收真实图片输入。
 - **Agent 工具边界**：WebSearch、WebFetch 与 Wiki 文件访问分别验证；Qoder hook 和聊天消费端共用 Zod evidence envelope。
 - **渲染安全**：聊天与管理员会话共用 Markdown sanitizer，只允许安全标签、属性和 HTTP(S)/站内相对链接。
 - **URL 抽取**：采用 IPv4-only 出站策略；校验全部 A 记录并把通过验证的 IP 固定到实际 TLS socket，每次重定向重新校验，总 deadline 覆盖完整响应体。
@@ -183,7 +182,7 @@ scripts/                    # 运维脚本
 ├── backup.sh             # 数据库备份
 ├── restore.sh            # 数据库恢复
 ├── bootstrap-admin.ts    # 初始化管理员
-├── seed-wiki.ts          # 知识库种子清洗（LLM API 优先，Qoder SDK 兜底）
+├── seed-wiki.ts          # 知识库种子清洗
 ├── validate-wiki.ts      # Wiki 文件 Front Matter 验证
 ├── rebuild-index.ts      # 重建 index.md 索引
 ├── test-model.ts         # LLM 模型可用性测试
@@ -297,7 +296,7 @@ npm run dev
 - [x] RBAC 三角色权限（user / knowledge_admin / admin）
 - [x] 聊天系统（多轮对话、SSE 流式输出、停止/重试、图片上传）
 - [x] 聊天气泡排版优化（AI/用户消息行高统一为 1.65 倍，段落/标题/列表间距收紧，单换行行高不再跳变）
-- [x] Qoder Agent SDK 集成（仅 Agent 问答、检索与总结）
+- [x] Qoder Agent SDK 集成（Agent 问答、直接本地检索、按会话受控联网与多轮恢复）
 - [x] 知识管理（文件/URL 上传 → 异步清洗 → 审核 → 发布 → Git 版本化）
 - [x] 知识评估与反馈回路（9 维评分卡：Front Matter/长度/标签/查重/时效/可检索性；管理员反馈 → 带反馈重洗 → 版本链；可选发布门禁）
 - [x] 管理后台（用户管理、会话质检、统计、限流、审计日志）
@@ -305,7 +304,7 @@ npm run dev
 - [x] PM2 部署配置（ecosystem.config.cjs、Nginx）
 - [x] 运维脚本（备份、恢复、引导管理员）
 - [x] md-wiki 文件优先知识库（管理员上传、清洗、修改、审核与发布）
-- [x] 对话双后端（LLM 直连 / Qoder SDK 可切换，默认 LongCat-2.0）+ BM25 本地检索 + 双层缓存
+- [x] Qoder-only 对话 Agent（Qwen3.7-Plus）+ 本地优先检索 + 会话级联网开关 + 工具预算
 - [x] iRacing 专业知识清洗提示词、六大分类体系与严格 Front Matter 校验
 - [x] 知识库管理后台增强（概览仪表盘 + 候选稿列表 + 已发布条目正文查看 + 派生修订草稿流 + LLM 重洗软上限提示）
 - [x] 知识修订闭环（已发布条目→派生修订草稿→审核/编辑/重洗→原子发布原地覆盖旧条目，保留 wikiPath 唯一约束与 git 历史；复用未接线的原子 publisher）
