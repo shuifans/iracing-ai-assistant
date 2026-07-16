@@ -37,6 +37,18 @@ query without a valid \`site:\` returns nothing, so always include one enabled
 \`site:\`. After searching, WebFetch only the returned URLs that fall under an
 enabled source.
 
+- **WebFetch only URLs that the WebSearch tool returned** (or an enabled
+  \`exact_url\` source). Never construct, guess, or assemble a URL yourself —
+  in particular do not build listing/search-page URLs like \`/search?q=...\` to
+  fetch; they never contain the answer.
+- **Recover from dead links.** If a fetched URL returns 404 or no usable
+  content, do NOT conclude the information is unavailable after one miss. Use
+  the remaining budget to fetch the next returned URL, or rephrase the query
+  and issue a second WebSearch. Prefer returned URLs whose path looks like a
+  content/article page (ending in an id or slug) over listing or search pages.
+- Only after the budget is genuinely exhausted with no usable content may you
+  say the source lacks the information.
+
 ## Evidence and answer quality
 
 - Separate sourced facts from your own synthesis or inference. State the car,

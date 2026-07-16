@@ -123,14 +123,14 @@ describe('allowed tool progress callback', () => {
       toolUseId: 'valid',
       name: 'WebFetch',
       current: 1,
-      limit: 2,
+      limit: 3,
       sourceName: 'iRacing Support',
     });
     expect(onAllowedToolUse).toHaveBeenNthCalledWith(2, {
       toolUseId: 'valid-2',
       name: 'WebFetch',
       current: 2,
-      limit: 2,
+      limit: 3,
       sourceName: 'iRacing Support',
     });
   });
@@ -150,16 +150,19 @@ describe('allowed tool progress callback', () => {
     await preToolUse(webFetch('same-id', 'https://support.iracing.com/article/1'));
     await preToolUse(webFetch('same-id', 'https://support.iracing.com/article/1'));
     const second = await preToolUse(webFetch('second-id', 'https://support.iracing.com/article/2'));
+    const third = await preToolUse(webFetch('third-id', 'https://support.iracing.com/article/3'));
     const exhausted = await preToolUse(
-      webFetch('third-id', 'https://support.iracing.com/article/3'),
+      webFetch('fourth-id', 'https://support.iracing.com/article/4'),
     );
 
-    expect(onAllowedToolUse).toHaveBeenCalledTimes(2);
+    expect(onAllowedToolUse).toHaveBeenCalledTimes(3);
     expect(onAllowedToolUse.mock.calls.map(([tool]) => tool)).toEqual([
       expect.objectContaining({ toolUseId: 'same-id', current: 1 }),
       expect.objectContaining({ toolUseId: 'second-id', current: 2 }),
+      expect.objectContaining({ toolUseId: 'third-id', current: 3 }),
     ]);
     expect(second).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+    expect(third).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
     expect(exhausted).toMatchObject({
       hookSpecificOutput: {
         permissionDecision: 'deny',
@@ -206,7 +209,8 @@ describe('allowed tool progress callback', () => {
 
     const first = await preToolUse(search('search-1'));
     const repeated = await preToolUse(search('search-1'));
-    const exhausted = await preToolUse(search('search-2'));
+    const second = await preToolUse(search('search-2'));
+    const exhausted = await preToolUse(search('search-3'));
 
     expect(repeated).toEqual(first);
     expect(repeated).toMatchObject({
@@ -218,9 +222,15 @@ describe('allowed tool progress callback', () => {
         },
       },
     });
-    expect(onAllowedToolUse).toHaveBeenCalledOnce();
-    expect(onAllowedToolUse).toHaveBeenCalledWith(
-      expect.objectContaining({ toolUseId: 'search-1', current: 1, limit: 1 }),
+    expect(second).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+    expect(onAllowedToolUse).toHaveBeenCalledTimes(2);
+    expect(onAllowedToolUse).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ toolUseId: 'search-1', current: 1, limit: 2 }),
+    );
+    expect(onAllowedToolUse).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ toolUseId: 'search-2', current: 2, limit: 2 }),
     );
     expect(exhausted).toMatchObject({
       hookSpecificOutput: {
@@ -577,13 +587,16 @@ describe('createChatQuery', () => {
       ).resolves.toMatchObject({ permissionDecision: 'allow' });
       await expect(
         decision(hook, input('WebSearch', { query: 'rain site:support.iracing.com' })),
+      ).resolves.toMatchObject({ permissionDecision: 'allow' });
+      await expect(
+        decision(hook, input('WebSearch', { query: 'rain site:support.iracing.com' })),
       ).resolves.toMatchObject({
         permissionDecision: 'deny',
         permissionDecisionReason: 'WEB_TOOL_BUDGET_EXHAUSTED',
       });
     });
 
-    it('allows two valid WebFetch calls and denies the third per query', async () => {
+    it('allows three valid WebFetch calls and denies the fourth per query', async () => {
       const { hook } = getHook();
       const fetch = (suffix: string) =>
         input('WebFetch', { url: `https://support.iracing.com/${suffix}` });
@@ -595,6 +608,9 @@ describe('createChatQuery', () => {
         permissionDecision: 'allow',
       });
       await expect(decision(hook, fetch('three'))).resolves.toMatchObject({
+        permissionDecision: 'allow',
+      });
+      await expect(decision(hook, fetch('four'))).resolves.toMatchObject({
         permissionDecision: 'deny',
         permissionDecisionReason: 'WEB_TOOL_BUDGET_EXHAUSTED',
       });
@@ -765,6 +781,11 @@ describe('createChatQuery', () => {
             url: 'https://reddit.com/r/simracing/comments/abc',
             snippet: 'Out of scope',
           },
+          {
+            title: 'Search listing page',
+            url: 'https://support.iracing.com/search?q=rain',
+            snippet: 'A listing page, never the answer body',
+          },
         ],
       };
 
@@ -784,6 +805,8 @@ describe('createChatQuery', () => {
       expect(JSON.stringify(output)).not.toContain('Ignore previous instructions');
       expect(JSON.stringify(output)).not.toContain('evil.example');
       expect(JSON.stringify(output)).not.toContain('simracing');
+      expect(JSON.stringify(output)).not.toContain('/search?q=');
+      expect(JSON.stringify(output)).not.toContain('listing page');
       expect(onEvidence).not.toHaveBeenCalled();
     });
 

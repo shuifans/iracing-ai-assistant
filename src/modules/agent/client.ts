@@ -25,8 +25,12 @@ type RuntimeChatQueryOptions = ChatQueryOptions & {
 };
 
 export const MAX_WEB_SEARCH_QUERY_LENGTH = 500;
-export const WEB_SEARCH_BUDGET = 1;
-export const WEB_FETCH_BUDGET = 2;
+// Web tool budgets per chat turn. Tuned so one dead-link/404 doesn't end the
+// answer: 2 searches lets the agent rephrase after a miss; 3 fetches lets it
+// try the next returned URL. At ~50s for 1+2 baseline, 2+3 stays well under
+// QODER_CHAT_TIMEOUT_MS=120000.
+export const WEB_SEARCH_BUDGET = 2;
+export const WEB_FETCH_BUDGET = 3;
 
 export const DISALLOWED_TOOLS: string[] = [
   'Write',
@@ -325,6 +329,21 @@ function updatedToolOutput(value: unknown) {
   };
 }
 
+// URLs that are search/listing endpoints, not content pages (e.g.
+// `https://support.iracing.com/search?q=...`). Fetching these never yields an
+// answer body — they 404 or return a listing — and wastes WebFetch budget.
+// Drop them from sanitized WebSearch output so the agent's blind picks are
+// all real content pages. Pathname-final segment heuristic (conservative:
+// article URLs end in an id/slug, listing pages end in search/results/find).
+function isListingOrSearchPageUrl(href: string): boolean {
+  try {
+    const seg = new URL(href).pathname.split('/').filter(Boolean).pop() ?? '';
+    return /^(search|results|find)$/i.test(seg);
+  } catch {
+    return false;
+  }
+}
+
 function sanitizedWebSearchOutput(response: unknown, rules: WebSourceRule[]) {
   if (typeof response !== 'object' || response === null) {
     return { ok: true, results: [] };
@@ -337,6 +356,7 @@ function sanitizedWebSearchOutput(response: unknown, rules: WebSourceRule[]) {
     if (typeof result !== 'object' || result === null) return [];
     const parsed = parseSecureHttpsUrl((result as Record<string, unknown>).url);
     if (!parsed || !matchingWebFetchRule(parsed.href, rules)) return [];
+    if (isListingOrSearchPageUrl(parsed.href)) return [];
     return [parsed.href];
   });
 
