@@ -24,8 +24,6 @@ const envSchema = z.object({
   ),
   QODER_CHAT_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   QODER_CLEAN_TIMEOUT_MS: z.coerce.number().int().positive().default(900000),
-  // 知识清洗后端单次 LLM 请求超时（毫秒，worker llm-direct 路径用）
-  LLM_CLEAN_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   LLM_CLEAN_MAX_INPUT_CHARS: z.coerce.number().int().positive().default(100000),
   // 知识清洗单次 LLM 生成的 token 上限（含思考+正文）。reasoning 模型会把
   // 思考与回答一并计入该预算，过小会导致 content 被截断为空。

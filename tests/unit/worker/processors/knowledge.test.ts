@@ -47,7 +47,6 @@ vi.mock('@/config/env', () => ({
     DATA_ROOT: '/data',
     WIKI_ROOT: '/data/md-wiki',
     URL_FETCH_MAX_BYTES: 5242880,
-    LLM_CLEAN_TIMEOUT_MS: 120000,
     LLM_CLEAN_MAX_INPUT_CHARS: 100000,
     LLM_CLEAN_MAX_TOKENS: 16000,
   },

@@ -223,15 +223,17 @@ async function callProvider(params: {
   userPrompt: string;
   maxTokens: number;
   signal?: AbortSignal;
-  timeoutMs: number;
 }): Promise<string> {
   const endpoint = `${params.provider.baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
 
-  // Combine the external signal (Worker 15min hardAbort) with a per-request
-  // timeout so a hung connection doesn't dangle. Does not rely on
-  // AbortSignal.any existing — wires the signals manually.
+  // The only abort source is the caller's external signal (e.g. the Worker's
+  // 30-minute hard backstop). We deliberately do NOT impose a per-request
+  // timeout: multimodal / vision cleaning via reasoning models (e.g. LongCat
+  // with vision support) can legitimately take many minutes, and a short
+  // AbortController was aborting healthy slow cleans mid-flight. When no
+  // signal is supplied (e.g. the offline seed script) the fetch runs with no
+  // abort at all.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), params.timeoutMs);
   const onExternalAbort = () => controller.abort();
   if (params.signal) {
     if (params.signal.aborted) controller.abort();
@@ -320,7 +322,6 @@ async function callProvider(params: {
         `message.keys=[${messageKeys}], ${usage}）。响应片段: ${bodyText.slice(0, 500)}${hint}`,
     );
   } finally {
-    clearTimeout(timer);
     if (params.signal) params.signal.removeEventListener('abort', onExternalAbort);
   }
 }
@@ -335,7 +336,6 @@ export interface CleanWithLlmDirectParams {
   hint?: string;
   feedback?: string;
   signal?: AbortSignal;
-  timeoutMs?: number;
   maxOutputChars?: number;
   maxTokens?: number;
   maxInputChars?: number;
@@ -383,7 +383,6 @@ export async function cleanWithLlmDirect(params: CleanWithLlmDirectParams): Prom
     sourceMetadata: params.sourceMetadata,
   });
   const maxTokens = params.maxTokens ?? 6000;
-  const timeoutMs = params.timeoutMs ?? 120_000;
 
   let lastError: Error | null = null;
   for (const provider of providers) {
@@ -397,7 +396,6 @@ export async function cleanWithLlmDirect(params: CleanWithLlmDirectParams): Prom
         userPrompt,
         maxTokens,
         signal: params.signal,
-        timeoutMs,
       });
     } catch (err) {
       if (err instanceof StopCleaningError) throw err;

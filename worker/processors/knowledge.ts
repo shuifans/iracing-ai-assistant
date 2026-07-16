@@ -16,7 +16,7 @@
  * 12. Supersede old drafts
  * 13. Auto-evaluate draft (heuristic + probe) — non-fatal
  *
- * AbortController enforces 15-minute hard timeout and 30s idle timeout.
+ * AbortController enforces 30-minute hard timeout and 30s idle timeout.
  *
  * @module worker/processors/knowledge
  */
@@ -46,7 +46,7 @@ import { env } from '@/config/env';
 // Constants
 // ---------------------------------------------------------------------------
 
-const HARD_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+const HARD_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes (multimodal/vision cleaning can be slow)
 const MAX_CONTENT_CHARS = 12_000;
 
 // ---------------------------------------------------------------------------
@@ -122,7 +122,6 @@ async function runPipeline(job: LeasedJob, signal: AbortSignal): Promise<void> {
       signal,
       maxOutputChars: MAX_CONTENT_CHARS,
       maxTokens: env.LLM_CLEAN_MAX_TOKENS,
-      timeoutMs: env.LLM_CLEAN_TIMEOUT_MS,
       maxInputChars: env.LLM_CLEAN_MAX_INPUT_CHARS,
       sourceMetadata: {
         noteId: source.id,
@@ -223,7 +222,7 @@ async function handleFailure(jobId: string, err: unknown, signal: AbortSignal): 
     errorMessage = err.message;
   } else if (signal.aborted) {
     errorCode = 'AGENT_UNAVAILABLE';
-    errorMessage = 'Hard timeout (15min) exceeded';
+    errorMessage = 'Hard timeout (30min) exceeded';
   } else {
     errorCode = 'EXTRACTION_FAILED';
     errorMessage = err instanceof Error ? err.message : String(err);
