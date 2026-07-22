@@ -15,10 +15,10 @@ const trendConfig = {
 
 export function StatCard({ title, value, subtitle, trend }: StatCardProps) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="rounded-card border border-gray-200 bg-white p-5 shadow-card">
       <p className="text-sm font-medium text-gray-500">{title}</p>
       <div className="mt-2 flex items-baseline gap-2">
-        <p className="text-2xl font-bold text-gray-900">{value}</p>
+        <p className="text-2xl font-bold text-navy-900">{value}</p>
         {trend && (
           <span data-trend={trend} className={`text-sm font-medium ${trendConfig[trend].color}`}>
             {trendConfig[trend].arrow}

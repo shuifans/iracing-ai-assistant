@@ -33,7 +33,7 @@ const columns = [
     render: (item: Row) => (
       <a
         href={`/admin/sessions?sessionId=${item.sessionId}`}
-        className="text-blue-600 hover:underline"
+        className="text-brand-600 hover:underline"
         target="_blank"
         rel="noreferrer"
       >
@@ -47,7 +47,7 @@ export function PopularQuestions({ data, loading = false }: PopularQuestionsProp
   const rows: Row[] = data.map((d) => ({ ...d }));
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
+    <div className="rounded-card border border-gray-200 bg-white shadow-card p-4">
       <h3 className="mb-3 text-sm font-semibold text-gray-700">热门问题 Top 20</h3>
       <DataTable<Row>
         columns={columns}

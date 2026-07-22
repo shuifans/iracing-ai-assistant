@@ -100,7 +100,7 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5 rounded-xl border border-gray-200 bg-white p-6">
+    <form onSubmit={handleSubmit} className="space-y-5 rounded-card border border-gray-200 bg-white shadow-card p-6">
       <h3 className="text-base font-semibold text-gray-800">编辑限流配置</h3>
 
       {/* 每分钟限制 */}
@@ -115,7 +115,7 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
           step={1}
           value={perMinuteLimit}
           onChange={(e) => dispatch({ type: 'setPerMinuteLimit', value: parseInt(e.target.value, 10) || 0 })}
-          className={`w-full rounded-lg border px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
+          className={`w-full rounded-lg border px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
             errors.perMinuteLimit ? 'border-red-400' : 'border-gray-300'
           }`}
         />
@@ -136,7 +136,7 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
           step={1}
           value={perDayLimit}
           onChange={(e) => dispatch({ type: 'setPerDayLimit', value: parseInt(e.target.value, 10) || 0 })}
-          className={`w-full rounded-lg border px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
+          className={`w-full rounded-lg border px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
             errors.perDayLimit ? 'border-red-400' : 'border-gray-300'
           }`}
         />
@@ -157,7 +157,7 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
           step={1}
           value={maxSessionTurns}
           onChange={(e) => dispatch({ type: 'setMaxSessionTurns', value: parseInt(e.target.value, 10) || 0 })}
-          className={`w-full rounded-lg border px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
+          className={`w-full rounded-lg border px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
             errors.maxSessionTurns ? 'border-red-400' : 'border-gray-300'
           }`}
         />
@@ -177,8 +177,8 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
           role="switch"
           aria-checked={enabled}
           onClick={() => dispatch({ type: 'setEnabled', value: !enabled })}
-          className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
-            enabled ? 'bg-blue-600' : 'bg-gray-300'
+          className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
+            enabled ? 'bg-brand-600' : 'bg-gray-300'
           }`}
         >
           <span
@@ -195,7 +195,7 @@ export function RateLimitForm({ initial, onSave, onCancel, saving }: RateLimitFo
         <button
           type="submit"
           disabled={saving}
-          className="flex min-h-[40px] items-center rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex min-h-[40px] items-center rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {saving ? '保存中…' : '保存'}
         </button>

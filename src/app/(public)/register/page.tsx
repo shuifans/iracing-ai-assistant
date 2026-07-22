@@ -3,6 +3,8 @@
 import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { MIN_PASSWORD_LENGTH } from '@/modules/auth/constants';
+import { Button } from '@/components/common';
+import { LogoMark } from '@/components/layout/Logo';
 import { validateRegisterForm } from '@/app/(public)/register/validation';
 
 export default function RegisterPage() {
@@ -58,7 +60,7 @@ export default function RegisterPage() {
 
   if (success) {
     return (
-      <div className="rounded-2xl bg-white p-6 shadow-md sm:p-8">
+      <div className="rounded-card border border-gray-200 bg-white p-6 shadow-card sm:p-8">
         <div className="flex flex-col items-center text-center">
           <div
             className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100"
@@ -75,11 +77,11 @@ export default function RegisterPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">注册申请已提交</h1>
+          <h1 className="text-xl font-bold text-navy-900">注册申请已提交</h1>
           <p className="mt-2 text-sm text-gray-600">请等待管理员审批，审批通过后方可登录。</p>
           <Link
             href="/login"
-            className="mt-6 inline-flex h-11 items-center justify-center rounded-lg bg-blue-600 px-6 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:ring-offset-2"
+            className="mt-6 inline-flex h-11 items-center justify-center rounded-control bg-brand-600 px-6 text-sm font-semibold text-white transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
           >
             返回登录
           </Link>
@@ -89,10 +91,13 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="rounded-2xl bg-white p-6 shadow-md sm:p-8">
+    <div className="rounded-card border border-gray-200 bg-white p-6 shadow-card sm:p-8">
       {/* Title */}
       <div className="mb-8 text-center">
-        <h1 className="text-2xl font-bold text-gray-900">iRacing AI 助手</h1>
+        <div className="mb-3 flex justify-center">
+          <LogoMark className="h-12 w-12" />
+        </div>
+        <h1 className="text-2xl font-bold text-navy-900">iRacing AI 助手</h1>
         <p className="mt-1 text-sm text-gray-600">创建新账户</p>
       </div>
 
@@ -119,7 +124,7 @@ export default function RegisterPage() {
             required
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="h-11 rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="h-11 rounded-control border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             placeholder="请输入用户名"
           />
         </div>
@@ -136,7 +141,7 @@ export default function RegisterPage() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="h-11 rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="h-11 rounded-control border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             placeholder={`至少 ${MIN_PASSWORD_LENGTH} 位`}
           />
         </div>
@@ -153,7 +158,7 @@ export default function RegisterPage() {
             required
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            className="h-11 rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="h-11 rounded-control border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             placeholder="请再次输入密码"
           />
         </div>
@@ -169,19 +174,15 @@ export default function RegisterPage() {
             rows={3}
             value={registrationReason}
             onChange={(e) => setRegistrationReason(e.target.value)}
-            className="min-h-[76px] resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="min-h-[76px] resize-y rounded-control border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             placeholder="简述您注册的原因（可选）"
           />
         </div>
 
         {/* Submit */}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="flex h-11 w-full items-center justify-center rounded-lg bg-blue-600 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-        >
+        <Button type="submit" loading={submitting} className="h-11 w-full font-semibold">
           {submitting ? '提交中…' : '提交注册申请'}
-        </button>
+        </Button>
       </form>
 
       {/* Login link */}
@@ -189,7 +190,7 @@ export default function RegisterPage() {
         已有账户？{' '}
         <Link
           href="/login"
-          className="font-semibold text-blue-600 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:ring-offset-2 rounded"
+          className="rounded font-semibold text-brand-600 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
         >
           立即登录
         </Link>

@@ -23,7 +23,7 @@ export function SourceCard({ source }: SourceCardProps) {
       type="button"
       onClick={handleClick}
       disabled={!href}
-      className="flex min-h-[44px] w-full items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-left text-xs transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:cursor-default disabled:hover:bg-gray-50"
+      className="flex min-h-[44px] w-full items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-left text-xs transition-colors hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:cursor-default disabled:hover:bg-gray-50"
       aria-label={`来源: ${source.title}`}
     >
       <span className="flex-shrink-0 text-base leading-5" aria-hidden>

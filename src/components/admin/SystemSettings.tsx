@@ -41,15 +41,15 @@ export function SystemSettings() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-8">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+      <div className="flex items-center gap-3 rounded-card border border-gray-200 bg-white shadow-card p-8">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
         <span className="text-sm text-gray-500">加载系统信息…</span>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-6">
+    <div className="space-y-4 rounded-card border border-gray-200 bg-white shadow-card p-6">
       <h3 className="text-base font-semibold text-gray-800">系统信息</h3>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

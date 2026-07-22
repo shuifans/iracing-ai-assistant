@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Tabs, FilterBar, ConfirmDialog, Toast, Pagination } from '@/components/common';
+import { Tabs, FilterBar, ConfirmDialog, Toast, Pagination, PageHeader } from '@/components/common';
 import { UserTable } from '@/components/admin/UserTable';
 import { UserDetail } from '@/components/admin/UserDetail';
 import { authFetch } from '@/lib/auth-client';
@@ -298,11 +298,10 @@ export default function AdminUsersPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">用户管理</h1>
-        <p className="mt-1 text-sm text-gray-500">管理系统用户：审批注册、修改角色、禁用或删除账户</p>
-      </div>
+      <PageHeader
+        title="用户管理"
+        description="管理系统用户：审批注册、修改角色、禁用或删除账户"
+      />
 
       {/* Tabs */}
       <Tabs

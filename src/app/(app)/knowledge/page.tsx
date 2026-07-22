@@ -2,7 +2,17 @@
 
 import { useState, useEffect, useCallback, startTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Tabs, Pagination, FilterBar, ConfirmDialog, Toast, DataTable } from '@/components/common';
+import {
+  Tabs,
+  Pagination,
+  FilterBar,
+  ConfirmDialog,
+  Toast,
+  DataTable,
+  Button,
+  PageHeader,
+} from '@/components/common';
+import { RequireRole } from '@/components/providers/RequireRole';
 import { authFetch } from '@/lib/auth-client';
 import { JobStatusBadge } from '@/components/knowledge/JobStatusBadge';
 import { ItemTable } from '@/components/knowledge/ItemTable';
@@ -98,6 +108,14 @@ const TERMINAL_JOB_STATUSES: JobStatus[] = ['published', 'rejected', 'failed', '
 // ---------------------------------------------------------------------------
 
 export default function KnowledgePage() {
+  return (
+    <RequireRole roles={['admin', 'knowledge_admin']}>
+      <KnowledgePageContent />
+    </RequireRole>
+  );
+}
+
+function KnowledgePageContent() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('import');
   const [toast, setToast] = useState<{
@@ -109,22 +127,6 @@ export default function KnowledgePage() {
     message: string;
     onConfirm: () => void;
   } | null>(null);
-
-  // 前端角色守卫（API 侧已有 knowledge_admin/admin 强校验兜底）
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await authFetch('/api/auth/me');
-        if (res.ok) {
-          const json = (await res.json()) as { data?: { user?: { role?: string } } };
-          const role = json.data?.user?.role;
-          if (role !== 'admin' && role !== 'knowledge_admin') router.replace('/chat');
-        }
-      } catch {
-        /* auth handled by layout */
-      }
-    })();
-  }, [router]);
 
   // ── Stats（工作流看板计数） ────────────────────────────────────────────────
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
@@ -377,12 +379,6 @@ export default function KnowledgePage() {
   };
 
   // ── Job 行操作按钮（按状态渲染） ─────────────────────────────────────────────
-  const btnBase =
-    'inline-flex min-h-[36px] min-w-[36px] items-center rounded-md px-3 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2';
-  const btnNeutral = `${btnBase} border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:ring-blue-500/40`;
-  const btnDanger = `${btnBase} border border-red-300 bg-white text-red-600 hover:bg-red-50 focus:ring-red-500/40`;
-  const btnPrimary = `${btnBase} bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500/40`;
-
   const confirmThen = (title: string, message: string, action: () => void) =>
     setConfirmAction({
       title,
@@ -396,65 +392,69 @@ export default function KnowledgePage() {
   const renderJobActions = (job: Job) => (
     <div className="flex flex-wrap gap-2">
       {job.status === 'queued' && (
-        <button type="button" onClick={() => pauseJob(job.id)} className={btnNeutral}>
+        <Button type="button" variant="secondary" size="sm" onClick={() => pauseJob(job.id)}>
           暂停
-        </button>
+        </Button>
       )}
       {job.status === 'paused' && (
-        <button type="button" onClick={() => resumeJob(job.id)} className={btnNeutral}>
+        <Button type="button" variant="secondary" size="sm" onClick={() => resumeJob(job.id)}>
           恢复
-        </button>
+        </Button>
       )}
       {(job.status === 'queued' || job.status === 'paused') && (
-        <button
+        <Button
           type="button"
+          variant="danger"
+          size="sm"
           onClick={() =>
             confirmThen('取消任务', `确定要取消任务 ${job.id.slice(0, 8)} 吗？`, () =>
               cancelJob(job.id),
             )
           }
-          className={btnDanger}
         >
           取消
-        </button>
+        </Button>
       )}
       {job.status === 'failed' && (
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           onClick={() =>
             confirmThen('重试任务', `确定要重试任务 ${job.id.slice(0, 8)} 吗？`, () =>
               retryJob(job.id),
             )
           }
-          className={btnNeutral}
         >
           重试
-        </button>
+        </Button>
       )}
       {job.status === 'pending_review' && (
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={() => router.push(`/knowledge/review/${job.id}`)}
-          className={btnPrimary}
         >
           去审查
-        </button>
+        </Button>
       )}
       {job.status === 'approved' && (
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={() => {
             setActiveTab('manage');
             setManageView('pending');
           }}
-          className={btnPrimary}
         >
           去发布
-        </button>
+        </Button>
       )}
       {TERMINAL_JOB_STATUSES.includes(job.status) && (
-        <button
+        <Button
           type="button"
+          variant="danger"
+          size="sm"
           onClick={() =>
             confirmThen(
               '删除任务',
@@ -462,10 +462,9 @@ export default function KnowledgePage() {
               () => deleteJob(job.id),
             )
           }
-          className={btnDanger}
         >
           删除
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -506,7 +505,7 @@ export default function KnowledgePage() {
         <div className="flex items-center gap-2">
           <div className="h-1.5 w-16 overflow-hidden rounded-full bg-gray-200">
             <div
-              className="h-full rounded-full bg-blue-600 transition-all"
+              className="h-full rounded-full bg-brand-600 transition-all"
               style={{ width: `${job.progress}%` }}
             />
           </div>
@@ -594,35 +593,37 @@ export default function KnowledgePage() {
       header: '操作',
       render: (d: Draft) => (
         <div className="flex flex-wrap gap-2">
-          <button
+          <Button
             type="button"
+            size="sm"
             onClick={() =>
               confirmThen('发布上线', `确定要发布「${d.title}」吗？将写入知识库并同步 Wiki。`, () =>
                 publishDraft(d.id),
               )
             }
-            className={btnPrimary}
           >
             发布上线
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => router.push(`/knowledge/review/${d.id}`)}
-            className={btnNeutral}
           >
             查看
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="danger"
+            size="sm"
             onClick={() =>
               confirmThen('退回审查', `确定要将「${d.title}」退回待审查吗？`, () =>
                 unapproveDraft(d.id),
               )
             }
-            className={btnDanger}
           >
             退回审查
-          </button>
+          </Button>
         </div>
       ),
     },
@@ -676,7 +677,7 @@ export default function KnowledgePage() {
   );
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="mx-auto w-full max-w-7xl px-4 py-6">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
       {confirmAction && (
@@ -705,21 +706,20 @@ export default function KnowledgePage() {
         onError={(msg) => setToast({ message: msg, type: 'error' })}
       />
 
-      {/* Page header */}
-      <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">知识管理</h1>
-          <p className="mt-1 text-sm text-gray-500">导入知识、管理知识与管理任务</p>
-        </div>
-        {activeTab === 'import' && (
-          <button type="button" onClick={() => setAddModalOpen(true)} className={btnPrimary}>
-            + 添加知识
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="知识管理"
+        description="导入知识、管理知识与管理任务"
+        actions={
+          activeTab === 'import' ? (
+            <Button type="button" onClick={() => setAddModalOpen(true)}>
+              + 添加知识
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Tabs */}
-      <div className="border-b border-gray-200 bg-white px-6">
+      <div className="mt-4">
         <Tabs
           tabs={[
             { id: 'import', label: '导入知识' },
@@ -732,7 +732,7 @@ export default function KnowledgePage() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="mt-6">
         {/* ── 导入知识 ─────────────────────────────────────────────────── */}
         {activeTab === 'import' && (
           <div className="space-y-6">
@@ -756,7 +756,7 @@ export default function KnowledgePage() {
                     setActiveStage(null);
                     setJobsCursorStack([]);
                   }}
-                  className="text-xs text-blue-600 hover:underline"
+                  className="text-xs text-brand-600 hover:underline"
                 >
                   清除阶段过滤
                 </button>
@@ -790,9 +790,9 @@ export default function KnowledgePage() {
                   key={v.id}
                   type="button"
                   onClick={() => setManageView(v.id)}
-                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
+                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
                     manageView === v.id
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-brand-600 text-white'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                 >

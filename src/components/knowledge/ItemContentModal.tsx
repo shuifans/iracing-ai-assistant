@@ -74,7 +74,7 @@ export function ItemContentModal({ itemId, onClose, onRevise }: ItemContentModal
       <div
         role="dialog"
         aria-modal="true"
-        className="relative z-10 flex max-h-[85vh] w-full max-w-3xl flex-col rounded-xl bg-white shadow-xl"
+        className="relative z-10 flex max-h-[85vh] w-full max-w-3xl flex-col rounded-card bg-white shadow-pop"
       >
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <div className="min-w-0">
@@ -92,7 +92,7 @@ export function ItemContentModal({ itemId, onClose, onRevise }: ItemContentModal
               <button
                 type="button"
                 onClick={() => onRevise!(itemId)}
-                className="inline-flex min-h-[36px] items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                className="inline-flex min-h-[36px] items-center rounded-md bg-brand-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
               >
                 派生修订
               </button>
@@ -100,7 +100,7 @@ export function ItemContentModal({ itemId, onClose, onRevise }: ItemContentModal
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex min-h-[36px] items-center rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              className="inline-flex min-h-[36px] items-center rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             >
               关闭
             </button>

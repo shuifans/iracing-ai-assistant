@@ -146,7 +146,7 @@ function SafeLink({
       {...props}
       href={safeHref}
       {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-      className="break-words text-blue-600 underline hover:text-blue-800"
+      className="break-words text-brand-600 underline hover:text-brand-800"
     >
       {children}
     </a>
@@ -199,7 +199,7 @@ export function SafeMarkdown({ children }: SafeMarkdownProps) {
         ),
         p: ({ children: content }) => <p className="my-1">{content}</p>,
         pre: ({ children: content }) => (
-          <pre className="overflow-x-auto rounded-lg bg-gray-900 p-3 text-[13px] leading-5 text-gray-100">
+          <pre className="overflow-x-auto rounded-lg bg-navy-900 p-3 text-[13px] leading-5 text-gray-100">
             {content}
           </pre>
         ),

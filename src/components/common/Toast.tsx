@@ -11,7 +11,7 @@ interface ToastProps {
 const typeClasses: Record<ToastProps['type'], string> = {
   success: 'bg-green-600',
   error: 'bg-red-600',
-  info: 'bg-blue-600',
+  info: 'bg-brand-600',
 };
 
 export function Toast({ message, type, onClose }: ToastProps) {

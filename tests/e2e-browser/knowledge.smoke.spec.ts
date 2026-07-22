@@ -13,14 +13,27 @@ test.describe('/knowledge smoke', () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test('authenticated /knowledge renders the sources tab and paginates (>20 seeded sources)', async ({
+  test('authenticated /knowledge renders the import tab and paginates (>20 seeded jobs)', async ({
     authedKadminPage: page,
   }) => {
     await page.goto('/knowledge');
     await expect(page).toHaveURL(/\/knowledge/);
-    await expect(page.getByRole('tab', { name: '来源管理' })).toBeVisible();
-    // 21 seeded sources, limit 20 → meta.nextCursor non-null → 下一页 enabled
+    await expect(page.getByRole('tab', { name: '导入知识' })).toBeVisible();
+    // 21 seeded failed jobs, limit 20 → meta.nextCursor non-null → 下一页 enabled
     await expect(page.getByRole('button', { name: '下一页' })).toBeEnabled();
+  });
+
+  test('/knowledge uses the unified TopNav (no chat session sidebar)', async ({
+    authedKadminPage: page,
+  }) => {
+    await page.goto('/knowledge');
+    // TopNav 模块链接按角色显隐：kadmin 可见「对话」「知识管理」，不可见「账户管理」
+    const topNav = page.getByRole('navigation', { name: '模块导航' });
+    await expect(topNav.getByRole('link', { name: '对话' })).toBeVisible();
+    await expect(topNav.getByRole('link', { name: '知识管理' })).toBeVisible();
+    await expect(topNav.getByRole('link', { name: '账户管理' })).toHaveCount(0);
+    // 知识页不再挂会话侧边栏
+    await expect(page.getByRole('complementary', { name: '会话历史' })).toHaveCount(0);
   });
 
   test('sources list returns meta.nextCursor (envelope fix: cursor under meta, not pagination)', async ({
@@ -65,14 +78,16 @@ test.describe('/knowledge smoke', () => {
     webSourceCleanup.trackName(sourceName);
 
     await page.goto('/knowledge');
-    const webSourcesTab = page.getByRole('tab', { name: '联网知识源' });
+    // 「联网知识源」位于 管理知识 tab 下的子分区（pill 按钮）
+    await page.getByRole('tab', { name: '管理知识' }).click();
+    const webSourcesTab = page.getByRole('button', { name: '联网知识源' });
     await expect(webSourcesTab).toBeVisible();
     await webSourcesTab.click();
     await expect(page.getByRole('heading', { name: '新增联网知识源' })).toBeVisible();
 
     await page.getByLabel('名称').fill(sourceName);
     await page.getByLabel('范围类型').selectOption('exact_url');
-    await page.getByLabel('URL').fill(sourceUrl);
+    await page.getByRole('textbox', { name: 'URL' }).fill(sourceUrl);
     await page.getByLabel('来源级别').selectOption('official');
     await page.getByRole('button', { name: `创建 ${sourceName}` }).click();
 

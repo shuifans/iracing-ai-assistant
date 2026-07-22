@@ -680,8 +680,8 @@ export default function SessionPage() {
 
           {/* 服务端映射的 Qoder 工具阶段；不在前端推测 Agent 思考。 */}
           {statusStage && isStreaming && (
-            <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
-              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+            <div className="flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-700">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-brand-500" />
               <span>{statusStage.message}</span>
             </div>
           )}
@@ -692,7 +692,7 @@ export default function SessionPage() {
               <button
                 type="button"
                 onClick={() => handleRetry(lastFailedMessage.id)}
-                className="flex min-h-[44px] items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                className="flex min-h-[44px] items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path

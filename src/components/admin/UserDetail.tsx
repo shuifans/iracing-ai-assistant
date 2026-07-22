@@ -86,7 +86,7 @@ export function UserDetail({ mode, onClose, onConfirm }: UserDetailProps) {
       <div
         role="dialog"
         aria-modal="true"
-        className="relative z-10 w-full max-w-lg rounded-xl bg-white p-6 shadow-xl"
+        className="relative z-10 w-full max-w-lg rounded-card bg-white p-6 shadow-pop"
       >
         <div className="flex items-start justify-between">
           <h3 className="text-lg font-semibold text-gray-900">{titles[mode.type]}</h3>
@@ -161,7 +161,7 @@ export function UserDetail({ mode, onClose, onConfirm }: UserDetailProps) {
               id="role-select"
               value={selectedRole}
               onChange={(e) => setSelectedRole(e.target.value)}
-              className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             >
               {ROLE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -177,7 +177,7 @@ export function UserDetail({ mode, onClose, onConfirm }: UserDetailProps) {
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           >
             取消
           </button>
@@ -193,7 +193,7 @@ export function UserDetail({ mode, onClose, onConfirm }: UserDetailProps) {
               className={`inline-flex min-h-[44px] items-center justify-center rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${
                 mode.type === 'reject'
                   ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
-                  : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
+                  : 'bg-brand-600 hover:bg-brand-700 focus:ring-brand-500'
               }`}
             >
               {submitting ? '处理中…' : mode.type === 'reject' ? '确认拒绝' : '确认修改'}

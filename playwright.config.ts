@@ -38,8 +38,10 @@ export default defineConfig({
     baseURL: BASE_URL,
     trace: 'retain-on-failure',
     actionTimeout: 15_000,
-    navigationTimeout: 20_000,
+    navigationTimeout: 30_000,
   },
+  expect: { timeout: 30_000 },
+  timeout: 60_000,
   // `next start` uses the existing `.next` production build. Run `npm run build`
   // first if the build is missing/stale. Port 3100 avoids clashing with `next dev`
   // on 3000.

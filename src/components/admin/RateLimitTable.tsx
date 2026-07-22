@@ -127,7 +127,7 @@ export function RateLimitTable({ configs, loading, onUpdated }: RateLimitTablePr
         <button
           type="button"
           onClick={() => setEditingId((item as RateLimitConfig).id)}
-          className="rounded-md px-3 py-1 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+          className="rounded-md px-3 py-1 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
         >
           编辑
         </button>

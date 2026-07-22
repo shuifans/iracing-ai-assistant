@@ -200,7 +200,7 @@ export function WebSourceManager() {
             type="button"
             aria-label={`${source.enabled ? '停用' : '启用'} ${source.name}`}
             onClick={() => void toggleSource(source)}
-            className="rounded-md px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="rounded-md px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           >
             {source.enabled ? '停用' : '启用'}
           </button>
@@ -208,7 +208,7 @@ export function WebSourceManager() {
             type="button"
             aria-label={`编辑 ${source.name}`}
             onClick={() => startEditing(source)}
-            className="rounded-md px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="rounded-md px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           >
             编辑
           </button>
@@ -231,7 +231,7 @@ export function WebSourceManager() {
 
       <form
         onSubmit={(event) => void saveSource(event)}
-        className="rounded-xl border border-gray-200 bg-white p-5"
+        className="rounded-card border border-gray-200 bg-white shadow-card p-5"
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-gray-900">
@@ -242,7 +242,7 @@ export function WebSourceManager() {
               type="button"
               aria-label={`取消编辑 ${form.name}`}
               onClick={resetForm}
-              className="rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              className="rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             >
               取消编辑
             </button>
@@ -256,7 +256,7 @@ export function WebSourceManager() {
               required
               value={form.name}
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             />
           </label>
 
@@ -270,7 +270,7 @@ export function WebSourceManager() {
                   scopeType: event.target.value as SourceForm['scopeType'],
                 }))
               }
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             >
               <option value="domain">域名</option>
               <option value="path">路径</option>
@@ -286,7 +286,7 @@ export function WebSourceManager() {
               value={form.url}
               onChange={(event) => setForm((current) => ({ ...current, url: event.target.value }))}
               placeholder="https://example.com"
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             />
           </label>
 
@@ -300,7 +300,7 @@ export function WebSourceManager() {
                   sourceLevel: event.target.value as SourceForm['sourceLevel'],
                 }))
               }
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             >
               <option value="official">官方</option>
               <option value="community">社区</option>
@@ -314,7 +314,7 @@ export function WebSourceManager() {
               onChange={(event) =>
                 setForm((current) => ({ ...current, enabled: event.target.checked }))
               }
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
             />
             启用状态
           </label>
@@ -327,7 +327,7 @@ export function WebSourceManager() {
                 setForm((current) => ({ ...current, description: event.target.value }))
               }
               rows={2}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             />
           </label>
         </div>
@@ -337,7 +337,7 @@ export function WebSourceManager() {
             type="submit"
             disabled={saving}
             aria-label={`${editingId ? '保存' : '创建'} ${form.name || '新来源'}`}
-            className="inline-flex min-h-[44px] items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-[44px] items-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? '保存中…' : editingId ? '保存修改' : '创建来源'}
           </button>

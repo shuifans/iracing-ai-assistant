@@ -54,9 +54,9 @@ export function FeedbackButtons({ messageId, initialRating }: FeedbackButtonsPro
         disabled={submitting}
         aria-label="点赞"
         aria-pressed={rating === 'up'}
-        className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50 ${
+        className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-lg transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50 ${
           rating === 'up'
-            ? 'bg-blue-100 text-blue-600'
+            ? 'bg-brand-100 text-brand-600'
             : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
         }`}
       >
@@ -68,7 +68,7 @@ export function FeedbackButtons({ messageId, initialRating }: FeedbackButtonsPro
         disabled={submitting}
         aria-label="点踩"
         aria-pressed={rating === 'down'}
-        className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50 ${
+        className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-lg transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50 ${
           rating === 'down'
             ? 'bg-red-100 text-red-600'
             : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'

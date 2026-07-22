@@ -3,6 +3,7 @@
 import { use, useEffect, useState, useCallback, startTransition } from 'react';
 import { authFetch } from '@/lib/auth-client';
 import { Pagination } from '@/components/common/Pagination';
+import { PageHeader } from '@/components/common';
 import { SessionTable } from '@/components/admin/SessionTable';
 import { SessionDetail } from '@/components/admin/SessionDetail';
 
@@ -161,14 +162,10 @@ export default function AdminSessionsPage({
 
   return (
     <div className="space-y-4">
-      {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">会话质检</h1>
-        <p className="mt-1 text-sm text-gray-500">查看和检索所有用户的会话记录</p>
-      </div>
+      <PageHeader title="会话质检" description="查看和检索所有用户的会话记录" />
 
       {/* Filter bar */}
-      <div className="flex flex-wrap items-end gap-4 rounded-xl border border-gray-200 bg-white p-4">
+      <div className="flex flex-wrap items-end gap-4 rounded-card border border-gray-200 bg-white shadow-card p-4">
         <div className="flex min-w-[140px] flex-1 flex-col gap-1">
           <label htmlFor="filter-userId" className="text-xs font-medium text-gray-600">
             用户 ID
@@ -180,7 +177,7 @@ export default function AdminSessionsPage({
             value={userId}
             onChange={(e) => setUserId(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
         <div className="flex min-w-[140px] flex-1 flex-col gap-1">
@@ -194,7 +191,7 @@ export default function AdminSessionsPage({
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
         <div className="flex min-w-[140px] flex-1 flex-col gap-1">
@@ -206,7 +203,7 @@ export default function AdminSessionsPage({
             type="date"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
-            className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
         <div className="flex min-w-[140px] flex-1 flex-col gap-1">
@@ -218,13 +215,13 @@ export default function AdminSessionsPage({
             type="date"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
-            className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
         <button
           type="button"
           onClick={handleSearch}
-          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
         >
           搜索
         </button>

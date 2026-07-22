@@ -1,3 +1,26 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  /* 供 JS 取色场景（如图表）使用，与 tailwind.config.ts 保持一致 */
+  --brand-600: #2a75bb;
+  --brand-500: #3d7dca;
+  --accent-400: #ffcb05;
+  --navy-700: #003a70;
+  --navy-900: #00203f;
+}
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-white text-gray-900;
+  }
+
+  ::selection {
+    @apply bg-accent-200 text-navy-900;
+  }
+}

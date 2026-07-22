@@ -78,7 +78,7 @@ export function CostTable({ data, loading = false }: CostTableProps) {
   ];
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
+    <div className="rounded-card border border-gray-200 bg-white shadow-card p-4">
       <h3 className="mb-3 text-sm font-semibold text-gray-700">成本明细</h3>
       <DataTable<Row>
         columns={columns}

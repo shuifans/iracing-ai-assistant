@@ -130,7 +130,7 @@ export function DraftReviewer({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6">
+      <div className="rounded-card border border-gray-200 bg-white shadow-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">{draft.title}</h2>
@@ -177,7 +177,7 @@ export function DraftReviewer({
       {/* Diff view: extracted (left) + rendered (right) */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Extracted text */}
-        <div className="rounded-xl border border-gray-200 bg-white">
+        <div className="rounded-card border border-gray-200 bg-white shadow-card">
           <div className="border-b border-gray-200 px-4 py-3">
             <h3 className="text-sm font-semibold text-gray-700">原文（提取内容）</h3>
           </div>
@@ -189,7 +189,7 @@ export function DraftReviewer({
         </div>
 
         {/* Candidate draft */}
-        <div className="rounded-xl border border-gray-200 bg-white">
+        <div className="rounded-card border border-gray-200 bg-white shadow-card">
           <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
             <h3 className="text-sm font-semibold text-gray-700">候选稿</h3>
             {!editing && draft.status === 'pending_review' && (
@@ -199,7 +199,7 @@ export function DraftReviewer({
                   setContent(renderedMarkdown);
                   setEditing(true);
                 }}
-                className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
               >
                 编辑
               </button>
@@ -211,7 +211,7 @@ export function DraftReviewer({
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 rows={25}
-                className="w-full resize-none rounded-lg border border-gray-300 bg-white p-3 font-mono text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full resize-none rounded-lg border border-gray-300 bg-white p-3 font-mono text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
             ) : (
               <pre className="whitespace-pre-wrap text-sm text-gray-700">{renderedMarkdown}</pre>
@@ -222,21 +222,21 @@ export function DraftReviewer({
 
       {/* Actions */}
       {draft.status === 'pending_review' && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap items-center gap-3 rounded-card border border-gray-200 bg-white shadow-card p-4">
           {editing ? (
             <>
               <button
                 type="button"
                 onClick={handleSaveEdit}
                 disabled={submitting}
-                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50"
+                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50"
               >
                 {submitting ? '保存中…' : '保存修改'}
               </button>
               <button
                 type="button"
                 onClick={() => setEditing(false)}
-                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-300 bg-white px-5 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-300 bg-white px-5 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
               >
                 取消
               </button>
@@ -276,7 +276,7 @@ export function DraftReviewer({
                   onChange={(e) => setRejectReason(e.target.value)}
                   rows={2}
                   placeholder="请输入拒绝理由…"
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
               </div>
               <div className="flex gap-2">
@@ -294,7 +294,7 @@ export function DraftReviewer({
                     setShowReject(false);
                     setRejectReason('');
                   }}
-                  className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 >
                   取消
                 </button>

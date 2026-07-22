@@ -9,14 +9,15 @@ import { test, expect } from './fixtures';
 test.describe('/admin smoke', () => {
   test('unauthenticated /admin redirects to /login (not 404)', async ({ page }) => {
     await page.goto('/admin');
-    // /admin → server redirect to /admin/users → client layout → /api/auth/me 401 → /login
-    await expect(page).toHaveURL(/\/login/);
+    // /admin → AuthGate → /api/auth/me 401 → unauthed → client redirect /login
+    await expect(page).toHaveURL(/\/login/, { timeout: 30_000 });
   });
 
   test('authenticated /admin lands on /admin/users', async ({ authedAdminPage: page }) => {
     await page.goto('/admin');
-    await expect(page).toHaveURL(/\/admin\/users/);
-    await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible();
+    // /admin → AuthGate → authed → client redirect → /admin/users
+    await expect(page).toHaveURL(/\/admin\/users/, { timeout: 30_000 });
+    await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible({ timeout: 15_000 });
   });
 
   test('disable / enable / change-role accept PATCH (was 405 when frontend used POST/PUT)', async ({

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { authFetch, getAccessToken } from '@/lib/auth-client';
+import { PageHeader } from '@/components/common';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -86,7 +86,7 @@ function statusBadge(status: string) {
     case 'error':
       return <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">✗ 失败</span>;
     case 'running':
-      return <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 animate-pulse">● 运行中</span>;
+      return <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700 animate-pulse">● 运行中</span>;
     default:
       return <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">○ 等待</span>;
   }
@@ -97,7 +97,6 @@ function statusBadge(status: string) {
 // ---------------------------------------------------------------------------
 
 export default function DiagnosticPage() {
-  const router = useRouter();
   const [questions, setQuestions] = useState<string[]>(DEFAULT_QUESTIONS);
   const [editingQuestions, setEditingQuestions] = useState(false);
   const [editText, setEditText] = useState(DEFAULT_QUESTIONS.join('\n'));
@@ -372,32 +371,21 @@ export default function DiagnosticPage() {
       <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
         {/* Header */}
         <div className="mb-6">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.push('/chat')}
-              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <div>
-              <h1 className="text-xl font-semibold text-gray-900">多轮对话诊断测试</h1>
-              <p className="mt-0.5 text-sm text-gray-500">
-                测试多轮对话性能：追踪节点链路耗时、响应时长变化、错误率
-              </p>
-            </div>
-          </div>
+          <PageHeader
+            title="多轮对话诊断测试"
+            description="测试多轮对话性能：追踪节点链路耗时、响应时长变化、错误率"
+            back={{ href: '/chat', label: '返回对话' }}
+          />
         </div>
 
         {/* Question Editor */}
-        <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
+        <div className="mb-6 rounded-card border border-gray-200 bg-white shadow-card p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-medium text-gray-700">测试问题 ({questions.length} 个)</h2>
             {!editingQuestions && !running && (
               <button
                 onClick={() => { setEditText(questions.join('\n')); setEditingQuestions(true); }}
-                className="text-xs text-blue-600 hover:text-blue-700"
+                className="text-xs text-brand-600 hover:text-brand-700"
               >
                 编辑
               </button>
@@ -410,13 +398,13 @@ export default function DiagnosticPage() {
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
                 rows={questions.length + 2}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 placeholder="每行一个问题"
               />
               <div className="mt-2 flex gap-2">
                 <button
                   onClick={saveQuestions}
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
                 >
                   保存
                 </button>
@@ -447,7 +435,7 @@ export default function DiagnosticPage() {
               <button
                 onClick={runDiagnostic}
                 disabled={questions.length === 0}
-                className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+                className="rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
               >
                 🚀 开始诊断测试
               </button>
@@ -477,7 +465,7 @@ export default function DiagnosticPage() {
 
         {/* Summary */}
         {summary && (
-          <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
+          <div className="mb-6 rounded-card border border-gray-200 bg-white shadow-card p-4">
             <h2 className="mb-4 text-sm font-semibold text-gray-700">📊 测试总结</h2>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <StatCard label="成功率" value={`${summary.successCount}/${summary.totalRounds}`} color={summary.failCount > 0 ? 'red' : 'green'} />
@@ -502,7 +490,7 @@ export default function DiagnosticPage() {
 
         {/* Results Table */}
         {results.length > 0 && (
-          <div className="rounded-xl border border-gray-200 bg-white">
+          <div className="rounded-card border border-gray-200 bg-white shadow-card">
             <div className="border-b border-gray-100 px-4 py-3">
               <h2 className="text-sm font-semibold text-gray-700">📋 逐轮结果</h2>
             </div>
@@ -619,7 +607,7 @@ export default function DiagnosticPage() {
         {/* Running indicator */}
         {running && results.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16">
-            <div className="mb-4 h-8 w-8 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+            <div className="mb-4 h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
             <p className="text-sm text-gray-500">正在创建会话…</p>
           </div>
         )}
@@ -658,7 +646,7 @@ function StatCard({
     green: 'text-green-600',
     red: 'text-red-600',
     yellow: 'text-yellow-600',
-    blue: 'text-blue-600',
+    blue: 'text-brand-600',
     gray: 'text-gray-700',
   };
 

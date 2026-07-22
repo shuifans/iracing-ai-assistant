@@ -28,7 +28,7 @@ export function AddKnowledgeModal({ open, onClose, onSuccess, onError }: AddKnow
       onClick={onClose}
     >
       <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-xl bg-white shadow-xl"
+        className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-card bg-white shadow-pop"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -44,7 +44,7 @@ export function AddKnowledgeModal({ open, onClose, onSuccess, onError }: AddKnow
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             aria-label="关闭"
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

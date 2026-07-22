@@ -35,7 +35,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       <div
         className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 shadow-sm sm:max-w-[78%] ${
           isUser
-            ? 'bg-blue-600 text-white shadow-blue-600/10'
+            ? 'bg-brand-600 text-white shadow-brand-600/10'
             : 'border border-gray-200/80 bg-white text-gray-900'
         }`}
       >

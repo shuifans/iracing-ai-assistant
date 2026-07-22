@@ -29,7 +29,7 @@ export function FilterBar({ filters, values, onChange, onSearch }: FilterBarProp
               id={`filter-${filter.name}`}
               value={values[filter.name] ?? ''}
               onChange={(e) => onChange(filter.name, e.target.value)}
-              className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             >
               <option value="">全部</option>
               {filter.options?.map((opt) => (
@@ -44,7 +44,7 @@ export function FilterBar({ filters, values, onChange, onSearch }: FilterBarProp
               type="date"
               value={values[filter.name] ?? ''}
               onChange={(e) => onChange(filter.name, e.target.value)}
-              className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
           ) : (
             <input
@@ -58,7 +58,7 @@ export function FilterBar({ filters, values, onChange, onSearch }: FilterBarProp
                   onSearch(values[filter.name] ?? '');
                 }
               }}
-              className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
           )}
         </div>
@@ -68,7 +68,7 @@ export function FilterBar({ filters, values, onChange, onSearch }: FilterBarProp
         <button
           type="button"
           onClick={() => onSearch(values['search'] ?? '')}
-          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
         >
           搜索
         </button>

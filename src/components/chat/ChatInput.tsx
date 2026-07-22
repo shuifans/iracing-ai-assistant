@@ -124,8 +124,8 @@ export function ChatInput({
           aria-checked={webSearchEnabled}
           disabled={disabled || webSearchUpdating}
           onClick={() => onWebSearchChange(!webSearchEnabled)}
-          className={`relative mt-0.5 inline-flex h-6 w-11 flex-none items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 ${
-            webSearchEnabled ? 'bg-blue-600' : 'bg-gray-300'
+          className={`relative mt-0.5 inline-flex h-6 w-11 flex-none items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:cursor-not-allowed disabled:opacity-50 ${
+            webSearchEnabled ? 'bg-brand-600' : 'bg-gray-300'
           }`}
         >
           <span
@@ -233,7 +233,7 @@ export function ChatInput({
           <button
             type="submit"
             disabled={!canSend}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl bg-blue-600 text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl bg-brand-600 text-white transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="发送消息"
           >
             <svg

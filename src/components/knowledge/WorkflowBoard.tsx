@@ -39,20 +39,20 @@ export function WorkflowBoard({ counts, activeStage, onStageClick }: WorkflowBoa
             <button
               type="button"
               onClick={() => onStageClick(active ? null : stage.key)}
-              className={`w-full rounded-xl border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
+              className={`w-full rounded-card border p-4 text-left transition-all focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
                 active
-                  ? 'border-blue-500 bg-blue-50 shadow-sm'
-                  : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
+                  ? 'border-brand-500 bg-brand-50 shadow-card'
+                  : 'border-gray-200 bg-white hover:border-brand-300 hover:bg-brand-50/50 hover:shadow-card'
               }`}
             >
               <div className="flex items-baseline justify-between">
                 <span
-                  className={`text-sm font-medium ${active ? 'text-blue-700' : 'text-gray-700'}`}
+                  className={`text-sm font-medium ${active ? 'text-brand-700' : 'text-gray-700'}`}
                 >
                   {stage.label}
                 </span>
                 <span
-                  className={`text-2xl font-semibold ${active ? 'text-blue-700' : 'text-gray-900'}`}
+                  className={`text-2xl font-semibold ${active ? 'text-brand-700' : 'text-gray-900'}`}
                 >
                   {counts ? counts[stage.key] : '—'}
                 </span>

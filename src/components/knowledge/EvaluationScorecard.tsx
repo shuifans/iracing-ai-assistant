@@ -25,7 +25,7 @@ interface EvaluationView {
 
 const TIER_COLOR: Record<string, string> = {
   A: 'bg-green-100 text-green-800',
-  B: 'bg-blue-100 text-blue-800',
+  B: 'bg-brand-100 text-brand-800',
   C: 'bg-yellow-100 text-yellow-800',
   D: 'bg-red-100 text-red-800',
   pending: 'bg-gray-100 text-gray-600',
@@ -83,14 +83,14 @@ export function EvaluationScorecard({
   };
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-6">
+    <div className="rounded-card border border-gray-200 bg-white shadow-card p-6">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700">知识评估</h3>
         <button
           type="button"
           onClick={runEval}
           disabled={running}
-          className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-blue-300 bg-white px-3 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50"
+          className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-brand-300 bg-white px-3 py-1 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50"
         >
           {running ? '评估中…' : '重新评估'}
         </button>

@@ -4,6 +4,8 @@ import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { setAccessToken } from '@/lib/auth-client';
+import { Button } from '@/components/common';
+import { LogoMark } from '@/components/layout/Logo';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -46,10 +48,13 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="rounded-2xl bg-white p-6 shadow-md sm:p-8">
+    <div className="rounded-card border border-gray-200 bg-white p-6 shadow-card sm:p-8">
       {/* Logo / Title */}
       <div className="mb-8 text-center">
-        <h1 className="text-2xl font-bold text-gray-900">iRacing AI 助手</h1>
+        <div className="mb-3 flex justify-center">
+          <LogoMark className="h-12 w-12" />
+        </div>
+        <h1 className="text-2xl font-bold text-navy-900">iRacing AI 助手</h1>
         <p className="mt-1 text-sm text-gray-600">登录您的账户</p>
       </div>
 
@@ -76,7 +81,7 @@ export default function LoginPage() {
             required
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="h-11 rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="h-11 rounded-control border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             placeholder="请输入用户名"
           />
         </div>
@@ -93,19 +98,15 @@ export default function LoginPage() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="h-11 rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="h-11 rounded-control border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             placeholder="请输入密码"
           />
         </div>
 
         {/* Submit */}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="flex h-11 w-full items-center justify-center rounded-lg bg-blue-600 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-        >
+        <Button type="submit" loading={submitting} className="h-11 w-full font-semibold">
           {submitting ? '登录中…' : '登录'}
-        </button>
+        </Button>
       </form>
 
       {/* Register link */}
@@ -113,7 +114,7 @@ export default function LoginPage() {
         还没有账户？{' '}
         <Link
           href="/register"
-          className="font-semibold text-blue-600 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:ring-offset-2 rounded"
+          className="rounded font-semibold text-brand-600 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
         >
           立即注册
         </Link>

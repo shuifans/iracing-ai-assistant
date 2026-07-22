@@ -88,7 +88,7 @@ export function ReCleanButton({
   };
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-6">
+    <div className="rounded-card border border-gray-200 bg-white shadow-card p-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-gray-700">带反馈重洗</h3>
@@ -104,7 +104,7 @@ export function ReCleanButton({
           type="button"
           onClick={() => setConfirmOpen(true)}
           disabled={submitting}
-          className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md bg-blue-600 px-4 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50"
+          className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md bg-brand-600 px-4 py-1 text-xs font-medium text-white transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50"
         >
           {submitting ? '入队中…' : '带反馈重洗'}
         </button>

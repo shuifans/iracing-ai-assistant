@@ -58,7 +58,7 @@ function roleBadge(role: string): {
 export function SessionDetail({ session, messages, onClose }: SessionDetailProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl">
+      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-card bg-white shadow-pop">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-gray-200 px-6 py-4">
           <div className="min-w-0 flex-1">
@@ -106,13 +106,13 @@ export function SessionDetail({ session, messages, onClose }: SessionDetailProps
                   <div
                     className={`max-w-[85%] rounded-2xl px-4 py-3 ${
                       isUser
-                        ? 'bg-blue-600 text-white'
+                        ? 'bg-brand-600 text-white'
                         : 'border border-gray-200 bg-white text-gray-900'
                     }`}
                   >
                     <div className="mb-1 flex items-center gap-2">
                       <Badge label={label} variant={variant} />
-                      <span className={`text-xs ${isUser ? 'text-blue-200' : 'text-gray-400'}`}>
+                      <span className={`text-xs ${isUser ? 'text-brand-200' : 'text-gray-400'}`}>
                         {formatForDisplay(msg.createdAt)}
                       </span>
                     </div>

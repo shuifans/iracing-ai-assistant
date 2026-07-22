@@ -92,7 +92,7 @@ export default function ChatPage() {
         <div className="w-full max-w-3xl">
           {/* 标题 */}
           <div className="mb-7 text-center">
-            <h1 className="text-xl font-semibold text-gray-900 sm:text-2xl">iRacing AI 助手</h1>
+            <h1 className="text-xl font-bold text-navy-900 sm:text-2xl">iRacing AI 助手</h1>
             <p className="mt-2 text-[13px] leading-5 text-gray-500 sm:text-sm">
               面向 iRacing 玩家的智能问答助手，问我任何关于赛车调校、驾驶技巧和赛事规则的问题
             </p>
@@ -103,16 +103,16 @@ export default function ChatPage() {
             <h2 className="mb-2.5 text-[13px] font-medium text-gray-600 sm:text-sm">
               试试这些问题
             </h2>
-            <div className="space-y-1.5">
+            <div className="grid gap-2 sm:grid-cols-2">
               {SUGGESTED_QUESTIONS.map((q) => (
                 <button
                   key={q}
                   type="button"
                   onClick={() => handleSuggestedQuestion(q)}
                   disabled={creating}
-                  className="flex min-h-[44px] w-full items-center rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-left text-[13px] leading-5 text-gray-700 transition-colors hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50 sm:text-sm"
+                  className="flex min-h-[44px] w-full items-center rounded-card border border-gray-200 bg-white px-3.5 py-2.5 text-left text-[13px] leading-5 text-gray-700 shadow-card transition-all hover:border-brand-200 hover:shadow-pop focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50 sm:text-sm"
                 >
-                  <span className="mr-2 flex-shrink-0 text-blue-500">💡</span>
+                  <span className="mr-2 flex-shrink-0 text-brand-500">💡</span>
                   <span>{q}</span>
                 </button>
               ))}

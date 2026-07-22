@@ -37,7 +37,7 @@ function ChangesCell({ json }: { json: string | null }) {
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="text-xs font-medium text-blue-600 hover:underline"
+        className="text-xs font-medium text-brand-600 hover:underline"
       >
         {expanded ? '收起' : '展开'}
       </button>

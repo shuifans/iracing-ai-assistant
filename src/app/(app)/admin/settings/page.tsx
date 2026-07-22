@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Tabs } from '@/components/common';
+import { Tabs, PageHeader } from '@/components/common';
 import { RateLimitTable } from '@/components/admin/RateLimitTable';
 import { SystemSettings } from '@/components/admin/SystemSettings';
 import { authFetch } from '@/lib/auth-client';
@@ -43,11 +43,7 @@ export default function AdminSettingsPage() {
 
   return (
     <div className="space-y-6">
-      {/* 页面标题 */}
-      <div>
-        <h1 className="text-xl font-bold text-gray-900">系统设置</h1>
-        <p className="mt-1 text-sm text-gray-500">管理限流策略与系统参数</p>
-      </div>
+      <PageHeader title="系统设置" description="管理限流策略与系统参数" />
 
       {/* Tabs */}
       <Tabs tabs={TABS} activeTab={activeTab} onChange={setActiveTab} />

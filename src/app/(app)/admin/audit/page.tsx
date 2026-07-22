@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, startTransition } from 'react';
 import { authFetch } from '@/lib/auth-client';
 import { FilterBar } from '@/components/common/FilterBar';
 import { Pagination } from '@/components/common/Pagination';
+import { PageHeader } from '@/components/common';
 import { AuditLogTable } from '@/components/admin/AuditLogTable';
 import { AUDIT_ACTIONS } from '@/modules/audit/types';
 import type { AuditLogEntry } from '@/modules/audit/types';
@@ -103,7 +104,7 @@ export default function AuditPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">审计日志</h1>
+      <PageHeader title="审计日志" />
 
       <FilterBar
         filters={FILTERS}

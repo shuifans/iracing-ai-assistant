@@ -81,7 +81,7 @@ export function SessionTable({ sessions, loading = false, onSelect }: SessionTab
               <tr
                 key={session.id}
                 onClick={() => onSelect(session)}
-                className="cursor-pointer transition-colors hover:bg-blue-50"
+                className="cursor-pointer transition-colors hover:bg-brand-50"
               >
                 <td className="max-w-xs truncate px-4 py-3 text-gray-900">
                   <div className="flex items-center gap-2">

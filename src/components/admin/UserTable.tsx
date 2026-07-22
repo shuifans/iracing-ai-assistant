@@ -66,7 +66,7 @@ function ActionButton({
 }) {
   const cls: Record<string, string> = {
     default: 'border-gray-300 text-gray-700 hover:bg-gray-50',
-    primary: 'border-blue-500 text-blue-600 hover:bg-blue-50',
+    primary: 'border-brand-500 text-brand-600 hover:bg-brand-50',
     danger: 'border-red-400 text-red-600 hover:bg-red-50',
     success: 'border-green-500 text-green-600 hover:bg-green-50',
   };
@@ -74,7 +74,7 @@ function ActionButton({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex min-h-[32px] items-center rounded-md border px-2 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${cls[variant]}`}
+      className={`inline-flex min-h-[32px] items-center rounded-md border px-2 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${cls[variant]}`}
     >
       {children}
     </button>

@@ -15,7 +15,7 @@ export function StatsOverview({ data, loading = false }: StatsOverviewProps) {
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
-            className="h-24 animate-pulse rounded-xl border border-gray-200 bg-white"
+            className="h-24 animate-pulse rounded-card border border-gray-200 bg-white shadow-card"
           />
         ))}
       </div>

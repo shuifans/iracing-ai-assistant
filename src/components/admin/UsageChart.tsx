@@ -26,15 +26,15 @@ export function UsageChart({ data, loading = false }: UsageChartProps) {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center rounded-xl border border-gray-200 bg-white">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+      <div className="flex h-64 items-center justify-center rounded-card border border-gray-200 bg-white shadow-card">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-600 border-t-transparent" />
       </div>
     );
   }
 
   if (data.length === 0) {
     return (
-      <div className="flex h-64 items-center justify-center rounded-xl border border-gray-200 bg-white text-sm text-gray-400">
+      <div className="flex h-64 items-center justify-center rounded-card border border-gray-200 bg-white shadow-card text-sm text-gray-400">
         暂无使用量数据
       </div>
     );
@@ -71,7 +71,7 @@ export function UsageChart({ data, loading = false }: UsageChartProps) {
   );
 
   return (
-    <div ref={containerRef} className="rounded-xl border border-gray-200 bg-white p-4">
+    <div ref={containerRef} className="rounded-card border border-gray-200 bg-white shadow-card p-4">
       <h3 className="mb-3 text-sm font-semibold text-gray-700">使用量趋势</h3>
       <svg
         width={width - 32}

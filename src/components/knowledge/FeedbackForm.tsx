@@ -70,14 +70,14 @@ export function FeedbackForm({
   };
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-6">
+    <div className="rounded-card border border-gray-200 bg-white shadow-card p-6">
       <h3 className="text-sm font-semibold text-gray-700">管理员反馈</h3>
       <textarea
         value={comments}
         onChange={(e) => setComments(e.target.value)}
         rows={3}
         placeholder="反馈：哪些需要改进、补充、修正…（重洗时将作为指令喂给清洗器）"
-        className="mt-3 w-full resize-none rounded-lg border border-gray-300 bg-white p-3 text-sm text-gray-700 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="mt-3 w-full resize-none rounded-lg border border-gray-300 bg-white p-3 text-sm text-gray-700 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
       />
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
       <div className="mt-3 flex justify-end">

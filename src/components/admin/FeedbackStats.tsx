@@ -10,15 +10,15 @@ interface FeedbackStatsProps {
 export function FeedbackStats({ data, loading = false }: FeedbackStatsProps) {
   if (loading) {
     return (
-      <div className="flex h-48 items-center justify-center rounded-xl border border-gray-200 bg-white">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+      <div className="flex h-48 items-center justify-center rounded-card border border-gray-200 bg-white shadow-card">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-600 border-t-transparent" />
       </div>
     );
   }
 
   if (!data) {
     return (
-      <div className="flex h-48 items-center justify-center rounded-xl border border-gray-200 bg-white text-sm text-gray-400">
+      <div className="flex h-48 items-center justify-center rounded-card border border-gray-200 bg-white shadow-card text-sm text-gray-400">
         暂无反馈数据
       </div>
     );
@@ -29,7 +29,7 @@ export function FeedbackStats({ data, loading = false }: FeedbackStatsProps) {
   const downWidth = data.total > 0 ? (data.down / data.total) * 100 : 0;
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
+    <div className="rounded-card border border-gray-200 bg-white shadow-card p-4">
       <h3 className="mb-4 text-sm font-semibold text-gray-700">反馈统计</h3>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -47,7 +47,7 @@ export function FeedbackStats({ data, loading = false }: FeedbackStatsProps) {
         </div>
         <div>
           <p className="text-xs text-gray-500">赞率</p>
-          <p className="mt-1 text-xl font-bold text-blue-600">{upRate}%</p>
+          <p className="mt-1 text-xl font-bold text-brand-600">{upRate}%</p>
         </div>
       </div>
 

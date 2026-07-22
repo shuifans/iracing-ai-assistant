@@ -14,6 +14,7 @@ import { UsageChart } from '@/components/admin/UsageChart';
 import { PopularQuestions } from '@/components/admin/PopularQuestions';
 import { CostTable } from '@/components/admin/CostTable';
 import { FeedbackStats } from '@/components/admin/FeedbackStats';
+import { PageHeader } from '@/components/common';
 
 type Period = '7d' | '30d' | '90d';
 
@@ -94,28 +95,27 @@ export default function StatsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Header + period selector */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">统计面板</h1>
-          <p className="text-sm text-gray-500">系统使用量与性能概览</p>
-        </div>
-        <div className="flex gap-2">
-          {periodOptions.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setPeriod(opt.value)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                period === opt.value
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        title="统计面板"
+        description="系统使用量与性能概览"
+        actions={
+          <div className="flex gap-2">
+            {periodOptions.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setPeriod(opt.value)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  period === opt.value
+                    ? 'bg-brand-600 text-white'
+                    : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       {/* Overview cards */}
       <StatsOverview data={overview} loading={loading} />

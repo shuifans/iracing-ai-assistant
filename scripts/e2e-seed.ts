@@ -6,6 +6,7 @@
  *   - e2e-kadmin      / e2e-kadmin-pw-123    (role=knowledge_admin)
  *   - e2e-user01..20  / e2e-user-pw-123      (role=user)        → >20 rows for /admin/users pagination
  *   - 21 knowledge_sources (submitted by e2e-kadmin)           → >20 rows for /knowledge sources pagination
+ *   - 21 knowledge_jobs (status=failed, one per source)        → >20 rows for /knowledge jobs pagination
  *
  * Idempotent: deletes the DB file (+WAL/SHM) first.
  */
@@ -53,6 +54,11 @@ async function main() {
     `INSERT INTO knowledge_sources (id, input_type, original_name, mime_type, relative_path, source_url, sha256, size_bytes, status, submitted_by, created_at, updated_at)
      VALUES (@id, 'file', @originalName, 'text/plain', NULL, NULL, @sha256, 10, 'stored', @submittedBy, @now, @now)`,
   );
+  // failed 为终态，不会被清洗 worker 拾取，纯粹用于列表分页
+  const insertJob = db.prepare(
+    `INSERT INTO knowledge_jobs (id, source_id, status, attempt, max_attempts, available_at, progress, job_kind, created_at, updated_at)
+     VALUES (@id, @sourceId, 'failed', 1, 3, @now, 0, 'clean', @now, @now)`,
+  );
 
   const kadminId = generateId();
   db.transaction(() => {
@@ -68,19 +74,21 @@ async function main() {
       });
     }
     for (let i = 1; i <= 21; i++) {
+      const sourceId = generateId();
       insertSource.run({
-        id: generateId(),
+        id: sourceId,
         originalName: `e2e-source-${i}.txt`,
         sha256: `e2e-seed-${String(i).padStart(4, '0')}`,
         submittedBy: kadminId,
         now,
       });
+      insertJob.run({ id: generateId(), sourceId, now });
     }
   })();
 
   db.close();
   console.log(
-    '[e2e-seed] seeded: e2e-admin, e2e-kadmin, 20 users, 21 knowledge_sources (submitted_by=e2e-kadmin)',
+    '[e2e-seed] seeded: e2e-admin, e2e-kadmin, 20 users, 21 knowledge_sources + 21 failed jobs (submitted_by=e2e-kadmin)',
   );
 }
 

@@ -38,7 +38,7 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-message"
-        className="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+        className="relative z-10 w-full max-w-md rounded-card bg-white p-6 shadow-pop"
       >
         <h3 id="confirm-dialog-title" className="text-lg font-semibold text-gray-900">
           {title}
@@ -51,7 +51,7 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           >
             {cancelLabel}
           </button>
@@ -61,7 +61,7 @@ export function ConfirmDialog({
             className={`inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
               danger
                 ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
-                : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
+                : 'bg-brand-600 hover:bg-brand-700 focus:ring-brand-500'
             }`}
           >
             {confirmLabel}
