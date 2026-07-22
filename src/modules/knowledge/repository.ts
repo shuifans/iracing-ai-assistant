@@ -22,7 +22,11 @@ import {
 } from '@/db/schema/knowledge';
 import { generateId } from '@/lib/uuid';
 import { utcNow } from '@/lib/datetime';
-import { knowledgeEvaluations } from '@/db/schema/evaluation';
+import {
+  knowledgeEvaluations,
+  evaluationDimensions,
+  evaluationFeedback,
+} from '@/db/schema/evaluation';
 import { auditLogs } from '@/db/schema/admin';
 import { AppError } from '@/lib/errors';
 import type { KnowledgeCategory, WikiSyncStatus } from '@/config/constants';
@@ -238,7 +242,12 @@ export function supersedeOldDrafts(sourceId: string, currentDraftId: string): vo
  * by draft status, evaluation tier, and sourceId (via job.source_id).
  */
 export function listDrafts(
-  params: CursorPageParams & { status?: string; sourceId?: string; tier?: string },
+  params: CursorPageParams & {
+    status?: string;
+    sourceId?: string;
+    tier?: string;
+    pendingPublish?: boolean;
+  },
 ): CursorPageResult<DraftListRow> {
   const db = getDb();
   const limit = params.limit ?? 20;
@@ -248,6 +257,11 @@ export function listDrafts(
     conditions.push(
       eq(knowledgeDrafts.status, params.status as typeof knowledgeDrafts.status._.data),
     );
+  }
+  if (params.pendingPublish) {
+    // Approved drafts whose job has not gone through publish yet.
+    conditions.push(eq(knowledgeDrafts.status, 'approved'));
+    conditions.push(eq(knowledgeJobs.status, 'approved'));
   }
   if (params.tier) {
     conditions.push(
@@ -267,6 +281,7 @@ export function listDrafts(
       tier: knowledgeEvaluations.tier,
       overallScore: knowledgeEvaluations.overallScore,
       evalStatus: knowledgeEvaluations.status,
+      jobStatus: knowledgeJobs.status,
       sourceOriginalName: knowledgeSources.originalName,
       sourceUrl: knowledgeSources.sourceUrl,
     })
@@ -706,12 +721,150 @@ export function getKnowledgeStats(): KnowledgeStats {
     .all()
     .map((r) => ({ key: r.tier ?? 'pending', count: r.count }));
 
+  const jobCount = (statuses: string[]) =>
+    jobsByStatus.filter((j) => statuses.includes(j.key)).reduce((sum, j) => sum + j.count, 0);
+
   return {
     items: { byStatus: itemsByStatus, byCategory: itemsByCategory, total: itemsTotal },
     drafts: { byStatus: draftsByStatus, reviewQueue, total: draftsTotal },
     sources: { total: sourcesTotal },
     jobs: { byStatus: jobsByStatus },
+    workflow: {
+      imported: jobCount(['queued', 'paused', 'extracting']),
+      cleaning: jobCount(['cleaning']),
+      pendingReview: jobCount(['pending_review']),
+      approvedPending: jobCount(['approved']),
+    },
     reClean: { jobsTotal: reCleanJobsTotal, byVersion: draftsByVersion },
     tierDistribution: tierDist,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Deletion (cascading, FK-safe)
+// ---------------------------------------------------------------------------
+
+// Terminal job states eligible for deletion from the task list.
+export const DELETABLE_JOB_STATUSES = ['published', 'rejected', 'failed', 'cancelled'] as const;
+
+/**
+ * Delete a terminal-state job and its dependent rows (draft, evaluations,
+ * dimensions, feedback) in one transaction. Blocked when a knowledge_item
+ * still references the job's draft — the item must be deleted first.
+ *
+ * Returns the deleted draft's relative path (for file cleanup) if one existed.
+ */
+export function deleteJobCascade(
+  jobId: string,
+  actorId: string,
+): { draftRelativePath: string | null } {
+  const db = getDb();
+
+  return db.transaction((tx) => {
+    const job = tx
+      .select()
+      .from(knowledgeJobs)
+      .where(eq(knowledgeJobs.id, jobId))
+      .limit(1)
+      .all()[0];
+    if (!job) {
+      throw new AppError('NOT_FOUND', `Job ${jobId} not found`);
+    }
+    if (!(DELETABLE_JOB_STATUSES as readonly string[]).includes(job.status)) {
+      throw new AppError(
+        'INVALID_STATE',
+        `只有终态任务（published/rejected/failed/cancelled）可删除，当前 '${job.status}'`,
+      );
+    }
+
+    const draft = tx
+      .select()
+      .from(knowledgeDrafts)
+      .where(eq(knowledgeDrafts.jobId, jobId))
+      .limit(1)
+      .all()[0];
+
+    let draftRelativePath: string | null = null;
+    if (draft) {
+      const referencingItem = tx
+        .select({ id: knowledgeItems.id })
+        .from(knowledgeItems)
+        .where(eq(knowledgeItems.draftId, draft.id))
+        .limit(1)
+        .all()[0];
+      if (referencingItem) {
+        throw new AppError(
+          'INVALID_STATE',
+          '该任务的草稿已发布为知识条目，请先在「管理知识」中删除对应条目',
+        );
+      }
+
+      const evals = tx
+        .select({ id: knowledgeEvaluations.id })
+        .from(knowledgeEvaluations)
+        .where(eq(knowledgeEvaluations.draftId, draft.id))
+        .all();
+      const evalIds = evals.map((e) => e.id);
+      if (evalIds.length > 0) {
+        tx.delete(evaluationDimensions)
+          .where(inArray(evaluationDimensions.evaluationId, evalIds))
+          .run();
+      }
+      tx.delete(evaluationFeedback).where(eq(evaluationFeedback.draftId, draft.id)).run();
+      if (evalIds.length > 0) {
+        tx.delete(knowledgeEvaluations).where(inArray(knowledgeEvaluations.id, evalIds)).run();
+      }
+      tx.delete(knowledgeDrafts).where(eq(knowledgeDrafts.id, draft.id)).run();
+      draftRelativePath = draft.draftRelativePath;
+    }
+
+    // Feedback rows from other drafts that reference this job (applied_to_job_id FK).
+    tx.update(evaluationFeedback)
+      .set({ appliedToJobId: null, updatedAt: utcNow() })
+      .where(eq(evaluationFeedback.appliedToJobId, jobId))
+      .run();
+
+    tx.delete(knowledgeJobs).where(eq(knowledgeJobs.id, jobId)).run();
+
+    tx.insert(auditLogs)
+      .values({
+        id: generateId(),
+        actorId,
+        action: 'knowledge.job_deleted',
+        resource: 'knowledge_job',
+        resourceId: jobId,
+        requestId: null,
+        ipHash: null,
+        changesJson: JSON.stringify({ status: job.status, draftId: draft?.id ?? null }),
+        createdAt: utcNow(),
+      })
+      .run();
+
+    return { draftRelativePath };
+  });
+}
+
+/**
+ * Delete an archived knowledge item row (+ audit). The wiki file removal and
+ * git commit are handled by the service layer before this is called.
+ */
+export function deleteItem(itemId: string, actorId: string): void {
+  const db = getDb();
+
+  db.transaction((tx) => {
+    tx.delete(knowledgeItems).where(eq(knowledgeItems.id, itemId)).run();
+    tx.insert(auditLogs)
+      .values({
+        id: generateId(),
+        actorId,
+        action: 'knowledge.item_deleted',
+        resource: 'knowledge_item',
+        resourceId: itemId,
+        requestId: null,
+        ipHash: null,
+        changesJson: null,
+        createdAt: utcNow(),
+      })
+      .run();
+  });
 }

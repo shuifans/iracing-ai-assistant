@@ -135,7 +135,10 @@ export default function ReviewPage() {
             extractedText={data.extractedText}
             renderedMarkdown={data.renderedMarkdown}
             onSuccess={() => {
-              setToast({ message: '操作成功', type: 'success' });
+              setToast({
+                message: '操作成功；通过审查的知识可在「知识管理 → 管理知识 → 待发布」中发布上线',
+                type: 'success',
+              });
               fetchDraft();
             }}
             onError={(msg) => setToast({ message: msg, type: 'error' })}

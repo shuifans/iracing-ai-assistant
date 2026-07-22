@@ -249,7 +249,7 @@ export function DraftReviewer({
                 disabled={submitting}
                 className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-green-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500/40 disabled:opacity-50"
               >
-                {submitting ? '处理中…' : '批准'}
+                {submitting ? '处理中…' : '通过审查'}
               </button>
               <button
                 type="button"

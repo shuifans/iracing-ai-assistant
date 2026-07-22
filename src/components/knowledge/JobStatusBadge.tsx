@@ -8,9 +8,11 @@ type JobBadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info';
 
 const jobStatusVariant: Record<JobStatus, JobBadgeVariant> = {
   queued: 'default',
+  paused: 'warning',
   extracting: 'info',
   cleaning: 'info',
   pending_review: 'warning',
+  approved: 'success',
   publishing: 'info',
   published: 'success',
   rejected: 'danger',
@@ -20,9 +22,11 @@ const jobStatusVariant: Record<JobStatus, JobBadgeVariant> = {
 
 const jobStatusLabels: Record<JobStatus, string> = {
   queued: '排队中',
+  paused: '已暂停',
   extracting: '提取中',
   cleaning: '清洗中',
-  pending_review: '待审核',
+  pending_review: '待审查',
+  approved: '已通过',
   publishing: '发布中',
   published: '已发布',
   rejected: '已拒绝',

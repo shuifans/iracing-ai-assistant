@@ -112,8 +112,16 @@ describe('jobs/service', () => {
       expect(canTransition('cleaning', 'pending_review')).toBe(true);
     });
 
-    it('pending_review → publishing: true', () => {
-      expect(canTransition('pending_review', 'publishing')).toBe(true);
+    it('pending_review → approved: true', () => {
+      expect(canTransition('pending_review', 'approved')).toBe(true);
+    });
+
+    it('approved → publishing: true', () => {
+      expect(canTransition('approved', 'publishing')).toBe(true);
+    });
+
+    it('pending_review → publishing: false (must approve first)', () => {
+      expect(canTransition('pending_review', 'publishing')).toBe(false);
     });
 
     it('publishing → published: true', () => {

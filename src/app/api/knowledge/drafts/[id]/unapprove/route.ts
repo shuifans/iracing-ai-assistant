@@ -7,7 +7,6 @@ import {
   validateOrigin,
 } from '@/modules/auth/middleware';
 import { successResponse } from '@/lib/response';
-import { AppError } from '@/lib/errors';
 import * as knowledgeService from '@/modules/knowledge/service';
 import { recordAudit } from '@/modules/audit/service';
 
@@ -18,7 +17,7 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-// POST — 通过审查（不发布；发布在「管理知识-待发布」中进行）
+// POST — 将已通过但未发布的 draft 退回待审查
 export const POST = withErrorHandler(
   async (request: NextRequest, context?: RouteContext): Promise<NextResponse> => {
     validateOrigin(request);
@@ -28,18 +27,12 @@ export const POST = withErrorHandler(
 
     const id = (await context!.params).id;
 
-    // Idempotency-Key header is required
-    const idempotencyKey = request.headers.get('Idempotency-Key');
-    if (!idempotencyKey) {
-      throw new AppError('VALIDATION_ERROR', 'Missing required header: Idempotency-Key');
-    }
-
-    await knowledgeService.approveDraftReview(id, user.id);
+    await knowledgeService.unapproveDraft(id, user.id);
 
     try {
       recordAudit({
         actorId: user.id,
-        action: 'knowledge.approved',
+        action: 'knowledge.unapproved',
         resource: 'knowledge_draft',
         resourceId: id,
         requestId: request.headers.get('x-request-id') ?? undefined,
@@ -49,6 +42,6 @@ export const POST = withErrorHandler(
       /* audit failure must not break main flow */
     }
 
-    return NextResponse.json(successResponse({ approved: true, draftId: id }));
+    return NextResponse.json(successResponse({ unapproved: true, draftId: id }));
   },
 );

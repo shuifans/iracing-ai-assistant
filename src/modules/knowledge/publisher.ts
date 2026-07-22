@@ -84,9 +84,9 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
   const tmpPath = `${targetPath}.tmp`;
   const bakPath = `${targetPath}.bak`;
 
-  const updated = jobsRepo.updateJobStatus(jobId, 'pending_review', 'publishing');
+  const updated = jobsRepo.updateJobStatus(jobId, 'approved', 'publishing');
   if (!updated) {
-    throw new AppError('INVALID_STATE', 'Job is not in pending_review state — cannot publish');
+    throw new AppError('INVALID_STATE', 'Job is not in approved state — cannot publish');
   }
 
   let itemId: string;
@@ -139,7 +139,7 @@ export async function publishDraft(input: PublishInput): Promise<PublishResult> 
     if (indexUpdated) {
       writeIndex(wikiRoot, rebuildIndex(wikiRoot));
     }
-    jobsRepo.updateJobStatus(jobId, 'publishing', 'pending_review');
+    jobsRepo.updateJobStatus(jobId, 'publishing', 'approved');
     throw error;
   } finally {
     if (fs.existsSync(bakPath)) fs.unlinkSync(bakPath);

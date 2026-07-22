@@ -97,12 +97,17 @@ export interface ClaimResult {
 
 export const VALID_TRANSITIONS: readonly StatusTransition[] = [
   { from: 'queued', to: 'extracting' },
+  { from: 'queued', to: 'paused' },
+  { from: 'paused', to: 'queued' },
+  { from: 'paused', to: 'cancelled' },
   { from: 'extracting', to: 'cleaning' },
   { from: 'extracting', to: 'failed' },
   { from: 'cleaning', to: 'pending_review' },
   { from: 'cleaning', to: 'failed' },
-  { from: 'pending_review', to: 'publishing' },
+  { from: 'pending_review', to: 'approved' },
   { from: 'pending_review', to: 'rejected' },
+  { from: 'approved', to: 'pending_review' }, // unapprove
+  { from: 'approved', to: 'publishing' },
   { from: 'publishing', to: 'published' },
   { from: 'publishing', to: 'failed' },
   { from: 'failed', to: 'queued' }, // retry

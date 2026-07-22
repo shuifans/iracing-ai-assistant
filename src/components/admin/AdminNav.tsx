@@ -55,8 +55,14 @@ export function AdminNav() {
           </nav>
         </div>
 
-        {/* 右侧: 返回聊天 + 退出 (桌面) */}
+        {/* 右侧: 知识管理 + 返回聊天 + 退出 (桌面) */}
         <div className="hidden items-center gap-2 md:flex">
+          <Link
+            href="/knowledge"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+          >
+            知识管理
+          </Link>
           <Link
             href="/chat"
             className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
@@ -128,6 +134,13 @@ export function AdminNav() {
               </Link>
             ))}
             <hr className="border-gray-700" />
+            <Link
+              href="/knowledge"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block rounded-md px-3 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+            >
+              知识管理
+            </Link>
             <Link
               href="/chat"
               onClick={() => setMobileMenuOpen(false)}

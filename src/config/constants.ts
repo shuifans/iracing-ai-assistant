@@ -36,9 +36,11 @@ export type KnowledgeSourceStatus = (typeof KNOWLEDGE_SOURCE_STATUSES)[number];
 // 任务状态（SPEC 8.3）
 export const JOB_STATUSES = [
   'queued',
+  'paused',
   'extracting',
   'cleaning',
   'pending_review',
+  'approved',
   'publishing',
   'published',
   'rejected',

@@ -19,6 +19,8 @@ import {
   completeJob as repoCompleteJob,
   retryJob,
   cancelJob,
+  pauseJob,
+  resumeJob,
   recoverExpiredLeases as repoRecoverExpiredLeases,
 } from '@/modules/jobs/repository';
 import { VALID_TRANSITIONS } from '@/modules/jobs/types';
@@ -118,9 +120,29 @@ export async function retryFailedJob(jobId: string): Promise<{ success: boolean 
 // ---------------------------------------------------------------------------
 
 /**
- * Cancel a queued job. Throws if the job is not in 'queued' state.
+ * Cancel a queued or paused job.
  */
 export async function cancelQueuedJob(jobId: string): Promise<{ success: boolean }> {
+  const job = getJob(jobId);
+  if (!job) {
+    throw new AppError('NOT_FOUND', `Job ${jobId} not found`);
+  }
+
+  if (job.status !== 'queued' && job.status !== 'paused') {
+    throw new AppError(
+      'INVALID_STATE',
+      `Cannot cancel job in '${job.status}' state — must be 'queued' or 'paused'`,
+    );
+  }
+
+  const ok = cancelJob(jobId);
+  return { success: ok };
+}
+
+/**
+ * Pause a queued job so the worker won't claim it.
+ */
+export async function pauseQueuedJob(jobId: string): Promise<{ success: boolean }> {
   const job = getJob(jobId);
   if (!job) {
     throw new AppError('NOT_FOUND', `Job ${jobId} not found`);
@@ -129,11 +151,31 @@ export async function cancelQueuedJob(jobId: string): Promise<{ success: boolean
   if (job.status !== 'queued') {
     throw new AppError(
       'INVALID_STATE',
-      `Cannot cancel job in '${job.status}' state — must be 'queued'`,
+      `Cannot pause job in '${job.status}' state — must be 'queued'`,
     );
   }
 
-  const ok = cancelJob(jobId);
+  const ok = pauseJob(jobId);
+  return { success: ok };
+}
+
+/**
+ * Resume a paused job back into the queue.
+ */
+export async function resumePausedJob(jobId: string): Promise<{ success: boolean }> {
+  const job = getJob(jobId);
+  if (!job) {
+    throw new AppError('NOT_FOUND', `Job ${jobId} not found`);
+  }
+
+  if (job.status !== 'paused') {
+    throw new AppError(
+      'INVALID_STATE',
+      `Cannot resume job in '${job.status}' state — must be 'paused'`,
+    );
+  }
+
+  const ok = resumeJob(jobId);
   return { success: ok };
 }
 

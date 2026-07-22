@@ -79,6 +79,7 @@ export interface DraftListRow {
   tier: string | null;
   overallScore: number | null;
   evalStatus: string | null;
+  jobStatus: string | null;
   sourceOriginalName: string | null;
   sourceUrl: string | null;
 }
@@ -94,8 +95,10 @@ export interface DraftListItem {
   tier: string | null;
   overallScore: number | null;
   status: string;
+  jobStatus: string | null;
   version: number;
   reCleanCount: number;
+  reviewedAt: string | null;
   createdAt: string;
 }
 
@@ -121,6 +124,12 @@ export interface KnowledgeStats {
   };
   sources: { total: number };
   jobs: { byStatus: CountBucket[] };
+  workflow: {
+    imported: number;
+    cleaning: number;
+    pendingReview: number;
+    approvedPending: number;
+  };
   reClean: {
     jobsTotal: number;
     byVersion: { version: number; count: number }[];

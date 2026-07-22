@@ -157,7 +157,15 @@ export function listJobs(params: {
 
   const conditions = [];
   if (params.status) {
-    conditions.push(eq(knowledgeJobs.status, params.status as (typeof JOB_STATUSES)[number]));
+    const statuses = params.status
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean) as (typeof JOB_STATUSES)[number][];
+    if (statuses.length === 1) {
+      conditions.push(eq(knowledgeJobs.status, statuses[0]!));
+    } else if (statuses.length > 1) {
+      conditions.push(inArray(knowledgeJobs.status, statuses));
+    }
   }
   if (params.sourceId) {
     conditions.push(eq(knowledgeJobs.sourceId, params.sourceId));
@@ -402,7 +410,7 @@ export function retryJob(id: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Cancel a queued job. CAS: only succeeds if status='queued'.
+ * Cancel a queued or paused job. CAS: only succeeds if status is queued/paused.
  * Returns true if the cancellation was applied.
  */
 export function cancelJob(id: string): boolean {
@@ -416,7 +424,39 @@ export function cancelJob(id: string): boolean {
       finishedAt: now,
       updatedAt: now,
     })
+    .where(and(eq(knowledgeJobs.id, id), inArray(knowledgeJobs.status, ['queued', 'paused'])))
+    .run();
+
+  return result.changes > 0;
+}
+
+/**
+ * Pause a queued job. CAS: only succeeds if status='queued'.
+ */
+export function pauseJob(id: string): boolean {
+  const db = getDb();
+  const now = utcNow();
+
+  const result = db
+    .update(knowledgeJobs)
+    .set({ status: 'paused', updatedAt: now })
     .where(and(eq(knowledgeJobs.id, id), eq(knowledgeJobs.status, 'queued')))
+    .run();
+
+  return result.changes > 0;
+}
+
+/**
+ * Resume a paused job back to the queue. CAS: only succeeds if status='paused'.
+ */
+export function resumeJob(id: string): boolean {
+  const db = getDb();
+  const now = utcNow();
+
+  const result = db
+    .update(knowledgeJobs)
+    .set({ status: 'queued', availableAt: now, updatedAt: now })
+    .where(and(eq(knowledgeJobs.id, id), eq(knowledgeJobs.status, 'paused')))
     .run();
 
   return result.changes > 0;

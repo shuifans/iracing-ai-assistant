@@ -18,7 +18,7 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-// POST — 通过审查（不发布；发布在「管理知识-待发布」中进行）
+// POST — 发布已通过审查的 draft（写 wiki 文件 + git 提交）
 export const POST = withErrorHandler(
   async (request: NextRequest, context?: RouteContext): Promise<NextResponse> => {
     validateOrigin(request);
@@ -28,18 +28,17 @@ export const POST = withErrorHandler(
 
     const id = (await context!.params).id;
 
-    // Idempotency-Key header is required
     const idempotencyKey = request.headers.get('Idempotency-Key');
     if (!idempotencyKey) {
       throw new AppError('VALIDATION_ERROR', 'Missing required header: Idempotency-Key');
     }
 
-    await knowledgeService.approveDraftReview(id, user.id);
+    const result = await knowledgeService.publishDraftReview(id, user.id, idempotencyKey);
 
     try {
       recordAudit({
         actorId: user.id,
-        action: 'knowledge.approved',
+        action: 'knowledge.published',
         resource: 'knowledge_draft',
         resourceId: id,
         requestId: request.headers.get('x-request-id') ?? undefined,
@@ -49,6 +48,6 @@ export const POST = withErrorHandler(
       /* audit failure must not break main flow */
     }
 
-    return NextResponse.json(successResponse({ approved: true, draftId: id }));
+    return NextResponse.json(successResponse(result));
   },
 );

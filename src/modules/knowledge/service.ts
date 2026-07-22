@@ -237,7 +237,8 @@ export async function getSource(id: string): Promise<KnowledgeSource> {
 }
 
 /**
- * List jobs with cursor-based pagination.
+ * List jobs with cursor-based pagination, enriched with the source display
+ * name (originalName / sourceUrl) for the admin task lists.
  */
 export async function listJobs(params: {
   limit?: number;
@@ -245,7 +246,16 @@ export async function listJobs(params: {
   status?: string;
   sourceId?: string;
 }): Promise<CursorPageResult<any>> {
-  return jobsService.listJobs(params);
+  const result = await jobsService.listJobs(params);
+  const items = result.items.map((job: any) => {
+    const source = knowledgeRepo.getSource(job.sourceId);
+    return {
+      ...job,
+      sourceName: source?.originalName ?? source?.sourceUrl ?? null,
+      sourceInputType: source?.inputType ?? null,
+    };
+  });
+  return { items, nextCursor: result.nextCursor };
 }
 
 /**
@@ -269,7 +279,12 @@ export async function listItems(
  * enriched with evaluation tier/score, parsed category, and re-clean count.
  */
 export async function listDrafts(
-  params: CursorPageParams & { status?: string; sourceId?: string; tier?: string },
+  params: CursorPageParams & {
+    status?: string;
+    sourceId?: string;
+    tier?: string;
+    pendingPublish?: boolean;
+  },
 ): Promise<CursorPageResult<DraftListItem>> {
   const result = knowledgeRepo.listDrafts(params);
 
@@ -295,8 +310,10 @@ export async function listDrafts(
       tier: row.tier,
       overallScore: row.overallScore,
       status: row.draft.status,
+      jobStatus: row.jobStatus,
       version: row.draft.version,
       reCleanCount: Math.max(0, row.draft.version - 1),
+      reviewedAt: row.draft.reviewedAt,
       createdAt: row.draft.createdAt,
     };
   });
@@ -564,14 +581,73 @@ export async function approveDraft(
 }
 
 /**
- * Publish a reviewed draft via the atomic eight-step publisher.
+ * Approve a reviewed draft WITHOUT publishing (step 1 of the two-step flow).
  *
- * This is the real publish path (replaces the simplified approveDraft): writes
- * the wiki file, rebuilds index.md, git commits, and — crucially for the
- * revision flow — upserts the knowledge_item by wikiPath so a re-published
+ * Marks draft pending_review → approved and CAS-transitions the job to
+ * 'approved'. The draft then appears in the 管理知识「待发布」list, where an
+ * admin explicitly publishes it via publishDraftReview.
+ */
+export async function approveDraftReview(draftId: string, reviewedBy: string): Promise<void> {
+  const draft = knowledgeRepo.getDraft(draftId);
+  if (!draft) {
+    throw new AppError('NOT_FOUND', `Draft ${draftId} not found`);
+  }
+
+  if (draft.status !== 'pending_review') {
+    throw new AppError(
+      'INVALID_STATE',
+      `Draft must be in pending_review status to be approved, got '${draft.status}'`,
+    );
+  }
+
+  const casOk = jobsRepo.updateJobStatus(draft.jobId, 'pending_review', 'approved');
+  if (!casOk) {
+    throw new AppError('INVALID_STATE', 'Job is not in pending_review state — cannot approve');
+  }
+
+  knowledgeRepo.updateDraft(draftId, {
+    status: 'approved',
+    reviewedBy,
+    reviewedAt: utcNow(),
+  });
+}
+
+/**
+ * Send an approved-but-unpublished draft back to review (undo approve).
+ */
+export async function unapproveDraft(draftId: string, reviewedBy: string): Promise<void> {
+  const draft = knowledgeRepo.getDraft(draftId);
+  if (!draft) {
+    throw new AppError('NOT_FOUND', `Draft ${draftId} not found`);
+  }
+
+  if (draft.status !== 'approved') {
+    throw new AppError(
+      'INVALID_STATE',
+      `Draft must be in approved status to be un-approved, got '${draft.status}'`,
+    );
+  }
+
+  const casOk = jobsRepo.updateJobStatus(draft.jobId, 'approved', 'pending_review');
+  if (!casOk) {
+    throw new AppError('INVALID_STATE', '任务不在待发布状态（可能已发布），无法退回审查');
+  }
+
+  knowledgeRepo.updateDraft(draftId, {
+    status: 'pending_review',
+    reviewedBy,
+    reviewedAt: utcNow(),
+  });
+}
+
+/**
+ * Publish an approved draft via the atomic eight-step publisher (step 2 of the
+ * two-step flow, triggered from 管理知识「待发布」).
+ *
+ * Writes the wiki file, rebuilds index.md, git commits, and — crucially for
+ * the revision flow — upserts the knowledge_item by wikiPath so a re-published
  * revision overwrites the existing item in place instead of violating the
- * uniqueIndex(wikiPath). The publish guard + draft 'approved' bookkeeping are
- * handled inside publisher.publishDraft.
+ * uniqueIndex(wikiPath).
  */
 export async function publishDraftReview(
   draftId: string,
@@ -585,10 +661,10 @@ export async function publishDraftReview(
     throw new AppError('NOT_FOUND', `Draft ${draftId} not found`);
   }
 
-  if (draft.status !== 'pending_review') {
+  if (draft.status !== 'approved') {
     throw new AppError(
       'INVALID_STATE',
-      `Draft must be in pending_review status to be approved, got '${draft.status}'`,
+      `Draft must be in approved status to be published, got '${draft.status}'`,
     );
   }
 
@@ -791,6 +867,72 @@ export async function restoreItem(id: string): Promise<void> {
     );
   }
   knowledgeRepo.restoreItem(id);
+}
+
+// ---------------------------------------------------------------------------
+// Deletion
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete a terminal-state job with its draft/evaluation records, then clean up
+ * the draft file on disk (best-effort).
+ */
+export async function deleteJob(jobId: string, actorId: string): Promise<void> {
+  const { draftRelativePath } = knowledgeRepo.deleteJobCascade(jobId, actorId);
+
+  if (draftRelativePath) {
+    const draftFilePath = path.join(env.DATA_ROOT as string, 'drafts', draftRelativePath);
+    try {
+      if (fs.existsSync(draftFilePath)) fs.unlinkSync(draftFilePath);
+    } catch {
+      /* file cleanup is best-effort — DB rows are already gone */
+    }
+  }
+}
+
+/**
+ * Permanently delete an archived knowledge item: removes the wiki file,
+ * rebuilds the index/agent contract, git commits the removal (best-effort),
+ * then deletes the DB row.
+ */
+export async function deleteArchivedItem(itemId: string, actorId: string): Promise<void> {
+  const item = knowledgeRepo.getItem(itemId);
+  if (!item) {
+    throw new AppError('NOT_FOUND', `Knowledge item ${itemId} not found`);
+  }
+  if (item.status !== 'archived') {
+    throw new AppError('INVALID_STATE', '只有已下线（归档）的条目可以删除，请先下线该条目');
+  }
+
+  const wikiRoot = env.WIKI_ROOT as string;
+  const wikiFilePath = path.join(wikiRoot, item.wikiPath);
+  const removedFile = fs.existsSync(wikiFilePath);
+  if (removedFile) {
+    fs.unlinkSync(wikiFilePath);
+    const { rebuildIndex, writeIndex } = await import('./wiki-index');
+    const { writeKnowledgeAgentContract } = await import('./agent-contract');
+    writeIndex(wikiRoot, rebuildIndex(wikiRoot));
+    writeKnowledgeAgentContract(wikiRoot);
+  }
+
+  knowledgeRepo.deleteItem(itemId, actorId);
+
+  if (removedFile) {
+    try {
+      const { execFileSync } = await import('child_process');
+      execFileSync('git', ['add', '-A', '--', item.wikiPath, 'index.md', 'KNOWLEDGE.md'], {
+        cwd: wikiRoot,
+      });
+      execFileSync('git', ['commit', '-m', `knowledge: remove ${item.title} [${itemId}]`], {
+        cwd: wikiRoot,
+      });
+      if (env.WIKI_GIT_REMOTE) {
+        execFileSync('git', ['push', env.WIKI_GIT_REMOTE, env.WIKI_GIT_BRANCH], { cwd: wikiRoot });
+      }
+    } catch {
+      /* git sync is best-effort — the file and DB row are already removed */
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

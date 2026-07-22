@@ -28,6 +28,7 @@ export const GET = withErrorHandler(async (request: NextRequest): Promise<NextRe
   const status = url.searchParams.get('status') ?? undefined;
   const sourceId = url.searchParams.get('sourceId') ?? undefined;
   const tier = url.searchParams.get('tier') ?? undefined;
+  const pendingPublish = url.searchParams.get('pendingPublish') === '1';
 
   const parsed = cursorPageSchema.parse({ limit: limitParam ?? 20, cursor });
 
@@ -37,6 +38,7 @@ export const GET = withErrorHandler(async (request: NextRequest): Promise<NextRe
     status,
     sourceId,
     tier,
+    pendingPublish,
   });
 
   return NextResponse.json(

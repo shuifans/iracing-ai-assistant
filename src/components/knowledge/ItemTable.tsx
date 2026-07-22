@@ -23,9 +23,18 @@ interface ItemTableProps {
   onRestore?: (id: string) => void;
   onViewContent?: (id: string) => void;
   onRevise?: (id: string) => void;
+  onDelete?: (id: string) => void;
 }
 
-export function ItemTable({ data, loading, onArchive, onRestore, onViewContent, onRevise }: ItemTableProps) {
+export function ItemTable({
+  data,
+  loading,
+  onArchive,
+  onRestore,
+  onViewContent,
+  onRevise,
+  onDelete,
+}: ItemTableProps) {
   const columns = [
     {
       key: 'title',
@@ -85,7 +94,7 @@ export function ItemTable({ data, loading, onArchive, onRestore, onViewContent, 
               onClick={() => onRevise(item.id)}
               className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
             >
-              派生修订
+              重新清洗
             </button>
           )}
           {item.status === 'published' && onArchive && (
@@ -94,7 +103,7 @@ export function ItemTable({ data, loading, onArchive, onRestore, onViewContent, 
               onClick={() => onArchive(item.id)}
               className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
             >
-              归档
+              下线
             </button>
           )}
           {item.status === 'archived' && onRestore && (
@@ -103,7 +112,16 @@ export function ItemTable({ data, loading, onArchive, onRestore, onViewContent, 
               onClick={() => onRestore(item.id)}
               className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
             >
-              恢复
+              重新上线
+            </button>
+          )}
+          {item.status === 'archived' && onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(item.id)}
+              className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500/40"
+            >
+              删除
             </button>
           )}
         </div>

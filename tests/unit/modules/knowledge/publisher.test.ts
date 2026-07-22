@@ -267,7 +267,7 @@ describe('publishDraft', () => {
     expect(mockUpdateJobStatus).not.toHaveBeenCalledWith(
       SAMPLE_JOB_ID,
       'publishing',
-      'pending_review',
+      'approved',
     );
     expect(mockUnlinkSync).not.toHaveBeenCalledWith(
       '/data/md-wiki/getting-started/first-race/test.md',
@@ -286,7 +286,7 @@ describe('publishDraft', () => {
     expect(mockUpdateJobStatus).not.toHaveBeenCalledWith(
       SAMPLE_JOB_ID,
       'publishing',
-      'pending_review',
+      'approved',
     );
     expect(mockUnlinkSync).not.toHaveBeenCalledWith(
       '/data/md-wiki/getting-started/first-race/test.md',
@@ -315,7 +315,7 @@ describe('publishDraft', () => {
     expect(mockUpdateJobStatus).not.toHaveBeenCalledWith(
       SAMPLE_JOB_ID,
       'publishing',
-      'pending_review',
+      'approved',
     );
     expect(mockUnlinkSync).not.toHaveBeenCalledWith(
       '/data/md-wiki/getting-started/first-race/test.md',
@@ -347,7 +347,7 @@ describe('publishDraft', () => {
       expect.stringContaining('.bak'),
       expect.stringContaining('test.md'),
     );
-    expect(mockUpdateJobStatus).toHaveBeenCalledWith(SAMPLE_JOB_ID, 'publishing', 'pending_review');
+    expect(mockUpdateJobStatus).toHaveBeenCalledWith(SAMPLE_JOB_ID, 'publishing', 'approved');
   });
 
   it('rebuilds index after a DB transaction failure restores the target file', async () => {
@@ -381,7 +381,7 @@ describe('publishDraft', () => {
   it('CAS failure does not touch the filesystem', async () => {
     mockUpdateJobStatus.mockReturnValue(false);
 
-    await expect(publishDraft(makeInput())).rejects.toThrow('Job is not in pending_review state');
+    await expect(publishDraft(makeInput())).rejects.toThrow('Job is not in approved state');
     expect(mockOpenSync).not.toHaveBeenCalled();
   });
 });

@@ -2,44 +2,35 @@
 
 import { useState, useEffect, useCallback, startTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Tabs, Pagination, FilterBar, ConfirmDialog, Toast, StatCard } from '@/components/common';
-import { DataTable } from '@/components/common';
+import { Tabs, Pagination, FilterBar, ConfirmDialog, Toast, DataTable } from '@/components/common';
 import { authFetch } from '@/lib/auth-client';
-import { SourceUploadForm } from '@/components/knowledge/SourceUploadForm';
-import { JobStatusBadge, SourceStatusBadge } from '@/components/knowledge/JobStatusBadge';
+import { JobStatusBadge } from '@/components/knowledge/JobStatusBadge';
 import { ItemTable } from '@/components/knowledge/ItemTable';
 import { ItemContentModal } from '@/components/knowledge/ItemContentModal';
 import { WebSourceManager } from '@/components/knowledge/WebSourceManager';
-import type { JobStatus } from '@/config/constants';
+import { AddKnowledgeModal } from '@/components/knowledge/AddKnowledgeModal';
 import {
-  JOB_STATUSES,
-  KNOWLEDGE_CATEGORIES,
-  EVALUATION_TIERS,
-  EVALUATION_STATUSES,
-  DRAFT_STATUSES,
-} from '@/config/constants';
+  WorkflowBoard,
+  STAGE_JOB_STATUSES,
+  type WorkflowStage,
+} from '@/components/knowledge/WorkflowBoard';
+import type { JobStatus } from '@/config/constants';
+import { JOB_STATUSES, KNOWLEDGE_CATEGORIES } from '@/config/constants';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface Source {
-  id: string;
-  inputType: string;
-  originalName?: string | null;
-  sourceUrl?: string | null;
-  status: 'stored' | 'queued' | 'processing' | 'ready' | 'failed' | 'archived';
-  createdAt: string;
-  [key: string]: unknown;
-}
-
 interface Job {
   id: string;
   sourceId: string;
+  sourceName?: string | null;
+  sourceInputType?: string | null;
   status: JobStatus;
   attempt: number;
   maxAttempts: number;
   progress: number;
+  jobKind?: string;
   errorCode?: string | null;
   errorMessage?: string | null;
   createdAt: string;
@@ -59,18 +50,6 @@ interface KnowledgeItem {
   [key: string]: unknown;
 }
 
-interface Evaluation {
-  id: string;
-  draftId: string;
-  tier: string;
-  overallScore: number;
-  status: string;
-  deepEval: boolean;
-  createdAt: string;
-  updatedAt: string;
-  [key: string]: unknown;
-}
-
 interface Draft {
   id: string;
   title: string;
@@ -80,65 +59,99 @@ interface Draft {
   tier: string | null;
   overallScore: number | null;
   status: string;
+  jobStatus: string | null;
   version: number;
   reCleanCount: number;
+  reviewedAt: string | null;
   createdAt: string;
   [key: string]: unknown;
 }
 
-interface StatsBucket {
-  key: string;
-  count: number;
-}
-
 interface KnowledgeStats {
-  items: { byStatus: StatsBucket[]; byCategory: StatsBucket[]; total: number };
-  drafts: { byStatus: StatsBucket[]; reviewQueue: number; total: number };
-  sources: { total: number };
-  jobs: { byStatus: StatsBucket[] };
-  reClean: { jobsTotal: number; byVersion: { version: number; count: number }[] };
-  tierDistribution: StatsBucket[];
+  items: { byStatus: { key: string; count: number }[]; total: number };
+  workflow: {
+    imported: number;
+    cleaning: number;
+    pendingReview: number;
+    approvedPending: number;
+  };
+  [key: string]: unknown;
 }
 
+const TIER_BADGE: Record<string, string> = {
+  A: 'bg-green-100 text-green-800',
+  B: 'bg-blue-100 text-blue-800',
+  C: 'bg-yellow-100 text-yellow-800',
+  D: 'bg-red-100 text-red-800',
+  pending: 'bg-gray-100 text-gray-600',
+};
+
+// 导入知识 tab 默认展示的（未完成）任务状态集合
+const IMPORT_DEFAULT_STATUSES =
+  'queued,paused,extracting,cleaning,pending_review,approved,failed';
+
+// 终态任务（可删除）
+const TERMINAL_JOB_STATUSES: JobStatus[] = ['published', 'rejected', 'failed', 'cancelled'];
+
 // ---------------------------------------------------------------------------
-// Custom hook for tab-based data fetching
+// Page component
 // ---------------------------------------------------------------------------
 
-function useKnowledgePageData() {
-  const [activeTab, setActiveTab] = useState('overview');
+export default function KnowledgePage() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState('import');
+  const [toast, setToast] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'info';
+  } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
-  // ── Sources ─────────────────────────────────────────────────────────────
-  const [sources, setSources] = useState<Source[]>([]);
-  const [sourcesLoading, setSourcesLoading] = useState(false);
-  const [sourcesCursor, setSourcesCursor] = useState<string | null>(null);
-  const [sourcesCursorStack, setSourcesCursorStack] = useState<(string | null)[]>([]);
+  // 前端角色守卫（API 侧已有 knowledge_admin/admin 强校验兜底）
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch('/api/auth/me');
+        if (res.ok) {
+          const json = (await res.json()) as { data?: { user?: { role?: string } } };
+          const role = json.data?.user?.role;
+          if (role !== 'admin' && role !== 'knowledge_admin') router.replace('/chat');
+        }
+      } catch {
+        /* auth handled by layout */
+      }
+    })();
+  }, [router]);
 
-  const fetchSources = useCallback(async (cursor?: string) => {
-    setSourcesLoading(true);
+  // ── Stats（工作流看板计数） ────────────────────────────────────────────────
+  const [stats, setStats] = useState<KnowledgeStats | null>(null);
+
+  const fetchStats = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ limit: '20' });
-      if (cursor) params.set('cursor', cursor);
-      const res = await authFetch(`/api/knowledge/sources?${params.toString()}`);
-      if (!res.ok) throw new Error('加载来源失败');
-      const json = (await res.json()) as {
-        data: { sources: Source[] };
-        meta?: { nextCursor: string | null };
-      };
-      setSources(json.data.sources);
-      setSourcesCursor(json.meta?.nextCursor ?? null);
+      const res = await authFetch(`/api/knowledge/stats`);
+      if (!res.ok) throw new Error('加载统计失败');
+      const json = (await res.json()) as { data: { stats: KnowledgeStats } };
+      setStats(json.data.stats);
     } catch {
-      // handled by toast in component
-    } finally {
-      setSourcesLoading(false);
+      /* toast handled elsewhere */
     }
   }, []);
 
-  // ── Jobs ────────────────────────────────────────────────────────────────
+  // ── Jobs（导入知识 / 管理任务共用） ─────────────────────────────────────────
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsCursor, setJobsCursor] = useState<string | null>(null);
   const [jobsCursorStack, setJobsCursorStack] = useState<(string | null)[]>([]);
+  // 导入知识：工作流阶段过滤；管理任务：单状态过滤
+  const [activeStage, setActiveStage] = useState<WorkflowStage | null>(null);
   const [jobStatusFilter, setJobStatusFilter] = useState('');
+
+  const importStatusParam = activeStage
+    ? STAGE_JOB_STATUSES[activeStage]
+    : IMPORT_DEFAULT_STATUSES;
 
   const fetchJobs = useCallback(async (cursor?: string, status?: string) => {
     setJobsLoading(true);
@@ -155,48 +168,59 @@ function useKnowledgePageData() {
       setJobs(json.data.jobs);
       setJobsCursor(json.meta?.nextCursor ?? null);
     } catch {
-      // handled by toast in component
+      /* toast handled by actions */
     } finally {
       setJobsLoading(false);
     }
   }, []);
 
-  // ── Items ───────────────────────────────────────────────────────────────
+  // 当前 tab 对应的任务过滤参数
+  const currentJobStatusParam =
+    activeTab === 'import' ? importStatusParam : jobStatusFilter || undefined;
+
+  const refreshJobs = useCallback(() => {
+    setJobsCursorStack([]);
+    fetchJobs(
+      undefined,
+      activeTab === 'import' ? importStatusParam : jobStatusFilter || undefined,
+    );
+    fetchStats();
+  }, [activeTab, importStatusParam, jobStatusFilter, fetchJobs, fetchStats]);
+
+  // ── 管理知识：待发布 drafts ────────────────────────────────────────────────
+  const [pendingDrafts, setPendingDrafts] = useState<Draft[]>([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [pendingCursor, setPendingCursor] = useState<string | null>(null);
+  const [pendingCursorStack, setPendingCursorStack] = useState<(string | null)[]>([]);
+
+  const fetchPendingDrafts = useCallback(async (cursor?: string) => {
+    setPendingLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '20', pendingPublish: '1' });
+      if (cursor) params.set('cursor', cursor);
+      const res = await authFetch(`/api/knowledge/drafts?${params.toString()}`);
+      if (!res.ok) throw new Error('加载待发布列表失败');
+      const json = (await res.json()) as {
+        data: { drafts: Draft[] };
+        meta?: { nextCursor: string | null };
+      };
+      setPendingDrafts(json.data.drafts);
+      setPendingCursor(json.meta?.nextCursor ?? null);
+    } catch {
+      /* toast handled by actions */
+    } finally {
+      setPendingLoading(false);
+    }
+  }, []);
+
+  // ── 管理知识：已发布 items ────────────────────────────────────────────────
+  const [manageView, setManageView] = useState<'pending' | 'published' | 'web'>('pending');
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [itemsCursor, setItemsCursor] = useState<string | null>(null);
   const [itemsCursorStack, setItemsCursorStack] = useState<(string | null)[]>([]);
   const [itemFilters, setItemFilters] = useState({ category: '', status: '' });
-
-  // ── Evaluations (评估 / 反馈 tabs share this data source) ────────────────
-  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
-  const [evaluationsLoading, setEvaluationsLoading] = useState(false);
-  const [evaluationsCursor, setEvaluationsCursor] = useState<string | null>(null);
-  const [evaluationsCursorStack, setEvaluationsCursorStack] = useState<(string | null)[]>([]);
-  const [evalTierFilter, setEvalTierFilter] = useState('');
-  const [evalStatusFilter, setEvalStatusFilter] = useState('');
-
-  const fetchEvaluations = useCallback(async (cursor?: string, tier?: string, status?: string) => {
-    setEvaluationsLoading(true);
-    try {
-      const params = new URLSearchParams({ limit: '20' });
-      if (cursor) params.set('cursor', cursor);
-      if (tier) params.set('tier', tier);
-      if (status) params.set('status', status);
-      const res = await authFetch(`/api/knowledge/evaluations?${params.toString()}`);
-      if (!res.ok) throw new Error('加载评估失败');
-      const json = (await res.json()) as {
-        data: { evaluations: Evaluation[] };
-        meta?: { nextCursor: string | null };
-      };
-      setEvaluations(json.data.evaluations);
-      setEvaluationsCursor(json.meta?.nextCursor ?? null);
-    } catch {
-      // handled by toast in component
-    } finally {
-      setEvaluationsLoading(false);
-    }
-  }, []);
+  const [contentItemId, setContentItemId] = useState<string | null>(null);
 
   const fetchItems = useCallback(async (cursor?: string, filters?: Record<string, string>) => {
     setItemsLoading(true);
@@ -214,261 +238,125 @@ function useKnowledgePageData() {
       setItems(json.data.items);
       setItemsCursor(json.meta?.nextCursor ?? null);
     } catch {
-      // handled by toast in component
+      /* toast handled by actions */
     } finally {
       setItemsLoading(false);
     }
   }, []);
 
-  // ── Drafts (候选稿 — cleaned drafts pending review) ───────────────────────
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [draftsLoading, setDraftsLoading] = useState(false);
-  const [draftsCursor, setDraftsCursor] = useState<string | null>(null);
-  const [draftsCursorStack, setDraftsCursorStack] = useState<(string | null)[]>([]);
-  const [draftFilters, setDraftFilters] = useState({ status: '', tier: '' });
+  // ── 添加知识 modal ───────────────────────────────────────────────────────
+  const [addModalOpen, setAddModalOpen] = useState(false);
 
-  const fetchDrafts = useCallback(async (cursor?: string, filters?: Record<string, string>) => {
-    setDraftsLoading(true);
-    try {
-      const params = new URLSearchParams({ limit: '20' });
-      if (cursor) params.set('cursor', cursor);
-      if (filters?.status) params.set('status', filters.status);
-      if (filters?.tier) params.set('tier', filters.tier);
-      const res = await authFetch(`/api/knowledge/drafts?${params.toString()}`);
-      if (!res.ok) throw new Error('加载候选稿失败');
-      const json = (await res.json()) as {
-        data: { drafts: Draft[] };
-        meta?: { nextCursor: string | null };
-      };
-      setDrafts(json.data.drafts);
-      setDraftsCursor(json.meta?.nextCursor ?? null);
-    } catch {
-      // handled by toast in component
-    } finally {
-      setDraftsLoading(false);
-    }
-  }, []);
-
-  // ── Stats (概览 dashboard) ────────────────────────────────────────────────
-  const [stats, setStats] = useState<KnowledgeStats | null>(null);
-  const [statsLoading, setStatsLoading] = useState(false);
-
-  const fetchStats = useCallback(async () => {
-    setStatsLoading(true);
-    try {
-      const res = await authFetch(`/api/knowledge/stats`);
-      if (!res.ok) throw new Error('加载统计失败');
-      const json = (await res.json()) as { data: { stats: KnowledgeStats } };
-      setStats(json.data.stats);
-    } catch {
-      // handled by toast in component
-    } finally {
-      setStatsLoading(false);
-    }
-  }, []);
-
-  // ── Tab change ──────────────────────────────────────────────────────────
+  // ── Tab / 视图切换时拉数据 ─────────────────────────────────────────────────
   useEffect(() => {
     startTransition(() => {
-      if (activeTab === 'overview') fetchStats();
-      else if (activeTab === 'sources') fetchSources();
-      else if (activeTab === 'jobs') fetchJobs(undefined, jobStatusFilter || undefined);
-      else if (activeTab === 'items') fetchItems(undefined, itemFilters);
-      else if (activeTab === 'drafts') fetchDrafts(undefined, draftFilters);
-      else if (activeTab === 'evaluations' || activeTab === 'feedback')
-        fetchEvaluations(undefined, evalTierFilter || undefined, evalStatusFilter || undefined);
+      if (activeTab === 'import') {
+        fetchStats();
+        fetchJobs(undefined, importStatusParam);
+      } else if (activeTab === 'manage') {
+        if (manageView === 'pending') fetchPendingDrafts();
+        else if (manageView === 'published') fetchItems(undefined, itemFilters);
+      } else if (activeTab === 'tasks') {
+        fetchJobs(undefined, jobStatusFilter || undefined);
+      }
     });
-  }, [
-    activeTab,
-    fetchStats,
-    fetchSources,
-    fetchJobs,
-    fetchItems,
-    fetchDrafts,
-    fetchEvaluations,
-    jobStatusFilter,
-    itemFilters,
-    draftFilters,
-    evalTierFilter,
-    evalStatusFilter,
-  ]);
-
-  return {
-    activeTab,
-    setActiveTab,
-    sources,
-    sourcesLoading,
-    sourcesCursor,
-    sourcesCursorStack,
-    setSourcesCursor,
-    setSourcesCursorStack,
-    jobs,
-    jobsLoading,
-    jobsCursor,
-    jobsCursorStack,
-    setJobsCursor,
-    setJobsCursorStack,
-    jobStatusFilter,
-    setJobStatusFilter,
-    items,
-    itemsLoading,
-    itemsCursor,
-    itemsCursorStack,
-    setItemsCursor,
-    setItemsCursorStack,
-    itemFilters,
-    setItemFilters,
-    drafts,
-    draftsLoading,
-    draftsCursor,
-    draftsCursorStack,
-    setDraftsCursor,
-    setDraftsCursorStack,
-    draftFilters,
-    setDraftFilters,
-    stats,
-    statsLoading,
-    evaluations,
-    evaluationsLoading,
-    evaluationsCursor,
-    evaluationsCursorStack,
-    setEvaluationsCursor,
-    setEvaluationsCursorStack,
-    evalTierFilter,
-    setEvalTierFilter,
-    evalStatusFilter,
-    setEvalStatusFilter,
-    fetchSources,
-    fetchJobs,
-    fetchItems,
-    fetchDrafts,
-    fetchStats,
-    fetchEvaluations,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Page component
-// ---------------------------------------------------------------------------
-
-export default function KnowledgePage() {
-  const router = useRouter();
-  const [toast, setToast] = useState<{
-    message: string;
-    type: 'success' | 'error' | 'info';
-  } | null>(null);
-
-  const {
-    activeTab,
-    setActiveTab,
-    sources,
-    sourcesLoading,
-    sourcesCursor,
-    sourcesCursorStack,
-    setSourcesCursor,
-    setSourcesCursorStack,
-    jobs,
-    jobsLoading,
-    jobsCursor,
-    jobsCursorStack,
-    setJobsCursor,
-    setJobsCursorStack,
-    jobStatusFilter,
-    setJobStatusFilter,
-    items,
-    itemsLoading,
-    itemsCursor,
-    itemsCursorStack,
-    setItemsCursor,
-    setItemsCursorStack,
-    itemFilters,
-    setItemFilters,
-    drafts,
-    draftsLoading,
-    draftsCursor,
-    draftsCursorStack,
-    setDraftsCursor,
-    setDraftsCursorStack,
-    draftFilters,
-    setDraftFilters,
-    stats,
-    statsLoading,
-    evaluations,
-    evaluationsLoading,
-    evaluationsCursor,
-    evaluationsCursorStack,
-    setEvaluationsCursor,
-    setEvaluationsCursorStack,
-    evalTierFilter,
-    setEvalTierFilter,
-    evalStatusFilter,
-    setEvalStatusFilter,
-    fetchSources,
-    fetchJobs,
-    fetchItems,
-    fetchDrafts,
-    fetchStats,
-    fetchEvaluations,
-  } = useKnowledgePageData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, manageView, importStatusParam, jobStatusFilter]);
 
   // ── Job actions ─────────────────────────────────────────────────────────
-  const [confirmAction, setConfirmAction] = useState<{
-    title: string;
-    message: string;
-    onConfirm: () => void;
-  } | null>(null);
-
-  // Item whose published body is shown in the content modal (null = closed).
-  const [contentItemId, setContentItemId] = useState<string | null>(null);
-
-  const retryJob = async (id: string) => {
+  const jobAction = async (
+    url: string,
+    method: string,
+    successMsg: string,
+    errorMsg: string,
+  ) => {
     try {
-      const res = await authFetch(`/api/knowledge/jobs/${id}/retry`, { method: 'POST' });
-      if (!res.ok) throw new Error('重试失败');
-      setToast({ message: '任务已重新排队', type: 'success' });
-      fetchJobs(undefined, jobStatusFilter || undefined);
-    } catch {
-      setToast({ message: '重试失败', type: 'error' });
+      const res = await authFetch(url, { method });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        throw new Error(j?.error?.message ?? errorMsg);
+      }
+      setToast({ message: successMsg, type: 'success' });
+      refreshJobs();
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : errorMsg, type: 'error' });
     }
   };
 
-  const cancelJob = async (id: string) => {
+  const retryJob = (id: string) =>
+    jobAction(`/api/knowledge/jobs/${id}/retry`, 'POST', '任务已重新排队', '重试失败');
+  const cancelJob = (id: string) =>
+    jobAction(`/api/knowledge/jobs/${id}/cancel`, 'POST', '任务已取消', '取消失败');
+  const pauseJob = (id: string) =>
+    jobAction(`/api/knowledge/jobs/${id}/pause`, 'POST', '任务已暂停', '暂停失败');
+  const resumeJob = (id: string) =>
+    jobAction(`/api/knowledge/jobs/${id}/resume`, 'POST', '任务已恢复排队', '恢复失败');
+  const deleteJob = (id: string) =>
+    jobAction(`/api/knowledge/jobs/${id}`, 'DELETE', '任务已删除', '删除失败');
+
+  // ── 待发布 draft actions ─────────────────────────────────────────────────
+  const publishDraft = async (id: string) => {
     try {
-      const res = await authFetch(`/api/knowledge/jobs/${id}/cancel`, { method: 'POST' });
-      if (!res.ok) throw new Error('取消失败');
-      setToast({ message: '任务已取消', type: 'success' });
-      fetchJobs(undefined, jobStatusFilter || undefined);
-    } catch {
-      setToast({ message: '取消失败', type: 'error' });
+      const res = await authFetch(`/api/knowledge/drafts/${id}/publish`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        throw new Error(j?.error?.message ?? '发布失败');
+      }
+      setToast({ message: '已发布上线', type: 'success' });
+      fetchPendingDrafts();
+      fetchStats();
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : '发布失败', type: 'error' });
+    }
+  };
+
+  const unapproveDraft = async (id: string) => {
+    try {
+      const res = await authFetch(`/api/knowledge/drafts/${id}/unapprove`, { method: 'POST' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        throw new Error(j?.error?.message ?? '退回失败');
+      }
+      setToast({ message: '已退回待审查', type: 'success' });
+      fetchPendingDrafts();
+      fetchStats();
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : '退回失败', type: 'error' });
     }
   };
 
   // ── Item actions ────────────────────────────────────────────────────────
-  const archiveItem = async (id: string) => {
+  const itemAction = async (
+    url: string,
+    method: string,
+    successMsg: string,
+    errorMsg: string,
+  ) => {
     try {
-      const res = await authFetch(`/api/knowledge/items/${id}/archive`, { method: 'POST' });
-      if (!res.ok) throw new Error('归档失败');
-      setToast({ message: '条目已归档', type: 'success' });
+      const res = await authFetch(url, { method });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        throw new Error(j?.error?.message ?? errorMsg);
+      }
+      setToast({ message: successMsg, type: 'success' });
       fetchItems(undefined, itemFilters);
-    } catch {
-      setToast({ message: '归档失败', type: 'error' });
+      fetchStats();
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : errorMsg, type: 'error' });
     }
   };
 
-  const restoreItem = async (id: string) => {
-    try {
-      const res = await authFetch(`/api/knowledge/items/${id}/restore`, { method: 'POST' });
-      if (!res.ok) throw new Error('恢复失败');
-      setToast({ message: '条目已恢复', type: 'success' });
-      fetchItems(undefined, itemFilters);
-    } catch {
-      setToast({ message: '恢复失败', type: 'error' });
-    }
-  };
+  const archiveItem = (id: string) =>
+    itemAction(`/api/knowledge/items/${id}/archive`, 'POST', '条目已下线', '下线失败');
+  const restoreItem = (id: string) =>
+    itemAction(`/api/knowledge/items/${id}/restore`, 'POST', '条目已重新上线', '上线失败');
+  const deleteItem = (id: string) =>
+    itemAction(`/api/knowledge/items/${id}`, 'DELETE', '条目已删除', '删除失败');
 
-  // Derive a revision draft from a published item, then jump into the review
-  // page where the admin can edit / re-clean / approve it (approval overwrites
-  // the existing item in place via the publisher's overwrite branch).
+  // 重新清洗：从已发布条目派生修订草稿，跳转审查页
   const reviseItem = async (id: string) => {
     try {
       const res = await authFetch(`/api/knowledge/items/${id}/revise`, {
@@ -478,56 +366,138 @@ export default function KnowledgePage() {
       });
       if (!res.ok) {
         const j = await res.json().catch(() => null);
-        throw new Error(j?.error?.message ?? j?.message ?? '派生修订草稿失败');
+        throw new Error(j?.error?.message ?? j?.message ?? '重新清洗失败');
       }
       const json = await res.json();
       setContentItemId(null);
       router.push(`/knowledge/review/${json.data.draftId}`);
     } catch (e) {
-      setToast({ message: e instanceof Error ? e.message : '派生修订失败', type: 'error' });
+      setToast({ message: e instanceof Error ? e.message : '重新清洗失败', type: 'error' });
     }
   };
 
-  // ── Job columns ─────────────────────────────────────────────────────────
-  const jobColumns = [
-    {
-      key: 'id',
-      header: 'ID',
-      render: (job: Job) => (
+  // ── Job 行操作按钮（按状态渲染） ─────────────────────────────────────────────
+  const btnBase =
+    'inline-flex min-h-[36px] min-w-[36px] items-center rounded-md px-3 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2';
+  const btnNeutral = `${btnBase} border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:ring-blue-500/40`;
+  const btnDanger = `${btnBase} border border-red-300 bg-white text-red-600 hover:bg-red-50 focus:ring-red-500/40`;
+  const btnPrimary = `${btnBase} bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500/40`;
+
+  const confirmThen = (title: string, message: string, action: () => void) =>
+    setConfirmAction({
+      title,
+      message,
+      onConfirm: () => {
+        setConfirmAction(null);
+        action();
+      },
+    });
+
+  const renderJobActions = (job: Job) => (
+    <div className="flex flex-wrap gap-2">
+      {job.status === 'queued' && (
+        <button type="button" onClick={() => pauseJob(job.id)} className={btnNeutral}>
+          暂停
+        </button>
+      )}
+      {job.status === 'paused' && (
+        <button type="button" onClick={() => resumeJob(job.id)} className={btnNeutral}>
+          恢复
+        </button>
+      )}
+      {(job.status === 'queued' || job.status === 'paused') && (
+        <button
+          type="button"
+          onClick={() =>
+            confirmThen('取消任务', `确定要取消任务 ${job.id.slice(0, 8)} 吗？`, () =>
+              cancelJob(job.id),
+            )
+          }
+          className={btnDanger}
+        >
+          取消
+        </button>
+      )}
+      {job.status === 'failed' && (
+        <button
+          type="button"
+          onClick={() =>
+            confirmThen('重试任务', `确定要重试任务 ${job.id.slice(0, 8)} 吗？`, () =>
+              retryJob(job.id),
+            )
+          }
+          className={btnNeutral}
+        >
+          重试
+        </button>
+      )}
+      {job.status === 'pending_review' && (
+        <button
+          type="button"
+          onClick={() => router.push(`/knowledge/review/${job.id}`)}
+          className={btnPrimary}
+        >
+          去审查
+        </button>
+      )}
+      {job.status === 'approved' && (
         <button
           type="button"
           onClick={() => {
-            // Find draft id via job id — go to review page if pending_review
-            if (job.status === 'pending_review') {
-              router.push(`/knowledge/review/${job.id}`);
-            }
+            setActiveTab('manage');
+            setManageView('pending');
           }}
-          className="font-mono text-xs text-blue-600 hover:underline focus:outline-none"
+          className={btnPrimary}
         >
-          {job.id.slice(0, 8)}…
+          去发布
         </button>
+      )}
+      {TERMINAL_JOB_STATUSES.includes(job.status) && (
+        <button
+          type="button"
+          onClick={() =>
+            confirmThen(
+              '删除任务',
+              `确定要删除任务 ${job.id.slice(0, 8)} 吗？其草稿与评估记录将一并删除，不可恢复。`,
+              () => deleteJob(job.id),
+            )
+          }
+          className={btnDanger}
+        >
+          删除
+        </button>
+      )}
+    </div>
+  );
+
+  // ── Job 列定义 ───────────────────────────────────────────────────────────
+  const jobColumns = [
+    {
+      key: 'sourceName',
+      header: '名称',
+      render: (job: Job) => (
+        <span
+          className="max-w-[240px] truncate font-medium text-gray-900"
+          title={job.sourceName ?? job.sourceId}
+        >
+          {job.sourceName ?? `${job.sourceId.slice(0, 8)}…`}
+        </span>
       ),
     },
     {
-      key: 'sourceId',
-      header: '来源 ID',
+      key: 'sourceInputType',
+      header: '来源类型',
       render: (job: Job) => (
-        <span className="font-mono text-xs text-gray-500">{job.sourceId.slice(0, 8)}…</span>
+        <span className="text-xs text-gray-600">
+          {job.sourceInputType === 'file' ? '文件' : job.sourceInputType === 'url' ? 'URL' : '—'}
+          {job.jobKind === 're_clean' ? ' · 重洗' : ''}
+        </span>
       ),
     },
     {
       key: 'status',
       header: '状态',
       render: (job: Job) => <JobStatusBadge status={job.status} />,
-    },
-    {
-      key: 'attempt',
-      header: '尝试次数',
-      render: (job: Job) => (
-        <span className="text-gray-600">
-          {job.attempt}/{job.maxAttempts}
-        </span>
-      ),
     },
     {
       key: 'progress',
@@ -558,7 +528,7 @@ export default function KnowledgePage() {
     },
     {
       key: 'createdAt',
-      header: '创建时间',
+      header: '提交时间',
       render: (job: Job) => (
         <span className="text-xs text-gray-500">{new Date(job.createdAt).toLocaleString()}</span>
       ),
@@ -566,125 +536,12 @@ export default function KnowledgePage() {
     {
       key: 'actions',
       header: '操作',
-      render: (job: Job) => (
-        <div className="flex gap-2">
-          {job.status === 'failed' && (
-            <button
-              type="button"
-              onClick={() =>
-                setConfirmAction({
-                  title: '重试任务',
-                  message: `确定要重试任务 ${job.id.slice(0, 8)} 吗？`,
-                  onConfirm: () => {
-                    setConfirmAction(null);
-                    retryJob(job.id);
-                  },
-                })
-              }
-              className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-            >
-              重试
-            </button>
-          )}
-          {job.status === 'queued' && (
-            <button
-              type="button"
-              onClick={() =>
-                setConfirmAction({
-                  title: '取消任务',
-                  message: `确定要取消任务 ${job.id.slice(0, 8)} 吗？`,
-                  onConfirm: () => {
-                    setConfirmAction(null);
-                    cancelJob(job.id);
-                  },
-                })
-              }
-              className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500/40"
-            >
-              取消
-            </button>
-          )}
-          {job.status === 'pending_review' && (
-            <button
-              type="button"
-              onClick={() => router.push(`/knowledge/review/${job.id}`)}
-              className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-            >
-              审核
-            </button>
-          )}
-        </div>
-      ),
+      render: renderJobActions,
     },
   ];
 
-  // ── Source columns ───────────────────────────────────────────────────────
-  const sourceColumns = [
-    {
-      key: 'originalName',
-      header: '名称',
-      render: (s: Source) => (
-        <span className="font-medium text-gray-900">
-          {s.inputType === 'file' ? s.originalName : s.sourceUrl}
-        </span>
-      ),
-    },
-    {
-      key: 'inputType',
-      header: '类型',
-      render: (s: Source) => (
-        <span className="text-gray-600">{s.inputType === 'file' ? '文件' : 'URL'}</span>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (s: Source) => <SourceStatusBadge status={s.status as Source['status']} />,
-    },
-    {
-      key: 'createdAt',
-      header: '上传时间',
-      render: (s: Source) => (
-        <span className="text-xs text-gray-500">{new Date(s.createdAt).toLocaleString()}</span>
-      ),
-    },
-  ];
-
-  // ── Item filter config ──────────────────────────────────────────────────
-  const itemFilterConfig = [
-    {
-      name: 'category',
-      label: '分类',
-      type: 'select' as const,
-      options: Object.keys(KNOWLEDGE_CATEGORIES).map((k) => ({ value: k, label: k })),
-    },
-    {
-      name: 'status',
-      label: '状态',
-      type: 'select' as const,
-      options: [
-        { value: 'published', label: '已发布' },
-        { value: 'archived', label: '已归档' },
-      ],
-    },
-  ];
-
-  const draftFilterConfig = [
-    {
-      name: 'status',
-      label: '状态',
-      type: 'select' as const,
-      options: DRAFT_STATUSES.map((s) => ({ value: s, label: s })),
-    },
-    {
-      name: 'tier',
-      label: '等级',
-      type: 'select' as const,
-      options: EVALUATION_TIERS.map((t) => ({ value: t, label: t })),
-    },
-  ];
-
-  const draftColumns = [
+  // ── 待发布 draft 列定义 ───────────────────────────────────────────────────
+  const pendingColumns = [
     {
       key: 'title',
       header: '标题',
@@ -700,17 +557,8 @@ export default function KnowledgePage() {
       ),
     },
     {
-      key: 'sourceName',
-      header: '来源',
-      render: (d: Draft) => (
-        <span className="max-w-[200px] truncate text-xs text-gray-500" title={d.sourceName ?? ''}>
-          {d.sourceName ?? '—'}
-        </span>
-      ),
-    },
-    {
       key: 'tier',
-      header: '等级',
+      header: '评估等级',
       render: (d: Draft) => (
         <span
           className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -718,187 +566,87 @@ export default function KnowledgePage() {
           }`}
         >
           {d.tier ?? '—'}
+          {d.overallScore != null ? ` · ${d.overallScore}` : ''}
         </span>
       ),
     },
     {
-      key: 'overallScore',
-      header: '总分',
-      render: (d: Draft) => <span className="text-xs text-gray-600">{d.overallScore ?? '—'}</span>,
-    },
-    {
-      key: 'reCleanCount',
-      header: '重洗',
+      key: 'version',
+      header: '版本',
       render: (d: Draft) => (
-        <span
-          className={`text-xs ${d.reCleanCount > 0 ? 'font-medium text-amber-600' : 'text-gray-400'}`}
-        >
-          {d.reCleanCount > 0 ? `${d.reCleanCount} 次` : '—'}
+        <span className="text-xs text-gray-600">
+          v{d.version}
+          {d.reCleanCount > 0 ? `（重洗 ${d.reCleanCount} 次）` : ''}
         </span>
       ),
     },
     {
-      key: 'status',
-      header: '状态',
-      render: (d: Draft) => <span className="text-xs text-gray-600">{d.status}</span>,
-    },
-    {
-      key: 'createdAt',
-      header: '创建时间',
+      key: 'reviewedAt',
+      header: '通过时间',
       render: (d: Draft) => (
-        <span className="text-xs text-gray-500">{new Date(d.createdAt).toLocaleString()}</span>
+        <span className="text-xs text-gray-500">
+          {d.reviewedAt ? new Date(d.reviewedAt).toLocaleString() : '—'}
+        </span>
       ),
     },
     {
       key: 'actions',
       header: '操作',
       render: (d: Draft) => (
-        <button
-          type="button"
-          onClick={() => router.push(`/knowledge/review/${d.id}`)}
-          className="inline-flex min-h-[36px] min-w-[36px] items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-        >
-          审核
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              confirmThen('发布上线', `确定要发布「${d.title}」吗？将写入知识库并同步 Wiki。`, () =>
+                publishDraft(d.id),
+              )
+            }
+            className={btnPrimary}
+          >
+            发布上线
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push(`/knowledge/review/${d.id}`)}
+            className={btnNeutral}
+          >
+            查看
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              confirmThen('退回审查', `确定要将「${d.title}」退回待审查吗？`, () =>
+                unapproveDraft(d.id),
+              )
+            }
+            className={btnDanger}
+          >
+            退回审查
+          </button>
+        </div>
       ),
     },
   ];
 
-  const TIER_BADGE: Record<string, string> = {
-    A: 'bg-green-100 text-green-800',
-    B: 'bg-blue-100 text-blue-800',
-    C: 'bg-yellow-100 text-yellow-800',
-    D: 'bg-red-100 text-red-800',
-    pending: 'bg-gray-100 text-gray-600',
-  };
-
-  const evaluationFilterConfig = [
+  // ── Filter 配置 ──────────────────────────────────────────────────────────
+  const itemFilterConfig = [
     {
-      name: 'tier',
-      label: '等级',
+      name: 'category',
+      label: '分类',
       type: 'select' as const,
-      options: EVALUATION_TIERS.map((t) => ({ value: t, label: t })),
+      options: Object.keys(KNOWLEDGE_CATEGORIES).map((k) => ({ value: k, label: k })),
     },
     {
       name: 'status',
       label: '状态',
       type: 'select' as const,
-      options: EVALUATION_STATUSES.map((s) => ({ value: s, label: s })),
+      options: [
+        { value: 'published', label: '已上线' },
+        { value: 'archived', label: '已下线' },
+      ],
     },
   ];
 
-  const evaluationColumns = [
-    {
-      key: 'draftId',
-      header: '草稿',
-      render: (e: Evaluation) => (
-        <button
-          type="button"
-          onClick={() => router.push(`/knowledge/review/${e.draftId}`)}
-          className="font-mono text-xs text-blue-600 hover:underline focus:outline-none"
-        >
-          {e.draftId.slice(0, 8)}…
-        </button>
-      ),
-    },
-    {
-      key: 'tier',
-      header: '等级',
-      render: (e: Evaluation) => (
-        <span
-          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-            TIER_BADGE[e.tier] ?? TIER_BADGE.pending
-          }`}
-        >
-          {e.tier}
-        </span>
-      ),
-    },
-    {
-      key: 'overallScore',
-      header: '总分',
-      render: (e: Evaluation) => (
-        <div className="flex items-center gap-2">
-          <div className="h-1.5 w-12 overflow-hidden rounded-full bg-gray-200">
-            <div
-              className={`h-full rounded-full ${
-                e.overallScore >= 85
-                  ? 'bg-green-500'
-                  : e.overallScore >= 60
-                    ? 'bg-yellow-500'
-                    : 'bg-red-500'
-              }`}
-              style={{ width: `${e.overallScore}%` }}
-            />
-          </div>
-          <span className="text-xs text-gray-600">{e.overallScore}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (e: Evaluation) => <span className="text-xs text-gray-600">{e.status}</span>,
-    },
-    {
-      key: 'deepEval',
-      header: '深度',
-      render: (e: Evaluation) => (
-        <span className="text-xs text-gray-500">{e.deepEval ? '是' : '否'}</span>
-      ),
-    },
-    {
-      key: 'updatedAt',
-      header: '更新时间',
-      render: (e: Evaluation) => (
-        <span className="text-xs text-gray-500">{new Date(e.updatedAt).toLocaleString()}</span>
-      ),
-    },
-  ];
-
-  // Shared table for the 评估 / 反馈 tabs (both list evaluations; clicking a
-  // row opens the review page where feedback + re-clean happen).
-  const renderEvaluationsTable = (emptyMessage: string) => (
-    <div className="space-y-6">
-      <FilterBar
-        filters={evaluationFilterConfig}
-        values={{ tier: evalTierFilter, status: evalStatusFilter }}
-        onChange={(name, value) => {
-          if (name === 'tier') {
-            setEvalTierFilter(value);
-            fetchEvaluations(undefined, value || undefined, evalStatusFilter || undefined);
-          } else if (name === 'status') {
-            setEvalStatusFilter(value);
-            fetchEvaluations(undefined, evalTierFilter || undefined, value || undefined);
-          }
-        }}
-      />
-      <DataTable<Evaluation>
-        columns={evaluationColumns}
-        data={evaluations}
-        loading={evaluationsLoading}
-        emptyMessage={emptyMessage}
-      />
-      <Pagination
-        nextCursor={evaluationsCursor}
-        hasPrev={evaluationsCursorStack.length > 0}
-        onPrev={() => {
-          const stack = [...evaluationsCursorStack];
-          stack.pop();
-          const prev = stack[stack.length - 1] ?? undefined;
-          setEvaluationsCursorStack(stack);
-          fetchEvaluations(prev, evalTierFilter || undefined, evalStatusFilter || undefined);
-        }}
-        onNext={(cursor) => {
-          setEvaluationsCursorStack([...evaluationsCursorStack, evaluationsCursor]);
-          setEvaluationsCursor(cursor);
-          fetchEvaluations(cursor, evalTierFilter || undefined, evalStatusFilter || undefined);
-        }}
-      />
-    </div>
-  );
-
-  // ── Job filter config ───────────────────────────────────────────────────
   const jobFilterConfig = [
     {
       name: 'status',
@@ -908,12 +656,29 @@ export default function KnowledgePage() {
     },
   ];
 
+  const jobsPagination = (
+    <Pagination
+      nextCursor={jobsCursor}
+      hasPrev={jobsCursorStack.length > 0}
+      onPrev={() => {
+        const stack = [...jobsCursorStack];
+        stack.pop();
+        const prev = stack[stack.length - 1] ?? undefined;
+        setJobsCursorStack(stack);
+        fetchJobs(prev, currentJobStatusParam);
+      }}
+      onNext={(cursor) => {
+        setJobsCursorStack([...jobsCursorStack, jobsCursor]);
+        setJobsCursor(cursor);
+        fetchJobs(cursor, currentJobStatusParam);
+      }}
+    />
+  );
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Toast */}
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
-      {/* Confirm dialog */}
       {confirmAction && (
         <ConfirmDialog
           isOpen={true}
@@ -930,26 +695,36 @@ export default function KnowledgePage() {
         onRevise={reviseItem}
       />
 
+      <AddKnowledgeModal
+        open={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onSuccess={() => {
+          setToast({ message: '知识已提交，进入导入工作流', type: 'success' });
+          refreshJobs();
+        }}
+        onError={(msg) => setToast({ message: msg, type: 'error' })}
+      />
+
       {/* Page header */}
       <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">知识管理</h1>
-          <p className="mt-1 text-sm text-gray-500">管理知识来源、处理任务和知识条目</p>
+          <p className="mt-1 text-sm text-gray-500">导入知识、管理知识与管理任务</p>
         </div>
+        {activeTab === 'import' && (
+          <button type="button" onClick={() => setAddModalOpen(true)} className={btnPrimary}>
+            + 添加知识
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
       <div className="border-b border-gray-200 bg-white px-6">
         <Tabs
           tabs={[
-            { id: 'overview', label: '概览' },
-            { id: 'sources', label: '来源管理' },
-            { id: 'web-sources', label: '联网知识源' },
-            { id: 'jobs', label: '任务列表' },
-            { id: 'drafts', label: '候选稿' },
-            { id: 'items', label: '知识条目' },
-            { id: 'evaluations', label: '评估' },
-            { id: 'feedback', label: '反馈' },
+            { id: 'import', label: '导入知识' },
+            { id: 'manage', label: '管理知识' },
+            { id: 'tasks', label: '管理任务' },
           ]}
           activeTab={activeTab}
           onChange={setActiveTab}
@@ -958,104 +733,166 @@ export default function KnowledgePage() {
 
       {/* Tab content */}
       <div className="flex-1 overflow-auto p-6">
-        {/* ── Overview tab ─────────────────────────────────────────────────── */}
-        {activeTab === 'overview' && (
+        {/* ── 导入知识 ─────────────────────────────────────────────────── */}
+        {activeTab === 'import' && (
           <div className="space-y-6">
-            {statsLoading && <p className="text-sm text-gray-500">加载中…</p>}
-            {!statsLoading && stats && (
-              <>
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-                  <StatCard
-                    title="待审核草稿"
-                    value={stats.drafts.reviewQueue}
-                    subtitle="清洗完成待 review"
-                  />
-                  <StatCard title="已发布条目" value={stats.items.total} subtitle="知识库总量" />
-                  <StatCard
-                    title="已归档"
-                    value={stats.items.byStatus.find((s) => s.key === 'archived')?.count ?? 0}
-                  />
-                  <StatCard
-                    title="LLM 重洗累计"
-                    value={stats.reClean.jobsTotal}
-                    subtitle="按 job 计"
-                  />
-                  <StatCard title="来源总数" value={stats.sources.total} />
-                </div>
+            <WorkflowBoard
+              counts={stats?.workflow ?? null}
+              activeStage={activeStage}
+              onStageClick={(stage) => {
+                setActiveStage(stage);
+                setJobsCursorStack([]);
+              }}
+            />
 
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <DistributionPanel
-                    title="已发布条目 · 分类分布"
-                    buckets={stats.items.byCategory}
-                    color="bg-blue-500"
-                  />
-                  <DistributionPanel
-                    title="已发布条目 · 等级分布"
-                    buckets={stats.tierDistribution}
-                    color="bg-green-500"
-                  />
-                  <DistributionPanel
-                    title="候选稿 · 状态分布"
-                    buckets={stats.drafts.byStatus}
-                    color="bg-amber-500"
-                  />
-                  <DistributionPanel
-                    title="LLM 重洗 · 版本分布"
-                    buckets={stats.reClean.byVersion.map((v) => ({
-                      key: `v${v.version}`,
-                      count: v.count,
-                    }))}
-                    color="bg-purple-500"
-                  />
-                </div>
-              </>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-gray-700">
+                {activeStage ? '当前阶段任务' : '进行中的知识'}
+              </p>
+              {activeStage && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveStage(null);
+                    setJobsCursorStack([]);
+                  }}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  清除阶段过滤
+                </button>
+              )}
+            </div>
+
+            <DataTable<Job>
+              columns={jobColumns}
+              data={jobs}
+              loading={jobsLoading}
+              emptyMessage="暂无进行中的知识，点击右上角「+ 添加知识」开始导入"
+            />
+
+            {jobsPagination}
+          </div>
+        )}
+
+        {/* ── 管理知识 ─────────────────────────────────────────────────── */}
+        {activeTab === 'manage' && (
+          <div className="space-y-6">
+            {/* 次级分区切换 */}
+            <div className="flex gap-2">
+              {(
+                [
+                  { id: 'pending', label: '待发布' },
+                  { id: 'published', label: '已发布' },
+                  { id: 'web', label: '联网知识源' },
+                ] as const
+              ).map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => setManageView(v.id)}
+                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
+                    manageView === v.id
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+
+            {manageView === 'pending' && (
+              <div className="space-y-6">
+                <DataTable<Draft>
+                  columns={pendingColumns}
+                  data={pendingDrafts}
+                  loading={pendingLoading}
+                  emptyMessage="暂无待发布知识（在「导入知识」中通过审查后会出现在这里）"
+                />
+                <Pagination
+                  nextCursor={pendingCursor}
+                  hasPrev={pendingCursorStack.length > 0}
+                  onPrev={() => {
+                    const stack = [...pendingCursorStack];
+                    stack.pop();
+                    const prev = stack[stack.length - 1] ?? undefined;
+                    setPendingCursorStack(stack);
+                    fetchPendingDrafts(prev);
+                  }}
+                  onNext={(cursor) => {
+                    setPendingCursorStack([...pendingCursorStack, pendingCursor]);
+                    setPendingCursor(cursor);
+                    fetchPendingDrafts(cursor);
+                  }}
+                />
+              </div>
             )}
-            {!statsLoading && !stats && <p className="text-sm text-gray-500">暂无统计数据</p>}
+
+            {manageView === 'published' && (
+              <div className="space-y-6">
+                <FilterBar
+                  filters={itemFilterConfig}
+                  values={itemFilters}
+                  onChange={(name, value) => {
+                    setItemFilters({ ...itemFilters, [name]: value });
+                  }}
+                  onSearch={() => {
+                    setItemsCursorStack([]);
+                    fetchItems(undefined, itemFilters);
+                  }}
+                />
+
+                <ItemTable
+                  data={items}
+                  loading={itemsLoading}
+                  onViewContent={(id) => setContentItemId(id)}
+                  onRevise={(id) =>
+                    confirmThen(
+                      '重新清洗',
+                      '将从该条目派生修订草稿并进入审查流程，确定继续吗？',
+                      () => reviseItem(id),
+                    )
+                  }
+                  onArchive={(id) =>
+                    confirmThen('下线条目', '确定要下线该知识条目吗？', () => archiveItem(id))
+                  }
+                  onRestore={(id) =>
+                    confirmThen('重新上线', '确定要重新上线该知识条目吗？', () => restoreItem(id))
+                  }
+                  onDelete={(id) =>
+                    confirmThen(
+                      '删除条目',
+                      '确定要永久删除该知识条目吗？Wiki 文件将一并删除，不可恢复。',
+                      () => deleteItem(id),
+                    )
+                  }
+                />
+
+                <Pagination
+                  nextCursor={itemsCursor}
+                  hasPrev={itemsCursorStack.length > 0}
+                  onPrev={() => {
+                    const stack = [...itemsCursorStack];
+                    stack.pop();
+                    const prev = stack[stack.length - 1] ?? undefined;
+                    setItemsCursorStack(stack);
+                    fetchItems(prev, itemFilters);
+                  }}
+                  onNext={(cursor) => {
+                    setItemsCursorStack([...itemsCursorStack, itemsCursor]);
+                    setItemsCursor(cursor);
+                    fetchItems(cursor, itemFilters);
+                  }}
+                />
+              </div>
+            )}
+
+            {manageView === 'web' && <WebSourceManager />}
           </div>
         )}
 
-        {/* ── Sources tab ─────────────────────────────────────────────── */}
-        {activeTab === 'sources' && (
-          <div className="space-y-6">
-            <SourceUploadForm
-              onSuccess={() => {
-                setToast({ message: '来源已提交', type: 'success' });
-                fetchSources();
-              }}
-              onError={(msg) => setToast({ message: msg, type: 'error' })}
-            />
-
-            <DataTable<Source>
-              columns={sourceColumns}
-              data={sources}
-              loading={sourcesLoading}
-              emptyMessage="暂无来源"
-            />
-
-            <Pagination
-              nextCursor={sourcesCursor}
-              hasPrev={sourcesCursorStack.length > 0}
-              onPrev={() => {
-                const stack = [...sourcesCursorStack];
-                stack.pop();
-                const prev = stack[stack.length - 1] ?? undefined;
-                setSourcesCursorStack(stack);
-                fetchSources(prev);
-              }}
-              onNext={(cursor) => {
-                setSourcesCursorStack([...sourcesCursorStack, sourcesCursor]);
-                setSourcesCursor(cursor);
-                fetchSources(cursor);
-              }}
-            />
-          </div>
-        )}
-
-        {/* ── Web sources tab ─────────────────────────────────────────── */}
-        {activeTab === 'web-sources' && <WebSourceManager />}
-
-        {/* ── Jobs tab ────────────────────────────────────────────────── */}
-        {activeTab === 'jobs' && (
+        {/* ── 管理任务 ─────────────────────────────────────────────────── */}
+        {activeTab === 'tasks' && (
           <div className="space-y-6">
             <FilterBar
               filters={jobFilterConfig}
@@ -1063,7 +900,7 @@ export default function KnowledgePage() {
               onChange={(name, value) => {
                 if (name === 'status') {
                   setJobStatusFilter(value);
-                  fetchJobs(undefined, value || undefined);
+                  setJobsCursorStack([]);
                 }
               }}
             />
@@ -1075,179 +912,10 @@ export default function KnowledgePage() {
               emptyMessage="暂无任务"
             />
 
-            <Pagination
-              nextCursor={jobsCursor}
-              hasPrev={jobsCursorStack.length > 0}
-              onPrev={() => {
-                const stack = [...jobsCursorStack];
-                stack.pop();
-                const prev = stack[stack.length - 1] ?? undefined;
-                setJobsCursorStack(stack);
-                fetchJobs(prev, jobStatusFilter || undefined);
-              }}
-              onNext={(cursor) => {
-                setJobsCursorStack([...jobsCursorStack, jobsCursor]);
-                setJobsCursor(cursor);
-                fetchJobs(cursor, jobStatusFilter || undefined);
-              }}
-            />
+            {jobsPagination}
           </div>
         )}
-
-        {/* ── Drafts tab ─────────────────────────────────────────────────── */}
-        {activeTab === 'drafts' && (
-          <div className="space-y-6">
-            <FilterBar
-              filters={draftFilterConfig}
-              values={draftFilters}
-              onChange={(name, value) => {
-                const newFilters = { ...draftFilters, [name]: value };
-                setDraftFilters(newFilters);
-              }}
-              onSearch={() => {
-                setDraftsCursorStack([]);
-                fetchDrafts(undefined, draftFilters);
-              }}
-            />
-
-            <DataTable<Draft>
-              columns={draftColumns}
-              data={drafts}
-              loading={draftsLoading}
-              emptyMessage="暂无候选稿"
-            />
-
-            <Pagination
-              nextCursor={draftsCursor}
-              hasPrev={draftsCursorStack.length > 0}
-              onPrev={() => {
-                const stack = [...draftsCursorStack];
-                stack.pop();
-                const prev = stack[stack.length - 1] ?? undefined;
-                setDraftsCursorStack(stack);
-                fetchDrafts(prev, draftFilters);
-              }}
-              onNext={(cursor) => {
-                setDraftsCursorStack([...draftsCursorStack, draftsCursor]);
-                setDraftsCursor(cursor);
-                fetchDrafts(cursor, draftFilters);
-              }}
-            />
-          </div>
-        )}
-
-        {/* ── Items tab ───────────────────────────────────────────────── */}
-        {activeTab === 'items' && (
-          <div className="space-y-6">
-            <FilterBar
-              filters={itemFilterConfig}
-              values={itemFilters}
-              onChange={(name, value) => {
-                const newFilters = { ...itemFilters, [name]: value };
-                setItemFilters(newFilters);
-              }}
-              onSearch={() => {
-                setItemsCursorStack([]);
-                fetchItems(undefined, itemFilters);
-              }}
-            />
-
-            <ItemTable
-              data={items}
-              loading={itemsLoading}
-              onViewContent={(id) => setContentItemId(id)}
-              onRevise={reviseItem}
-              onArchive={(id) =>
-                setConfirmAction({
-                  title: '归档条目',
-                  message: '确定要归档该知识条目吗？',
-                  onConfirm: () => {
-                    setConfirmAction(null);
-                    archiveItem(id);
-                  },
-                })
-              }
-              onRestore={(id) =>
-                setConfirmAction({
-                  title: '恢复条目',
-                  message: '确定要恢复该知识条目吗？',
-                  onConfirm: () => {
-                    setConfirmAction(null);
-                    restoreItem(id);
-                  },
-                })
-              }
-            />
-
-            <Pagination
-              nextCursor={itemsCursor}
-              hasPrev={itemsCursorStack.length > 0}
-              onPrev={() => {
-                const stack = [...itemsCursorStack];
-                stack.pop();
-                const prev = stack[stack.length - 1] ?? undefined;
-                setItemsCursorStack(stack);
-                fetchItems(prev, itemFilters);
-              }}
-              onNext={(cursor) => {
-                setItemsCursorStack([...itemsCursorStack, itemsCursor]);
-                setItemsCursor(cursor);
-                fetchItems(cursor, itemFilters);
-              }}
-            />
-          </div>
-        )}
-
-        {/* ── Evaluations tab ─────────────────────────────────────────────── */}
-        {activeTab === 'evaluations' && renderEvaluationsTable('暂无评估')}
-
-        {/* ── Feedback tab ────────────────────────────────────────────────── */}
-        {activeTab === 'feedback' && renderEvaluationsTable('暂无待反馈草稿')}
       </div>
-    </div>
-  );
-}
-
-// Lightweight horizontal-bar distribution panel for the 概览 dashboard. Each
-// row is a bucket (key + count); bar width is relative to the max bucket so
-// small values stay visible. No chart dependency — pure Tailwind bars.
-function DistributionPanel({
-  title,
-  buckets,
-  color,
-}: {
-  title: string;
-  buckets: { key: string; count: number }[];
-  color: string;
-}) {
-  const total = buckets.reduce((sum, b) => sum + b.count, 0);
-  const max = Math.max(1, ...buckets.map((b) => b.count));
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <p className="text-sm font-medium text-gray-700">{title}</p>
-      {buckets.length === 0 ? (
-        <p className="mt-3 text-xs text-gray-400">暂无数据</p>
-      ) : (
-        <div className="mt-3 space-y-2">
-          {buckets.map((b) => (
-            <div key={b.key} className="flex items-center gap-3">
-              <span className="w-24 shrink-0 truncate text-xs text-gray-600" title={b.key}>
-                {b.key}
-              </span>
-              <div className="h-4 flex-1 overflow-hidden rounded bg-gray-100">
-                <div
-                  className={`h-full rounded ${color}`}
-                  style={{ width: `${(b.count / max) * 100}%` }}
-                />
-              </div>
-              <span className="w-8 shrink-0 text-right text-xs font-medium text-gray-700">
-                {b.count}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-      <p className="mt-3 text-xs text-gray-400">合计 {total}</p>
     </div>
   );
 }
