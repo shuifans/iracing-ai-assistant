@@ -220,6 +220,9 @@ async function handleFailure(jobId: string, err: unknown, signal: AbortSignal): 
   if (err instanceof AppError) {
     errorCode = err.code;
     errorMessage = err.message;
+    if (err.fields && Object.keys(err.fields).length > 0) {
+      console.error(`[Worker] Job ${jobId} validation errors:`, JSON.stringify(err.fields));
+    }
   } else if (signal.aborted) {
     errorCode = 'AGENT_UNAVAILABLE';
     errorMessage = 'Hard timeout (30min) exceeded';

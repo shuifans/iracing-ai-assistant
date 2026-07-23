@@ -35,7 +35,14 @@ function parseYaml(yamlText: string): Record<string, unknown> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Front Matter YAML must be an object');
   }
-  return parsed as Record<string, unknown>;
+  const obj = parsed as Record<string, unknown>;
+  // LLMs often emit empty YAML keys (e.g. "source_url:") which js-yaml
+  // parses as null. Zod .optional() accepts undefined but not null, so strip
+  // null-valued keys to make them equivalent to absent keys.
+  for (const key of Object.keys(obj)) {
+    if (obj[key] === null) delete obj[key];
+  }
+  return obj;
 }
 
 // ---------------------------------------------------------------------------

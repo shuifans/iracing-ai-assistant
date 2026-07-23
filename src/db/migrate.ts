@@ -80,6 +80,9 @@ export function runMigrations(dbPath: string, options: MigrationOptions = {}): M
   for (const file of pending) {
     const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf-8');
 
+    // Table-rebuild migrations (DROP + RENAME) require FK checks disabled.
+    // PRAGMA foreign_keys cannot be changed inside a transaction.
+    db.pragma('foreign_keys = OFF');
     const runMigration = db.transaction(() => {
       db.exec(sql);
       db.prepare('INSERT INTO __migrations (name, applied_at) VALUES (?, ?)').run(
@@ -95,9 +98,11 @@ export function runMigrations(dbPath: string, options: MigrationOptions = {}): M
     } catch (err) {
       console.error(`[migrate] Failed: ${file}`, err);
       result.valid = false;
+      db.pragma('foreign_keys = ON');
       db.close();
       process.exit(1);
     }
+    db.pragma('foreign_keys = ON');
   }
 
   if (pending.length === 0) {
