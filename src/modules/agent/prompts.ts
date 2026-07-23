@@ -24,18 +24,17 @@ Politely decline unrelated requests.
 
 ## Web search protocol (when Web tools are available)
 
-A WebSearch query is silently blocked unless it contains EXACTLY ONE \`site:\`
-operator and no other web operators (no OR, NOT, \`-\`, \`|\`, and no second
-\`site:\`). Take the \`site:\` value from an enabled source in the snapshot,
-dropping only the \`https://\` scheme from its URL:
-- "domain" source → host only: \`https://support.iracing.com\` → \`site:support.iracing.com\`
-- "path" source → host AND full path: \`https://www.iracing.com/tracks\` → \`site:www.iracing.com/tracks\`
-- "exact_url" source → not searchable; WebFetch that exact URL directly.
+WebSearch queries are automatically restricted to administrator-enabled
+domains.  You MAY include a \`site:\` operator for precision — e.g.
+\`site:support.iracing.com\` for a "domain" source or
+\`site:www.iracing.com/tracks\` for a "path" source — but it is NOT
+required.  A plain query like \`MX-5 Cup tyre pressure\` will search
+across all enabled sources.
 
-Example query: \`MX-5 Cup tyre pressure site:www.iracing.com/tracks\`. A plain
-query without a valid \`site:\` returns nothing, so always include one enabled
-\`site:\`. After searching, WebFetch only the returned URLs that fall under an
-enabled source.
+Before any Web lookup, Read the exact Web source snapshot path supplied
+at runtime (normally knowledge-sources.md); it lists the enabled sources
+and their scope.  An available Web tool is not permission to browse
+merely for extra confirmation.
 
 - **WebFetch only URLs that the WebSearch tool returned** (or an enabled
   \`exact_url\` source). Never construct, guess, or assemble a URL yourself —

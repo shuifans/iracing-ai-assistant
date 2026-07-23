@@ -425,20 +425,43 @@ function createPreToolUseHook(config: AgentConfig, options: RuntimeChatQueryOpti
     if (toolName === 'WebSearch') {
       if (!options.webSearchEnabled) return deny('WEB_TOOLS_DISABLED');
       const rules = options.loadWebSourceRules();
-      const matchingRule = authorizedWebSearchRule(toolInput.query, rules);
-      if (!matchingRule) return deny('WEB_SEARCH_SOURCE_NOT_ALLOWED');
+      if (rules.length === 0) return deny('WEB_SEARCH_SOURCE_NOT_ALLOWED');
       if (budget.webSearch >= WEB_SEARCH_BUDGET) return deny('WEB_TOOL_BUDGET_EXHAUSTED');
       budget.webSearch += 1;
-      const sourceName = matchingSearchRules(toolInput.query as string, rules)
-        .map((rule) => rule.name)
-        .filter((name, index, names) => names.indexOf(name) === index)
-        .join('、');
+
+      // Try the strict site: protocol first.  If the model included a valid
+      // site: operator that matches an enabled rule, restrict to that domain.
+      const matchingRule = authorizedWebSearchRule(toolInput.query, rules);
+      let searchQuery = toolInput.query as string;
+      let allowedDomains: string[];
+      let sourceName: string;
+
+      if (matchingRule) {
+        allowedDomains = [matchingRule.hostname];
+        sourceName = matchingSearchRules(searchQuery, rules)
+          .map((rule) => rule.name)
+          .filter((name, index, names) => names.indexOf(name) === index)
+          .join('、');
+      } else {
+        // The model didn't use the site: protocol (or used an unapproved one).
+        // Strip any site: operators from the query and allow the search with
+        // ALL enabled hostnames so the security boundary is still enforced by
+        // the CLI's allowed_domains filter.
+        searchQuery = searchQuery.replace(/(?:^|[\s(])-?site:[^\s()]*/gi, '').replace(/\s+/g, ' ').trim();
+        if (!searchQuery) searchQuery = toolInput.query as string; // fallback: keep original if stripping emptied it
+        allowedDomains = [...new Set(rules.map((r) => r.hostname))];
+        sourceName = rules
+          .map((r) => r.name)
+          .filter((name, index, names) => names.indexOf(name) === index)
+          .join('、');
+      }
+
       const output = {
         hookSpecificOutput: {
           ...allow().hookSpecificOutput,
           updatedInput: {
-            query: toolInput.query,
-            allowed_domains: [matchingRule.hostname],
+            query: searchQuery,
+            allowed_domains: allowedDomains,
           },
         },
       };
