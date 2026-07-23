@@ -43,9 +43,11 @@ export const DISALLOWED_TOOLS: string[] = [
 ];
 
 function resolveCliPath(): string | undefined {
-  if (process.platform !== 'win32') return undefined;
-  const candidates = [
-    path.join(
+  const binaryName = process.platform === 'win32' ? 'qodercli.exe' : 'qodercli';
+
+  // On Windows, check the global npm install location.
+  if (process.platform === 'win32') {
+    const winCandidate = path.join(
       process.env.APPDATA ?? '',
       'npm',
       'node_modules',
@@ -53,9 +55,27 @@ function resolveCliPath(): string | undefined {
       'qodercli',
       'bundle',
       'qodercli.js',
-    ),
-  ];
-  return candidates.find(existsSync);
+    );
+    if (existsSync(winCandidate)) return winCandidate;
+  }
+
+  // On all platforms, resolve the SDK-bundled CLI from the project root.
+  // Next.js standalone builds omit binary assets from the SDK's _bundled/
+  // directory, so the SDK's internal resolution (based on import.meta.url)
+  // fails at runtime.  process.cwd() always points to the full project tree
+  // where node_modules is intact (PM2 exec_cwd / dev server root).
+  const bundled = path.join(
+    process.cwd(),
+    'node_modules',
+    '@qoder-ai',
+    'qoder-agent-sdk',
+    'dist',
+    '_bundled',
+    binaryName,
+  );
+  if (existsSync(bundled)) return bundled;
+
+  return undefined;
 }
 
 function isPathContained(root: string, target: string): boolean {
